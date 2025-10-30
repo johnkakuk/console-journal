@@ -22,7 +22,7 @@
         "@lezer/highlight": "^1",
         "@marijn/find-cluster-break": "^1.0.2",
         "better-sqlite3": "^11.10.0",
-        "markdown-pdf": "^11.0.0"
+        "marked": "^12.0.2"
     },
     "devDependencies": {
         "@electron/rebuild": "^3.7.2",
@@ -50,7 +50,8 @@
                 "filter": [
                     "@codemirror/**/*",
                     "@marijn/**/*",
-                    "style-mod/**/*"
+                    "style-mod/**/*",
+                    "marked/**/*"
                 ]
             },
             "!**/*.map",

@@ -2,7 +2,8 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const Database = require('better-sqlite3');
 const fs = require('fs');
-let _markdownpdf = null;
+const { marked } = require('marked');
+
 
 process.on('unhandledRejection', (reason, promise) => {
     console.error('🚨 Unhandled Rejection:', reason);
@@ -181,39 +182,54 @@ ipcMain.handle('app:quit', () => {
     app.quit();
 });
 
-ipcMain.handle("export-journal", async (event, args = {}) => {
-    const { markdown, outputPath, cssPath } = args;
+ipcMain.handle('export-journal', async (_event, args = {}) => {
+    const { markdown, outputPath } = args;
+    let { cssPath } = args;
 
-    if (typeof markdown !== "string") throw new Error("export-journal: markdown must be a string");
-    if (typeof outputPath !== "string" || !outputPath.trim()) throw new Error("export-journal: outputPath required");
+    if (typeof markdown !== 'string') throw new Error('export-journal: markdown must be a string');
+    if (typeof outputPath !== 'string' || !outputPath.trim()) throw new Error('export-journal: outputPath required');
 
-    // Ensure parent directory exists
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+
+    // Inline CSS for styling
+    let inlineCss = '';
     try {
-        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    } catch (e) {
-        throw new Error(`export-journal: cannot create output directory: ${e.message}`);
-    }
+        if (cssPath && !path.isAbsolute(cssPath)) cssPath = path.join(__dirname, '..', cssPath);
+        if (cssPath && fs.existsSync(cssPath)) inlineCss = fs.readFileSync(cssPath, 'utf8');
+    } catch {}
 
-    // Lazy-load & cache markdown-pdf (CJS) under ESM dynamic import
-    if (!_markdownpdf) {
-        _markdownpdf = (await import("markdown-pdf")).default;
-        if (!_markdownpdf) throw new Error("export-journal: failed to load markdown-pdf");
-    }
+    const html =    `<!doctype html>
+                    <html>
+                    <head>
+                    <meta charset="utf-8">
+                    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:;">
+                    <style>${inlineCss}</style>
+                    </head>
+                    <body class="markdown-body">
+                    ${marked.parse(markdown)}
+                    </body>
+                    </html>`;
 
-    // Normalize CSS path (optional)
-    const opts = {};
-    if (typeof cssPath === "string" && cssPath.trim()) {
-        opts.cssPath = cssPath;
-    }
-
-    return new Promise((resolve, reject) => {
-        _markdownpdf(opts)
-            .from.string(markdown)
-            .to(outputPath, (err) => {
-                if (err) return reject(new Error(`export-journal: ${err.message || err}`));
-                resolve({ ok: true, path: outputPath });
-            });
+    const win = new BrowserWindow({
+        show: false,
+        webPreferences: { offscreen: true, sandbox: true }
     });
+
+    try {
+        await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+        const pdf = await win.webContents.printToPDF({
+            printBackground: true,
+            pageSize: 'A4',
+            landscape: false,
+            margins: { marginType: 0 }
+        });
+        await fs.promises.writeFile(outputPath, pdf);
+        win.destroy();
+        return { ok: true, path: outputPath };
+    } catch (e) {
+        try { win.destroy(); } catch {}
+        throw new Error('export-journal: printToPDF failed: ' + (e?.message || String(e)));
+    }
 });
 
 // Resolve OS paths like 'downloads', 'documents', etc.
