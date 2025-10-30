@@ -12,5 +12,8 @@ contextBridge.exposeInMainWorld('db', {
 });
 
 contextBridge.exposeInMainWorld('electronAPI', {
-    quitApp: () => ipcRenderer.invoke('app:quit')
+    quitApp: () => ipcRenderer.invoke('app:quit'),
+    exportJournal: (args) => ipcRenderer.invoke('export-journal', args),
+    getPath: (name) => ipcRenderer.invoke('get-path', name),
+    saveText: ({ content, outputPath }) => ipcRenderer.invoke('save-text', { content, outputPath })
 });

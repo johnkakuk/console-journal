@@ -362,39 +362,41 @@ export function startEditor(shell, opts = {}) {
         return `${lines} line${lines === 1 ? '' : 's'}`;
     }
 
-    // Retro green-on-black theme for CM6
+    // Retro theme driven entirely by CSS variables (defined in style.css)
     const retroTheme = EditorView.theme({
-        '&': { backgroundColor: 'var(--bg, #000)', color: 'var(--text, #00ff66)', height: '100%' },
-        '.cm-content': { caretColor: 'var(--text, #00ff66)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: '14px', lineHeight: '1.5' },
+        '&': { backgroundColor: 'var(--editor-bg)', color: 'var(--editor-fg)', height: '100%' },
+        '.cm-content': {
+            caretColor: 'var(--editor-caret)',
+            fontFamily: 'var(--font-mono)',
+            fontSize: 'var(--editor-font-size)',
+            lineHeight: 'var(--editor-line-height)'
+        },
         '.cm-scroller': { fontFamily: 'inherit' },
-        '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--text, #00ff66)' },
+        '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--editor-caret)' },
         '&.cm-editor.cm-focused': { outline: 'none' },
-        '.cm-activeLine': { backgroundColor: 'rgba(0,255,102,0.08)' },
-        '.cm-selectionBackground, ::selection': { backgroundColor: 'rgba(0,255,102,0.25)' },
-        '.cm-lineNumbers': { color: 'rgba(0,255,102,0.5)' },
-        '.cm-gutters': { backgroundColor: 'transparent', borderRight: '1px solid rgba(0,255,102,0.1)' },
-        '.cm-panels': { backgroundColor: 'transparent' },
+        '.cm-activeLine': { backgroundColor: 'var(--editor-active-line-bg)' },
+        '.cm-selectionBackground, ::selection': { backgroundColor: 'var(--editor-selection-bg)' },
+        '.cm-lineNumbers': { color: 'var(--editor-gutter-fg)' },
+        '.cm-gutters': { backgroundColor: 'var(--editor-gutter-bg)', borderRight: '1px solid var(--editor-gutter-border)' },
+        '.cm-panels': { backgroundColor: 'var(--editor-panel-bg)' },
         // --- To-do clickable overlay style ---
         '.todo-click-target': {
             position: 'relative',
             cursor: 'pointer',
-            // Transparent, but overlays the bracket area for click
             background: 'transparent',
             zIndex: 2,
-            pointerEvents: 'auto',
+            pointerEvents: 'auto'
         },
         '.todo-click-target::after': {
             content: '""',
             position: 'absolute',
             left: 0, top: 0, right: 0, bottom: 0,
-            background: 'rgba(0,255,102,0.08)',
+            background: 'var(--editor-todo-hover-bg)',
             opacity: 0,
             transition: 'opacity 0.1s',
-            pointerEvents: 'none',
+            pointerEvents: 'none'
         },
-        '.todo-click-target:hover::after': {
-            opacity: 1,
-        }
+        '.todo-click-target:hover::after': { opacity: 1 }
     }, { dark: true });
 
     // Syntax highlight accents for Markdown (conservative)

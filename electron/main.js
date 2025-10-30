@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const Database = require('better-sqlite3');
 const fs = require('fs');
+let _markdownpdf = null;
 
 process.on('unhandledRejection', (reason, promise) => {
     console.error('🚨 Unhandled Rejection:', reason);
@@ -81,7 +82,7 @@ function initDB() {
     `);
 
     db._listRecent = db.prepare(`
-        SELECT date, substr(content, 1, 200) AS preview
+        SELECT date, content
         FROM entries
         ORDER BY date DESC
         LIMIT ?
@@ -173,9 +174,58 @@ ipcMain.handle('entry:listRecent', (evt, limit) => {
 
 ipcMain.handle('entry:listByYearMonth', (evt, ym) => {
     if (typeof ym !== 'string' || !/^\d{4}-\d{2}$/.test(ym)) throw new Error('Bad month');
-    return db._listByYearMonthPreview.all(ym);
+    return db._listByMonth.all(ym);
 });
 
 ipcMain.handle('app:quit', () => {
     app.quit();
+});
+
+ipcMain.handle("export-journal", async (event, args = {}) => {
+    const { markdown, outputPath, cssPath } = args;
+
+    if (typeof markdown !== "string") throw new Error("export-journal: markdown must be a string");
+    if (typeof outputPath !== "string" || !outputPath.trim()) throw new Error("export-journal: outputPath required");
+
+    // Ensure parent directory exists
+    try {
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    } catch (e) {
+        throw new Error(`export-journal: cannot create output directory: ${e.message}`);
+    }
+
+    // Lazy-load & cache markdown-pdf (CJS) under ESM dynamic import
+    if (!_markdownpdf) {
+        _markdownpdf = (await import("markdown-pdf")).default;
+        if (!_markdownpdf) throw new Error("export-journal: failed to load markdown-pdf");
+    }
+
+    // Normalize CSS path (optional)
+    const opts = {};
+    if (typeof cssPath === "string" && cssPath.trim()) {
+        opts.cssPath = cssPath;
+    }
+
+    return new Promise((resolve, reject) => {
+        _markdownpdf(opts)
+            .from.string(markdown)
+            .to(outputPath, (err) => {
+                if (err) return reject(new Error(`export-journal: ${err.message || err}`));
+                resolve({ ok: true, path: outputPath });
+            });
+    });
+});
+
+// Resolve OS paths like 'downloads', 'documents', etc.
+ipcMain.handle('get-path', (_evt, name) => {
+    return app.getPath(name);
+});
+
+// Write plain text files for TXT export
+ipcMain.handle('save-text', async (_evt, { content, outputPath }) => {
+    if (typeof content !== 'string') throw new Error('save-text: content must be a string');
+    if (typeof outputPath !== 'string' || !outputPath.trim()) throw new Error('save-text: outputPath required');
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    await fs.promises.writeFile(outputPath, content, 'utf8');
+    return { ok: true, path: outputPath };
 });

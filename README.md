@@ -36,6 +36,17 @@ Type, reflect, and organize your thoughts in a glowing green terminal that feels
 			~/Library/Application Support/console-journal/app.db
 - Command History
 	- Recall previous commands using the ↑ / ↓ arrow keys.
+- Exporting
+	- Export entries in bulk or individually
+	- Export to .txt or .pdf
+	- Supports flags:
+		- -a → all entries
+		- YYYY → all entries from a given year
+		- YYYY-MM → all entries from a given month
+		- YYYY-MM-DD → the entry from a given day
+		- ... -pdf → export as .pdf instead of .txt
+		- Theme can be edited in css/pdf.css
+- Theme can be edited in css/theme.css
 
 ---- 
 
@@ -43,8 +54,6 @@ Type, reflect, and organize your thoughts in a glowing green terminal that feels
 - Projects System — For long-form or creative writing:
 	- Nested folder structure (e.g., Book \> Drafts \> Manuscript)
 	- Chronological indexing for journal entries (YYYY/MM/entry.md)
-- Export Options
-	-  Export entries to Markdown, PDF, or plain text.
 - Theme Engine
 	- Switch between retro CRT themes and modern minimal aesthetics.
 - Browser-based web app

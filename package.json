@@ -21,7 +21,8 @@
         "@codemirror/view": "^6",
         "@lezer/highlight": "^1",
         "@marijn/find-cluster-break": "^1.0.2",
-        "better-sqlite3": "^11.10.0"
+        "better-sqlite3": "^11.10.0",
+        "markdown-pdf": "^11.0.0"
     },
     "devDependencies": {
         "@electron/rebuild": "^3.7.2",
