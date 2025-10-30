@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link href="css/style.css" rel="stylesheet">
+    <title>console-journal</title>
+</head>
+<body>
+    <div class="frame">
+        <section class="terminal" role="region" aria-label="Retro Console">
+            <div class="titlebar" aria-hidden="true">
+                <h1 class="title">console-journal</h1>
+            </div>
+            <div id="screen" aria-live="polite" aria-atomic="false">
+                <div id="output"></div>
+            </div>
+            <div id="inputWrap">
+                <span class="prompt">user:~$</span>
+                <input id="cmdInput" autocomplete="off" spellcheck="false" aria-label="Command input" />
+                <span class="caret" aria-hidden="true"></span>
+            </div>
+        </section>
+    </div>
+    <script type="module" src="./dist/renderer.js"></script>
+</body>
+</html>

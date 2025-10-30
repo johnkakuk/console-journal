@@ -1,0 +1,83 @@
+{
+    "name": "console-journal",
+    "productName": "Console Journal",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Retro console + CM6 writer",
+    "main": "electron/main.js",
+    "scripts": {
+        "start": "electron .",
+        "build": "electron-builder",
+        "bundle": "esbuild js/main.js --bundle --format=esm --outfile=dist/renderer.js"
+    },
+    "dependencies": {
+        "@codemirror/autocomplete": "^6",
+        "@codemirror/commands": "^6",
+        "@codemirror/lang-markdown": "^6",
+        "@codemirror/language": "^6",
+        "@codemirror/lint": "^6",
+        "@codemirror/search": "^6",
+        "@codemirror/state": "^6",
+        "@codemirror/view": "^6",
+        "@lezer/highlight": "^1",
+        "@marijn/find-cluster-break": "^1.0.2",
+        "better-sqlite3": "^11.10.0"
+    },
+    "devDependencies": {
+        "@electron/rebuild": "^3.7.2",
+        "electron": "^31.0.0",
+        "electron-builder": "^26.0.12",
+        "esbuild": "^0.25.11"
+    },
+    "build": {
+        "appId": "com.console.journal",
+        "productName": "Console Journal",
+        "copyright": "©2025 John Kakuk. All rights reserved.",
+        "directories": {
+            "buildResources": "assets",
+            "output": "dist"
+        },
+        "files": [
+            "electron/**/*",
+            "dist/**/*",
+            "index.html",
+            "css/**/*",
+            "assets/**/*",
+            {
+                "from": "node_modules",
+                "to": "node_modules",
+                "filter": [
+                    "@codemirror/**/*",
+                    "@marijn/**/*",
+                    "style-mod/**/*"
+                ]
+            },
+            "!**/*.map",
+            "!**/*.md",
+            "!**/__tests__/**",
+            "!**/test/**",
+            "!**/tests/**",
+            "!**/examples/**",
+            "!**/example/**",
+            "!**/docs/**"
+        ],
+        "asar": true,
+        "asarUnpack": [
+            "**/*.node"
+        ],
+        "mac": {
+            "category": "public.app-category.productivity",
+            "target": "dmg",
+            "icon": "icon/icon.icns"
+        },
+        "win": {
+            "target": "nsis"
+        },
+        "linux": {
+            "target": [
+                "AppImage"
+            ],
+            "category": "Utility"
+        }
+    }
+}
