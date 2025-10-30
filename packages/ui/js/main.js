@@ -749,7 +749,7 @@ register('export', async (argv = []) => {
         return;
     }
 
-    // Plain text export path — requires a simple IPC that writes a file.
+    // Plain text export path — requires a simple IPC that writes a file, or browser fallback.
     if (window.electronAPI && typeof window.electronAPI.saveText === 'function') {
         try {
             await window.electronAPI.saveText({ content: md, outputPath });
@@ -758,11 +758,57 @@ register('export', async (argv = []) => {
             const msg = err?.message || String(err);
             print(`<div class="error">Export TXT failed: ${esc(msg)}</div>`);
         }
+    } else if (typeof window.downloadText === 'function') {
+        try {
+            window.downloadText(md, filename);
+            print(`<div class="ok">Downloaded TXT file <span class="muted">${esc(filename)}</span></div>`);
+        } catch (err) {
+            const msg = err?.message || String(err);
+            print(`<div class="error">Download TXT failed: ${esc(msg)}</div>`);
+        }
     } else {
-        // Graceful notice if preload bridge isn't wired yet
-        print('<div class="warn">TXT export not wired yet. Use <span class="kbd">-pdf</span> to export now, or add an IPC <span class="kbd">saveText</span> that writes a file.</div>');
+        print('<div class="warn">TXT export not wired yet. Use <span class="kbd">-pdf</span> to export now, or add a <span class="kbd">downloadText</span> function to handle browser downloads.</div>');
     }
 }, 'Export entries (.txt by default, add -pdf)');
+
+// --- Switch command for web/desktop mode ---
+register('switch', async (argv = []) => {
+    const arg = argv[0]?.trim();
+    if (!arg) {
+        print('<div class="error">Usage: switch [mode]\nAvailable modes: web, desktop</div>');
+        return;
+    }
+
+    if (arg === 'web') {
+        print('<div class="muted">Switching to web mode...</div>');
+        if (window.electronAPI && typeof window.electronAPI.openWeb === 'function') {
+            try {
+                await window.electronAPI.openWeb();
+            } catch (err) {
+                print(`<div class="error">Failed to switch: ${esc(err.message || err)}</div>`);
+            }
+        } else {
+            print('<div class="warn">Web mode only available when running in Electron with openWeb bridge.</div>');
+        }
+        return;
+    }
+
+    if (arg === 'desktop') {
+        print('<div class="muted">Switching to desktop mode...</div>');
+        if (window.electronAPI && typeof window.electronAPI.openDesktop === 'function') {
+            try {
+                await window.electronAPI.openDesktop();
+            } catch (err) {
+                print(`<div class="error">Failed to switch: ${esc(err.message || err)}</div>`);
+            }
+        } else {
+            print('<div class="warn">Desktop mode only available when running in Electron with openDesktop bridge.</div>');
+        }
+        return;
+    }
+
+    print(`<div class="error">Invalid mode: ${esc(arg)}<br>Available modes: web, desktop</div>`);
+}, 'Switch between web and desktop modes');
 
 /* -----------------------------------------------------------------------------
  * BOOT
