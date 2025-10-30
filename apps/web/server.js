@@ -86,15 +86,9 @@ app.post('/api/export-pdf', async (req, res) => {
     }
 });
 
-// Static UI (dev only). In production (Render), this service is API-only.
-if (!isProd) {
-    app.use(express.static(UI_ROOT, { maxAge: '1y', immutable: true }));
-    app.get('*', (_req, res) => res.sendFile(path.join(UI_ROOT, 'index.html')));
-} else {
-    app.get('/', (_req, res) => {
-        res.type('text').send('Console Journal API');
-    });
-}
+// Static UI
+app.use(express.static(UI_ROOT, { maxAge: '1y', immutable: true }));
+app.get('*', (_req, res) => res.sendFile(path.join(UI_ROOT, 'index.html')));
 
 // --- HTTPS in dev ---
 const CERT_DIR = path.join(__dirname, 'certs');
