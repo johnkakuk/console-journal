@@ -1,0 +1,203 @@
+/*
+ * Console Journal — PDF theme (GitHub README–style)
+ * Single theme for Markdown → HTML → PDF
+ */
+
+/* Page + base */
+@page {
+    margin: 1in;
+}
+
+:root {
+    --fg: #24292f;           /* GitHub default text */
+    --muted: #57606a;        /* secondary text */
+    --border: #d0d7de;       /* subtle borders */
+    --border-soft: #eaeef2;
+    --bg: #ffffff;
+    --bg-soft: #f6f8fa;      /* code blocks / table header */
+    --accent: #0969da;       /* link color */
+}
+
+html, body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    line-height: 1.6;
+    font-size: 14px; /* GitHub is ~14px base */
+}
+
+/* Constrain width similar to GitHub's .markdown-body */
+body {
+    max-width: 860px;
+    margin: 0 auto;
+}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+    color: var(--fg);
+    font-weight: 800 !important;
+    line-height: 1.25;
+    margin-top: 24px;
+    margin-bottom: 16px;
+}
+
+h1 { font-size: 2em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+h3 { font-size: 1.25em; }
+h4 { font-size: 1em; }
+h5 { font-size: .875em; }
+h6 { font-size: .85em; color: var(--muted); }
+
+/* Paragraphs */
+p {
+    margin-top: 0;
+    margin-bottom: 16px;
+}
+
+/* Links */
+a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+/* Emphasis */
+strong { font-weight: 600; }
+em { font-style: italic; }
+
+/* Lists */
+ul, ol {
+    padding-left: 2em;
+    margin-top: 0;
+    margin-bottom: 16px;
+}
+
+li > p {
+    margin-top: 16px;
+}
+
+/* Task lists */
+input[type="checkbox"] {
+    transform: translateY(1px);
+    margin-right: .4em;
+}
+
+/* Blockquotes */
+blockquote {
+    margin: 0 0 16px 0;
+    padding: 0 1em;
+    color: var(--muted);
+    border-left: .25em solid var(--border);
+}
+
+/* Code */
+code, kbd, pre, samp {
+    font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 85%;
+}
+
+code {
+    background: rgba(175, 184, 193, 0.2);
+    padding: .2em .4em;
+    border-radius: 6px;
+}
+
+pre {
+    background: var(--bg-soft);
+    padding: 16px;
+    overflow: auto;
+    border-radius: 6px;
+    border: 1px solid var(--border-soft);
+    margin-top: 0;
+    margin-bottom: 16px;
+}
+
+pre code {
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+    font-size: 100%;
+}
+
+/* Tables */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    border-spacing: 0;
+    margin-bottom: 16px;
+}
+
+th, td {
+    border: 1px solid var(--border);
+    padding: 6px 13px;
+}
+
+th {
+    background: var(--bg-soft);
+    font-weight: 600;
+}
+
+tr:nth-child(2n) {
+    background: #fafbfc;
+}
+
+/* Horizontal rule */
+hr {
+    height: .25em;
+    padding: 0;
+    margin: 24px 0;
+    background-color: var(--border);
+    border: 0;
+    page-break-after: always;
+}
+
+hr:last-of-type {
+    page-break-after: avoid;
+}
+
+/* Images */
+img {
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+/* Definition lists */
+dt {
+    font-weight: 600;
+}
+
+dd {
+    margin-left: 0;
+    margin-bottom: 16px;
+}
+
+/* Inline details/summary */
+details {
+    margin-bottom: 16px;
+}
+
+details > summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+/* Callouts (GitHub note/warn tip style – minimal) */
+.note, .tip, .warn, .caution, .important {
+    border-left: .25em solid var(--border);
+    padding: 12px 16px;
+    background: #fefefe;
+    margin: 16px 0;
+}
+
+/* Page-break hints for better PDF pagination */
+h1, h2 { page-break-after: avoid; }
+h1 + p, h2 + p, h3 + p { page-break-before: avoid; }
+pre, table, blockquote { page-break-inside: avoid; }
+
+/* Headings spacing at top of page */
+@media print {
+    h1, h2, h3 { break-after: avoid-page; }
+}
