@@ -1,25 +1,14 @@
-/* AI assisted */
-:root {
-    --bg: #0b0f0c;
-    --panel: #0d140f;
-    --text: #73ff7a;
-    --muted: #2b3a30;
-    --error: #ff5c5c;
-    --warn: #ffe27a;
-    --info: #c2cb8a;
-    --scanline: linear-gradient(#00000000 50%, #0000001f 51%);
-}
-
 html,body {
     height: 100%
 }
 
 body {
     margin: 0;
-    font-size: 16px/1.5;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    background: radial-gradient(1200px 800px at 50% 20%, #0e160f, var(--bg));
-    color: var(--text);
+    font-size: 16px;
+    line-height: 1.5;
+    font-family: var(--font-mono);
+    background: radial-gradient(1200px 800px at 50% 20%, var(--bg-radial), var(--app-bg));
+    color: var(--app-fg);
     overflow: hidden;
 }
 
@@ -78,7 +67,7 @@ body {
 }
 
 .prompt {
-    color: #49d157;
+    color: var(--console-accent);
 }
 
 .caret {
@@ -86,7 +75,7 @@ body {
     display: inline-block;
     width: 8px;
     height: 1.2em;
-    background: var(--text);
+    background: var(--app-fg);
     vertical-align: -2px;
     margin-left: 2px;
     margin-top: 1px;
@@ -146,7 +135,7 @@ body {
 }
 
 .soft {
-    color: #9cff9f;
+    color: var(--soft);
 }
 
 .kbd {
@@ -173,13 +162,13 @@ body {
         padding: 8px 10px;
     }
 }
-/* Add CodeMirror search panel theming directly in style.css */
 
+/* CodeMirror search panel theming */
 .cm-panels {
   background-color: rgba(0, 0, 0, 0.85);
   color: var(--text);
-  border-bottom: 1px solid rgba(115, 255, 122, 0.25);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  border-bottom: 1px solid rgba(var(--text-rgb), 0.25);
+  font-family: var(--font-mono);
 }
 
 .cm-panel.cm-search {
@@ -190,26 +179,26 @@ body {
 }
 
 .cm-panel.cm-search label {
-  color: rgba(115, 255, 122, 0.9);
+  color: rgba(var(--text-rgb), 0.9);
 }
 
 .cm-panel.cm-search input {
-  background-color: rgba(115, 255, 122, 0.08);
+  background-color: rgba(var(--text-rgb), 0.08);
   color: var(--text);
-  border: 1px solid rgba(115, 255, 122, 0.25);
+  border: 1px solid rgba(var(--text-rgb), 0.25);
   border-radius: 4px;
   padding: 4px 6px;
   outline: none;
 }
 
 .cm-panel.cm-search input::placeholder {
-  color: rgba(115, 255, 122, 0.5);
+  color: rgba(var(--text-rgb), 0.5);
 }
 
 .cm-panel.cm-search button {
   background: transparent;
   color: var(--text);
-  border: 1px solid rgba(115, 255, 122, 0.25);
+  border: 1px solid rgba(var(--text-rgb), 0.25);
   border-radius: 4px;
   padding: 2px 6px;
   cursor: pointer;
@@ -217,15 +206,15 @@ body {
 }
 
 .cm-panel.cm-search button:hover {
-  background-color: rgba(115, 255, 122, 0.1);
+  background-color: rgba(var(--text-rgb), 0.1);
 }
 
 .cm-searchMatch {
-  background-color: rgba(115, 255, 122, 0.15);
+  background-color: rgba(var(--text-rgb), 0.15);
 }
 
 .cm-searchMatch.cm-searchMatch-selected {
-  background-color: rgba(115, 255, 122, 0.3);
+  background-color: rgba(var(--text-rgb), 0.3);
 }
 
 .help {
@@ -243,7 +232,7 @@ body {
   padding: 0;
   max-height: 40vh;          /* keeps lists compact */
   overflow: auto;            /* allow scrolling */
-  border: 1px solid rgba(0,255,128,0.12);
+  border: 1px solid rgba(var(--text-rgb), 0.12);
   border-radius: 6px;
   background: rgba(0,0,0,0.35);
 }
@@ -261,16 +250,16 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   opacity: 0.9;
   min-width: 8.2ch;          /* fits YYYY-MM-DD */
-  color: #7CFFB2;            /* retro green accent */
+  color: var(--accent-aux);            /* retro green accent */
 }
 
 .menu li:not(.active):hover {
-  background: rgba(0,255,128,0.06);
+  background: rgba(var(--text-rgb), 0.06);
 }
 
 .menu li.active {
-  background: rgba(0,255,128,0.18);
-  outline: 1px solid rgba(0,255,128,0.35);
+  background: rgba(var(--text-rgb), 0.18);
+  outline: 1px solid rgba(var(--text-rgb), 0.35);
 }
 
 .menu::-webkit-scrollbar {
@@ -278,7 +267,7 @@ body {
   width: 10px;
 }
 .menu::-webkit-scrollbar-thumb {
-  background: rgba(0,255,128,0.25);
+  background: rgba(var(--text-rgb), 0.25);
   border-radius: 6px;
 }
 .menu::-webkit-scrollbar-track {

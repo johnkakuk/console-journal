@@ -236,6 +236,7 @@ const exec = async (line) => {
  * --------------------------------------------------------------------------- */
 
 const handleKeydown = async (e) => {
+    // Execute commands on Enter
     if (e.key === 'Enter') {
         e.preventDefault();
 
@@ -253,10 +254,14 @@ const handleKeydown = async (e) => {
             }
             return;
         }
+
+        // Normal command execution (no subprogram)
+        await exec(line);
+        return;
     }
 
     // Command history navigation (only at root shell)
-    if (!activeProgram) { // Allow subprograms to override arrow keys
+    if (!activeProgram) {
         if (e.key === 'ArrowUp') {
             e.preventDefault();
             if (historyIndex > 0) {
@@ -264,36 +269,33 @@ const handleKeydown = async (e) => {
                 input.value = history[historyIndex] || '';
                 scheduleCaret();
             }
-      } else if (e.key === 'ArrowDown') {
-          e.preventDefault();
-              if (historyIndex < history.length - 1) {
-                  historyIndex++;
-                  input.value = history[historyIndex] || '';
-              } else {
-                  historyIndex = history.length;
-                  input.value = '';
-              }
-              scheduleCaret();
-      }
+        } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (historyIndex < history.length - 1) {
+                historyIndex++;
+                input.value = history[historyIndex] || '';
+            } else {
+                historyIndex = history.length;
+                input.value = '';
+            }
+            scheduleCaret();
+        }
     }
 
-      // Navigation for activePrograms ("list", "search")
-      if (activeProgram && typeof activeProgram.onKey === 'function') {
-          const navKeys = ['ArrowUp','ArrowDown','PageUp','PageDown','Home','End','Escape','Enter'];
-          if (navKeys.includes(e.key)) {
-              e.preventDefault();
-              e.stopPropagation();
-              activeProgram.onKey(e);
-              return;
-          } else {
-              // Any other key suspends list mode and lets typing continue
-              shell.suspend();
-              return;
-          }
+    // Navigation for active programs ("list", "search", etc.)
+    if (activeProgram && typeof activeProgram.onKey === 'function') {
+        const navKeys = ['ArrowUp','ArrowDown','PageUp','PageDown','Home','End','Escape','Enter'];
+        if (navKeys.includes(e.key)) {
+            e.preventDefault();
+            e.stopPropagation();
+            activeProgram.onKey(e);
+            return;
+        } else {
+            // Any other key suspends list mode and lets typing continue
+            shell.suspend();
+            return;
+        }
     }
-
-  // Normal command execution
-  await exec(line);
 };
 
 const focus = () => {
@@ -306,22 +308,37 @@ const caret = document.querySelector('.caret');
 
 const updateCaret = () => {
     const inputRect = input.getBoundingClientRect();
+    const styles = getComputedStyle(input);
 
-    // Hidden mirror to measure caret X position
+    // Hidden mirror to measure caret X position with accurate typography
     const mirror = document.createElement('span');
     mirror.style.position = 'absolute';
     mirror.style.visibility = 'hidden';
     mirror.style.whiteSpace = 'pre';
-    mirror.style.font = getComputedStyle(input).font;
+
+    // Typography fidelity: copy critical properties that affect glyph metrics
+    mirror.style.font = styles.font; // includes weight, size/line-height, family
+    mirror.style.letterSpacing = styles.letterSpacing;
+    mirror.style.fontKerning = styles.fontKerning;
+    mirror.style.fontFeatureSettings = styles.fontFeatureSettings;
+    mirror.style.textTransform = styles.textTransform;
+    mirror.style.textRendering = styles.textRendering;
+
+    // Content up to caret
     mirror.textContent = input.value.slice(0, input.selectionStart);
+
     document.body.appendChild(mirror);
-
-    const caretX = mirror.getBoundingClientRect().width;
-    caret.style.position = 'absolute';
-    caret.style.left = (inputRect.left + caretX) + 'px';
-    caret.style.top  = inputRect.top + 'px';
-
+    const measured = mirror.getBoundingClientRect().width;
     document.body.removeChild(mirror);
+
+    const paddingLeft = parseFloat(styles.paddingLeft) || 0;
+    const borderLeft = parseFloat(styles.borderLeftWidth) || 0;
+    const scrollLeft = input.scrollLeft || 0;
+
+    // Position the fake caret at the exact glyph boundary
+    caret.style.position = 'absolute';
+    caret.style.left = (inputRect.left + borderLeft + paddingLeft + measured - scrollLeft) + 'px';
+    caret.style.top = inputRect.top + 'px';
 };
 
 let caretRAF = null;
@@ -540,6 +557,212 @@ register('search', async (argv = []) => {
     shell.setPrompt('search>');
     shell.enter(createListUI(`SEARCH — ${esc(q)}`, items));
 }, 'Search entries by text');
+
+// --- Usage helper for export command ---
+function printExportHelp() {
+    print(`
+    <div class="soft">export usage</div>
+    <div class="muted help">
+        <div><span class="kbd">export</span> — export the last 7 entries as <em>.txt</em> to Downloads</div>
+        <div><span class="kbd">export -a</span> — export the entire journal</div>
+        <div><span class="kbd">export YYYY</span> — export that year</div>
+        <div><span class="kbd">export YYYY-MM</span> — export that month</div>
+        <div><span class="kbd">export YYYY-MM-DD</span> — export that day</div>
+        <div><span class="kbd">export ... -pdf</span> — export as <em>.pdf</em> instead of .txt</div>
+        <div><span class="kbd">export -help</span> — show this help</div>
+    </div>`);
+}
+
+// Resolve a list of entry rows for various selectors
+async function gatherEntriesForExport(selector) {
+    // selector: { type: 'all' | 'year' | 'month' | 'day' }
+    if (!selector || !selector.type) selector = { type: 'recent7' };
+
+    if (selector.type === 'day') {
+        const key = `${selector.y}-${String(selector.m).padStart(2,'0')}-${String(selector.d).padStart(2,'0')}`;
+        const row = await db.get(key);
+        return row ? [row] : [];
+    }
+
+    if (selector.type === 'month') {
+        const ym = `${selector.y}-${String(selector.m).padStart(2,'0')}`;
+        const rows = await db.listByYearMonth(ym);
+        return rows || [];
+    }
+
+    if (selector.type === 'year') {
+        const out = [];
+        for (let mm = 1; mm <= 12; mm++) {
+            const ym = `${selector.y}-${String(mm).padStart(2,'0')}`;
+            const rows = await db.listByYearMonth(ym);
+            if (rows && rows.length) out.push(...rows);
+        }
+        return out;
+    }
+
+    if (selector.type === 'all') {
+        const rows = await db.listRecent(100000);
+        return Array.isArray(rows) ? rows.slice().reverse() : [];
+    }
+
+    // default (no args): last 7 entries, oldest → newest
+    const rows = await db.listRecent(7);
+    return Array.isArray(rows) ? rows.slice().reverse() : [];
+}
+
+function buildMarkdownExport(rows) {
+    if (!rows || !rows.length) return '# Console Journal Export\n\n_No entries._\n';
+    // Ensure chronological order by date ascending
+    const sorted = rows.slice().sort((a,b) => String(a.date).localeCompare(String(b.date)));
+    const parts = ['# Console Journal Export\n'];
+    for (const r of sorted) {
+        const date = String(r.date || '').trim();
+        const content = (r.content ?? '').replace(/\r\n/g, '\n');
+        parts.push(`\n## ${date}\n\n${content}\n\n---\n`);
+    }
+    return parts.join('');
+}
+
+async function getDownloadsDir() {
+    try {
+        if (window.electronAPI && typeof window.electronAPI.getPath === 'function') {
+            const p = await window.electronAPI.getPath('downloads');
+            if (p) return p;
+        }
+    } catch {}
+    // Fallbacks if preload bridge doesn't expose getPath
+    try {
+        if (window.electronAPI && typeof window.electronAPI.getHomeDir === 'function') {
+            const home = await window.electronAPI.getHomeDir();
+            if (home) return home + '/Downloads';
+        }
+    } catch {}
+    // Last resort: relative Downloads in cwd
+    return 'Downloads';
+}
+
+function makeFilename(base, ext) {
+    const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0,19);
+    return `${base}-${stamp}.${ext}`;
+}
+
+function parseExportArgs(argv) {
+    // returns { target?: {type, y?, m?, d?}, pdf: boolean, help?: boolean, invalid?: string }
+    const opts = { pdf: false };
+    const args = argv.map(String);
+    if (!args.length) return opts; // default case -> recent 7 (no target)
+
+    // detect -help
+    if (args.includes('-help')) return { ...opts, help: true };
+
+    // detect -pdf
+    const pdfIdx = args.indexOf('-pdf');
+    if (pdfIdx !== -1) { opts.pdf = true; args.splice(pdfIdx, 1); }
+
+    // detect -a (all)
+    const allIdx = args.indexOf('-a');
+    if (allIdx !== -1) { opts.target = { type: 'all' }; args.splice(allIdx, 1); }
+
+    if (args.length) {
+        const a0 = args[0].trim();
+        if (/^\d{4}$/.test(a0)) {
+            opts.target = { type: 'year', y: Number(a0) };
+        } else if (/^\d{4}-\d{2}$/.test(a0)) {
+            const [y, m] = a0.split('-').map(n => Number(n));
+            opts.target = { type: 'month', y, m };
+        } else if (/^\d{4}-\d{2}-\d{2}$/.test(a0)) {
+            const [y, m, d] = a0.split('-').map(n => Number(n));
+            opts.target = { type: 'day', y, m, d };
+        } else {
+            opts.invalid = a0;
+        }
+    }
+    return opts;
+}
+
+register('export', async (argv = []) => {
+    const parsed = parseExportArgs(argv);
+    if (parsed.help) { printExportHelp(); return; }
+    if (parsed.invalid) {
+        print(`<div class="error">Invalid argument for export: ${esc(parsed.invalid)}<br>Use none, -a, YYYY, YYYY-MM, YYYY-MM-DD, optional -pdf, or -help.</div>`);
+        return;
+    }
+
+    // Fetch rows and build markdown bundle
+    const rows = await gatherEntriesForExport(parsed.target);
+    if (!rows.length) { print('<div class="muted">No entries to export.</div>'); return; }
+
+    const md = buildMarkdownExport(rows);
+    const downloadsDir = await getDownloadsDir();
+
+    // File base name
+    let base;
+    if (!parsed.target) {
+        base = 'console-journal-LAST-7';
+    } else if (parsed.target.type === 'day') {
+        base = `console-journal-${String(parsed.target.y)}-${String(parsed.target.m).padStart(2,'0')}-${String(parsed.target.d).padStart(2,'0')}`;
+    } else if (parsed.target.type === 'month') {
+        base = `console-journal-${String(parsed.target.y)}-${String(parsed.target.m).padStart(2,'0')}`;
+    } else if (parsed.target.type === 'year') {
+        base = `console-journal-${String(parsed.target.y)}`;
+    } else if (parsed.target.type === 'all') {
+        base = 'console-journal-ALL';
+    } else {
+        // Fallback (shouldn't hit): treat as recent7
+        base = 'console-journal-LAST-7';
+    }
+
+    const ext = parsed.pdf ? 'pdf' : 'txt';
+    const filename = makeFilename(base, ext);
+    const outputPath = `${downloadsDir}/${filename}`;
+
+    if (parsed.pdf) {
+        // Visual feedback while PDF is generating
+        const progress = document.createElement('div');
+        progress.className = 'muted';
+        progress.innerHTML = 'Export in progress…';
+        output.appendChild(progress);
+        scrollToBottom();
+
+        // Simple dot animation (… -> …. -> …..)
+        let dots = 0;
+        const timer = setInterval(() => {
+            dots = (dots + 1) % 4;
+            const trail = '.'.repeat(dots);
+            progress.innerHTML = `Export in progress${trail}`;
+            scrollToBottom();
+        }, 400);
+
+        try {
+            const res = await window.electronAPI.exportJournal({ markdown: md, outputPath, cssPath: 'css/pdf.css' });
+            clearInterval(timer);
+            progress.className = 'ok';
+            progress.innerHTML = `Exported PDF to <span class="muted">${esc(res?.path || outputPath)}</span>`;
+            scrollToBottom();
+        } catch (err) {
+            clearInterval(timer);
+            const msg = err?.message || String(err);
+            progress.className = 'error';
+            progress.innerHTML = `Export PDF failed: ${esc(msg)}`;
+            scrollToBottom();
+        }
+        return;
+    }
+
+    // Plain text export path — requires a simple IPC that writes a file.
+    if (window.electronAPI && typeof window.electronAPI.saveText === 'function') {
+        try {
+            await window.electronAPI.saveText({ content: md, outputPath });
+            print(`<div class="ok">Exported TXT to <span class="muted">${esc(outputPath)}</span></div>`);
+        } catch (err) {
+            const msg = err?.message || String(err);
+            print(`<div class="error">Export TXT failed: ${esc(msg)}</div>`);
+        }
+    } else {
+        // Graceful notice if preload bridge isn't wired yet
+        print('<div class="warn">TXT export not wired yet. Use <span class="kbd">-pdf</span> to export now, or add an IPC <span class="kbd">saveText</span> that writes a file.</div>');
+    }
+}, 'Export entries (.txt by default, add -pdf)');
 
 /* -----------------------------------------------------------------------------
  * BOOT

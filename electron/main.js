@@ -2,6 +2,8 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const Database = require('better-sqlite3');
 const fs = require('fs');
+const { marked } = require('marked');
+
 
 process.on('unhandledRejection', (reason, promise) => {
     console.error('🚨 Unhandled Rejection:', reason);
@@ -81,7 +83,7 @@ function initDB() {
     `);
 
     db._listRecent = db.prepare(`
-        SELECT date, substr(content, 1, 200) AS preview
+        SELECT date, content
         FROM entries
         ORDER BY date DESC
         LIMIT ?
@@ -173,9 +175,73 @@ ipcMain.handle('entry:listRecent', (evt, limit) => {
 
 ipcMain.handle('entry:listByYearMonth', (evt, ym) => {
     if (typeof ym !== 'string' || !/^\d{4}-\d{2}$/.test(ym)) throw new Error('Bad month');
-    return db._listByYearMonthPreview.all(ym);
+    return db._listByMonth.all(ym);
 });
 
 ipcMain.handle('app:quit', () => {
     app.quit();
+});
+
+ipcMain.handle('export-journal', async (_event, args = {}) => {
+    const { markdown, outputPath } = args;
+    let { cssPath } = args;
+
+    if (typeof markdown !== 'string') throw new Error('export-journal: markdown must be a string');
+    if (typeof outputPath !== 'string' || !outputPath.trim()) throw new Error('export-journal: outputPath required');
+
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+
+    // Inline CSS for styling
+    let inlineCss = '';
+    try {
+        if (cssPath && !path.isAbsolute(cssPath)) cssPath = path.join(__dirname, '..', cssPath);
+        if (cssPath && fs.existsSync(cssPath)) inlineCss = fs.readFileSync(cssPath, 'utf8');
+    } catch {}
+
+    const html =    `<!doctype html>
+                    <html>
+                    <head>
+                    <meta charset="utf-8">
+                    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:;">
+                    <style>${inlineCss}</style>
+                    </head>
+                    <body class="markdown-body">
+                    ${marked.parse(markdown)}
+                    </body>
+                    </html>`;
+
+    const win = new BrowserWindow({
+        show: false,
+        webPreferences: { offscreen: true, sandbox: true }
+    });
+
+    try {
+        await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+        const pdf = await win.webContents.printToPDF({
+            printBackground: true,
+            pageSize: 'A4',
+            landscape: false,
+            margins: { marginType: 0 }
+        });
+        await fs.promises.writeFile(outputPath, pdf);
+        win.destroy();
+        return { ok: true, path: outputPath };
+    } catch (e) {
+        try { win.destroy(); } catch {}
+        throw new Error('export-journal: printToPDF failed: ' + (e?.message || String(e)));
+    }
+});
+
+// Resolve OS paths like 'downloads', 'documents', etc.
+ipcMain.handle('get-path', (_evt, name) => {
+    return app.getPath(name);
+});
+
+// Write plain text files for TXT export
+ipcMain.handle('save-text', async (_evt, { content, outputPath }) => {
+    if (typeof content !== 'string') throw new Error('save-text: content must be a string');
+    if (typeof outputPath !== 'string' || !outputPath.trim()) throw new Error('save-text: outputPath required');
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    await fs.promises.writeFile(outputPath, content, 'utf8');
+    return { ok: true, path: outputPath };
 });
