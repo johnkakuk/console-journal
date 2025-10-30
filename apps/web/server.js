@@ -11,6 +11,16 @@ const UI_ROOT = path.join(__dirname, '..', '..', 'packages', 'ui');
 
 app.use(express.json({ limit: '10mb' }));
 
+// CORS for PWA hosted on a different domain (e.g., SiteGround)
+const ALLOW_ORIGIN = process.env.ALLOW_ORIGIN || '*';
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', ALLOW_ORIGIN);
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    next();
+});
+
 function readPdfCss() {
     const candidates = [
         path.join(__dirname, '..', '..', 'packages', 'ui', 'css', 'pdf.css'),
@@ -76,9 +86,15 @@ app.post('/api/export-pdf', async (req, res) => {
     }
 });
 
-// Static UI
-app.use(express.static(UI_ROOT, { maxAge: '1y', immutable: true }));
-app.get('*', (_req, res) => res.sendFile(path.join(UI_ROOT, 'index.html')));
+// Static UI (dev only). In production (Render), this service is API-only.
+if (!isProd) {
+    app.use(express.static(UI_ROOT, { maxAge: '1y', immutable: true }));
+    app.get('*', (_req, res) => res.sendFile(path.join(UI_ROOT, 'index.html')));
+} else {
+    app.get('/', (_req, res) => {
+        res.type('text').send('Console Journal API');
+    });
+}
 
 // --- HTTPS in dev ---
 const CERT_DIR = path.join(__dirname, 'certs');
