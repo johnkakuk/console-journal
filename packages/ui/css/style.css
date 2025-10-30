@@ -129,11 +129,6 @@ body {
     color: var(--text);
 }
 
-.stamp {
-    opacity: 0.6;
-    min-width: 110px !important;
-}
-
 .soft {
     color: var(--soft);
 }
@@ -242,14 +237,14 @@ body {
   line-height: 1.2;
   cursor: default;
   display: flex;
-  gap: 8px;
+  gap: 0;
   align-items: baseline;
 }
 
 .menu li .stamp {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  opacity: 0.9;
-  min-width: 8.2ch;          /* fits YYYY-MM-DD */
+  opacity: 0.6;
+  min-width: 7ch;          /* fits YYYY-MM-DD */
   color: var(--accent-aux);            /* retro green accent */
 }
 
@@ -277,4 +272,42 @@ body {
 .cm-line.completed .todo-text {
   opacity: 0.6;        /* example style */
   text-decoration: line-through;
+}
+
+/* ==== Console Output Wrapping =============================================== */
+#screen { overflow: auto; }
+
+#output {
+    white-space: normal;           /* allow wrapping by default */
+    overflow-wrap: anywhere;       /* break very long tokens (URLs, one-word lines) */
+    word-break: break-word;        /* legacy fallback */
+}
+
+/* Common output fragments should wrap instead of forcing horizontal scroll */
+#output .line,
+#output .soft,
+#output .ok,
+#output .info,
+#output .warn,
+#output .error,
+#output .muted {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+/* Lists in view/search menus should wrap neatly */
+#output .listui .menu { white-space: normal; }
+#output .listui .menu li {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+/* Preserve formatting in <pre>, but still allow wrapping for narrow screens */
+#output pre,
+#output .mono {
+    white-space: pre-wrap;         /* keep newlines/tabs, but wrap long lines */
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }

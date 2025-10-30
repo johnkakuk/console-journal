@@ -42,4 +42,6 @@
     --base-font-size: 14px;
     --editor-font-size: var(--base-font-size);
     --editor-line-height: 1.5;
+
+    --caret-offset-y: -1px;
 }
