@@ -1,0 +1,86 @@
+Effective: October 30, 2025
+
+1. Agreement to Terms
+By downloading, installing, or using Console Journal (the “App”), you agree to these Terms of Service (“Terms”). If you do not agree, do not use the App.
+
+2. What Console Journal Is
+Console Journal is a local, standalone journaling tool with an optional web/PWA version. The desktop App runs entirely on your device. The web/PWA stores your entries in your browser’s local storage. No account is required.
+
+3. Your Content
+a. Ownership. You own your entries and other content you create using the App.
+
+b. Storage.
+ - Desktop: Entries are stored locally in an on-disk database under your user profile.
+ - Web/PWA: Entries are stored in your browser’s local storage/IndexedDB. Clearing site data may delete them.
+
+c. Responsibility. You are solely responsible for safeguarding, backing up, and securing your content.
+
+4. Privacy
+The App does not collect personal data. The desktop App does not connect to external servers for core features. The web/PWA may send your Markdown to the server only when you request a PDF export; the server renders your PDF and returns it without retaining journal content. See the Privacy Policy included with the App for details.
+
+5. Security & Backups
+Security is your responsibility. You are solely responsible for:
+
+ - Securing your devices and operating systems (e.g., disk encryption, antivirus).
+ - Managing backups/exports and restoring them when needed.
+ - Managing browser storage for the web/PWA.
+
+The App does not include cloud backups, account recovery, or remote access.
+
+6. License & Restrictions
+a. License. Subject to these Terms, you are granted a limited, non-exclusive, non-transferable license to install and use the App for personal or internal business purposes.
+
+b. Restrictions. You may not:
+ - reverse engineer, decompile, or disassemble the App except to the extent permitted by law;
+ - remove or obscure notices or credits;
+ - use the App to violate laws, infringe rights, distribute malware, or disrupt networks;
+ - resell, sublicense, or redistribute the App except as allowed by the App’s license;
+ - misrepresent the origin of the App or any output.
+
+c. Open Source Components. The App uses third-party open-source libraries under their own licenses. Those licenses govern their components.
+
+7. Fees & Refunds (Desktop)
+If you purchase a desktop license, it is a one-time fee unless otherwise stated. Fees are non-refundable except where required by applicable law.
+
+8. Web/PWA Server Usage (PDF Export)
+When you request a PDF export in the web/PWA, your Markdown is transmitted to the server to render a PDF and returned immediately. No persistent storage of your journal content occurs on the server, and logs are not intended to include journal content.
+
+9. Updates & Changes
+The App may change, update, or be discontinued at any time without notice. Features may differ between desktop and web/PWA builds.
+
+10. Acceptable Use
+You will not use the App to:
+ - submit or store unlawful, infringing, or harmful content;
+ - attempt unauthorized access to systems or data;
+ - interfere with the operation or security of the App or servers;
+ - violate applicable laws or third-party rights.
+
+11. Disclaimer of Warranties
+THE APP IS PROVIDED “AS IS” AND “AS AVAILABLE,” WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION ANY WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, OR NON-INFRINGEMENT. USE OF THE APP IS AT YOUR SOLE RISK.
+
+12. Limitation of Liability
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT WILL THE APP’S DEVELOPER(S) BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR FOR ANY LOSS OF DATA, PROFITS, GOODWILL, OR OTHER INTANGIBLE LOSSES, ARISING OUT OF OR RELATED TO YOUR USE OF OR INABILITY TO USE THE APP, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. THE TOTAL LIABILITY FOR ALL CLAIMS RELATING TO THE APP SHALL NOT EXCEED THE AMOUNT YOU PAID (IF ANY) FOR THE DESKTOP LICENSE.
+
+13. Indemnification
+You agree to indemnify and hold harmless the App’s developer(s) from and against any claims, liabilities, damages, losses, and expenses (including reasonable attorneys’ fees) arising out of or in any way connected with your use of the App or violation of these Terms.
+
+14. Export & Compliance
+You represent that you are not located in a jurisdiction subject to embargoes or restrictions and will comply with applicable export control and sanctions laws.
+
+15. Termination
+These Terms remain in effect until terminated. You may stop using the App at any time. We may terminate or suspend your license and access to the App if you violate these Terms. Upon termination, you must cease use and delete copies of the App.
+
+16. Governing Law
+These Terms are governed by the laws of the State of Montana, USA, without regard to conflict-of-law rules. Venue and jurisdiction lie in the state and federal courts located in Lewis & Clark County, Montana, unless applicable law provides otherwise.
+
+17. Severability
+If any provision of these Terms is found unenforceable, that provision shall be enforced to the maximum extent permissible and the remaining provisions will remain in full force and effect.
+
+18. Changes to These Terms
+We may update these Terms from time to time. The updated Terms will be posted with an updated “Effective” date. Your continued use of the App after changes become effective constitutes acceptance.
+
+19. Contact
+Questions about these Terms may be directed to the project’s repository or listed support channel.
+
+Disclaimer
+Console Journal is provided “as is,” without warranties of any kind. You are responsible for your devices, your data, and compliance with applicable laws.

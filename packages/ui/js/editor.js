@@ -1,17 +1,11 @@
 /* ==== editor.js — Minimal inline writer (subprogram) ======================= */
-import { EditorState } from '../node_modules/@codemirror/state/dist/index.js';
-import { EditorView, keymap, drawSelection, highlightActiveLine } from '../node_modules/@codemirror/view/dist/index.js';
-import { defaultKeymap, indentMore, indentLess, history, historyKeymap } from '../node_modules/@codemirror/commands/dist/index.js';
-import { markdown } from '../node_modules/@codemirror/lang-markdown/dist/index.js';
-import { indentOnInput, indentUnit, syntaxHighlighting, HighlightStyle } from '../node_modules/@codemirror/language/dist/index.js';
-import { tags as t } from '../node_modules/@lezer/highlight/dist/index.js';
-import { search, searchKeymap, openSearchPanel, findNext, findPrevious } from '../node_modules/@codemirror/search/dist/index.js';
-import { Decoration, ViewPlugin, ViewUpdate } from '../node_modules/@codemirror/view/dist/index.js';
-    // --- Interactive Markdown To-Do List Plugin ------------------------------
-    // --- Simple Markdown To-Do Toggle Plugin ------------------------------
-// --- Interactive Markdown To-Do List Plugin with clickable overlay ---------
-import { WidgetType } from '../node_modules/@codemirror/view/dist/index.js';
-import { RangeSetBuilder } from '../node_modules/@codemirror/state/dist/index.js';
+import { EditorState, RangeSetBuilder } from '@codemirror/state';
+import { EditorView, keymap, drawSelection, highlightActiveLine, Decoration, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
+import { defaultKeymap, indentMore, indentLess, history, historyKeymap } from '@codemirror/commands';
+import { markdown } from '@codemirror/lang-markdown';
+import { indentOnInput, indentUnit, syntaxHighlighting, HighlightStyle } from '@codemirror/language';
+import { tags as t } from '@lezer/highlight';
+import { search, searchKeymap, openSearchPanel, findNext, findPrevious } from '@codemirror/search';
 
 // Widget for clickable overlay on the [ ] or [x] in todo list
 class TodoClickTargetWidget extends WidgetType {

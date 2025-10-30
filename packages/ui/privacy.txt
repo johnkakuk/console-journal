@@ -1,0 +1,58 @@
+Effective: October 30, 2025
+1. Overview
+Console Journal is designed for local, private writing. We do not run accounts, do not track you, and do not sell or share your data. The application is intentionally built to avoid collecting personal information.
+
+2. What Data the App Handles
+ - Journal content and metadata (dates, text).
+ - Exported files you choose to create (TXT, PDF).
+
+3. Where Your Data Lives
+ - Desktop App (Electron): Stored locally on your device in an on-disk SQLite database located under your OS user data directory. No automatic syncing or remote transmission occurs.
+ - Web App / PWA: Stored locally in your browser (e.g., LocalStorage/IndexedDB) under your device’s user profile. Clearing site data in the browser may delete your journal.
+
+4. Network Behavior
+ - Desktop App (Electron): Does not connect to any external server for core functionality.
+ - Web App / PWA: When you request a PDF export, the server renders your provided Markdown into a PDF and immediately returns it. The server does not persist your journal, export results, or logs containing journal content. We do not retain copies of your data.
+
+5. Security & Responsibility
+Security is your responsibility. You are solely responsible for:
+
+ - Securing your device(s), operating system, and user accounts.
+ - Managing backups of your journal (exports, disk images, cloud backups you control).
+ - Managing browser storage (for the PWA) and any data you clear.
+ - Installing updates and using antivirus/anti-malware as you see fit.
+ - Choosing strong authentication and disk encryption where appropriate.
+
+Console Journal does not include cloud backups, end-to-end encryption, account recovery, or remote access.
+
+6. Cookies, Analytics, and Tracking
+ - No third-party analytics, ad networks, or tracking pixels.
+ - No cookies are required for core features. The PWA may use standard browser storage strictly to save your entries and UI state.
+
+7. Third-Party Libraries
+Console Journal uses open-source libraries (e.g., Electron, CodeMirror, SQLite, Markdown/PDF tooling). These run locally under your control. Review their licenses and security practices if desired.
+
+8. Children’s Privacy
+Console Journal does not target or market to children and does not knowingly collect personal information from children.
+
+9. Data Sharing & Disclosure
+We do not collect or maintain your journal on our servers; therefore, we do not sell or share it. Any exports you create are written to your device (desktop) or downloaded to your browser’s default download location (web).
+
+10. Data Retention
+ - Desktop: Your journal remains on your disk until you delete it.
+ - Web/PWA: Your entries persist in browser storage until you clear them (e.g., “Clear browsing data,” uninstalling the PWA with data removal, or similar actions).
+ - Server (Web export): No retention of journal content beyond the transient rendering needed to produce your PDF.
+
+11. Your Controls
+ - You can export and self-archive your journal at any time.
+ - You can delete entries manually within the app or wipe local/browser storage outside the app.
+ - You control your own backups.
+
+12. Changes to This Policy
+If we materially change this policy, we will update the “Effective” date above and provide the revised text in the app repository.
+
+13. Contact
+For questions about this policy, contact the developer via the project’s repository or listed support channel.
+
+Disclaimer
+Console Journal is provided “as is,” without warranties of any kind. You use it at your own risk. You are responsible for safeguarding your data and complying with local laws regarding data storage and privacy.

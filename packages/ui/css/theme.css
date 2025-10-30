@@ -1,0 +1,47 @@
+:root {
+    --bg: #0b0f0c;
+    --panel: #0d140f;
+    --text: #73ff7a;
+    --muted: #2b3a30;
+    --error: #ff5c5c;
+    --warn: #ffe27a;
+    --info: #c2cb8a;
+    --scanline: linear-gradient(#00000000 50%, #0000001f 51%);
+    
+    /* Centralized theming */
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+    --app-bg: var(--bg);
+    --app-fg: var(--text);
+    --app-accent: var(--text);
+
+    /* Useful computed values */
+    --text-rgb: 115, 255, 122; /* matches #73ff7a */
+    --bg-radial: #0e160f;
+    --soft: #9cff9f;
+    --accent-aux: #7CFFB2;
+
+    /* Console theme */
+    --console-bg: var(--app-bg);
+    --console-fg: var(--app-fg);
+    --console-accent: var(--app-accent);
+
+    /* Editor theme (consumed by editor.js) */
+    --editor-bg: var(--app-bg);
+    --editor-fg: var(--app-fg);
+    --editor-caret: var(--app-fg);
+    --editor-selection-bg: rgba(var(--text-rgb), 0.25);
+    --editor-active-line-bg: rgba(var(--text-rgb), 0.08);
+    --editor-gutter-bg: transparent;
+    --editor-gutter-fg: rgba(var(--text-rgb), 0.5);
+    --editor-gutter-border: rgba(var(--text-rgb), 0.1);
+    --editor-panel-bg: transparent;
+    --editor-todo-hover-bg: rgba(var(--text-rgb), 0.08);
+
+    --base-font-size: 14px;
+    --editor-font-size: var(--base-font-size);
+    --editor-line-height: 1.5;
+
+    --caret-offset-y: -1px;
+}

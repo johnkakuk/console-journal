@@ -4,6 +4,38 @@ const Database = require('better-sqlite3');
 const fs = require('fs');
 const { marked } = require('marked');
 
+function readCssText(cssPath) {
+    if (!cssPath) return '';
+    const candidates = [];
+
+    // Absolute path provided
+    if (path.isAbsolute(cssPath)) candidates.push(cssPath);
+
+    // Relative to the app root (works in dev)
+    candidates.push(path.join(app.getAppPath(), cssPath));
+
+    // Relative to this file: ../../../ + cssPath (from apps/desktop/electron → repo root)
+    candidates.push(path.resolve(__dirname, '..', '..', '..', cssPath));
+
+    // Packaged build: relative to resources path
+    if (process.resourcesPath) candidates.push(path.join(process.resourcesPath, cssPath));
+
+    for (const p of candidates) {
+        try {
+            if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
+        } catch (_) {}
+    }
+    return '';
+}
+
+function htmlForExport(markdown, cssText) {
+    const body = marked.parse(markdown || '');
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Console Journal Export</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:;">
+<style>${cssText || ''}</style>
+</head><body><article class="markdown-body">${body}</article></body></html>`;
+}
+
 
 process.on('unhandledRejection', (reason, promise) => {
     console.error('🚨 Unhandled Rejection:', reason);
@@ -110,7 +142,7 @@ function createWindow() {
     });
 
     // Load the app from disk (no bundler/dev server)
-    win.loadFile(path.join(__dirname, '..', 'index.html'));
+    win.loadFile(path.join(__dirname, '..', '..', '..', 'packages', 'ui', 'index.html'));
 
 //     if (isDev) {
 //         try { win.webContents.openDevTools({ mode: 'detach' }); } catch {}
@@ -191,24 +223,9 @@ ipcMain.handle('export-journal', async (_event, args = {}) => {
 
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
-    // Inline CSS for styling
-    let inlineCss = '';
-    try {
-        if (cssPath && !path.isAbsolute(cssPath)) cssPath = path.join(__dirname, '..', cssPath);
-        if (cssPath && fs.existsSync(cssPath)) inlineCss = fs.readFileSync(cssPath, 'utf8');
-    } catch {}
-
-    const html =    `<!doctype html>
-                    <html>
-                    <head>
-                    <meta charset="utf-8">
-                    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:;">
-                    <style>${inlineCss}</style>
-                    </head>
-                    <body class="markdown-body">
-                    ${marked.parse(markdown)}
-                    </body>
-                    </html>`;
+    // Inline CSS for styling (resolve robustly in dev and in packaged builds)
+    const cssText = readCssText(args.cssPath);
+    const html = htmlForExport(markdown, cssText);
 
     const win = new BrowserWindow({
         show: false,

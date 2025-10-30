@@ -11,6 +11,7 @@
  * 
 /* ==== main.js — Shell Router & UI ================================================== */
 import { startEditor } from './editor.js';
+import { marked } from 'marked';
 
 // === date helpers ===
 function todayISO(tz = Intl.DateTimeFormat().resolvedOptions().timeZone) {
@@ -84,14 +85,107 @@ const input  = document.querySelector('#cmdInput');
 const output = document.querySelector('#output');
 const screen = document.querySelector('#screen');
 
-// Renderer guard for DB
-const db = window.db ?? {
-    get: async () => null,
-    upsert: async (date, content) => ({ id: -1, date, content }),
-    listRecent: async (limit = 15) => [],
-    listByYearMonth: async (_ym) => [],
-    search: async (_q) => []
-};
+// DB adapter: IndexedDB for browser/PWA, Electron bridge if available
+let db = window.db;
+if (!db) {
+    if (!window.electronAPI) {
+        // ===== Minimal IndexedDB adapter for PWA =====
+        const DB_NAME = 'console-journal';
+        const DB_VERSION = 1;
+        const STORE = 'entries';
+
+        const openDB = () => new Promise((resolve, reject) => {
+            const req = indexedDB.open(DB_NAME, DB_VERSION);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains(STORE)) {
+                    const s = db.createObjectStore(STORE, { keyPath: 'date' });
+                    s.createIndex('ym', 'ym', { unique: false });
+                    s.createIndex('updated_at', 'updated_at', { unique: false });
+                }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+
+        const txRun = async (mode, fn) => {
+            const dbi = await openDB();
+            return new Promise((resolve, reject) => {
+                const tx = dbi.transaction(STORE, mode);
+                const store = tx.objectStore(STORE);
+                let result;
+                try { result = fn(store, tx); } catch (e) { reject(e); return; }
+                tx.oncomplete = () => resolve(result);
+                tx.onerror = () => reject(tx.error);
+            });
+        };
+
+        db = {
+            async get(date) {
+                return txRun('readonly', store => store.get(date));
+            },
+            async upsert(date, content) {
+                const now = new Date().toISOString();
+                const ym = String(date).slice(0, 7);
+                const row = { date, content: content ?? '', created_at: now, updated_at: now, ym };
+                await txRun('readwrite', store => store.put(row));
+                return row;
+            },
+            async listByYearMonth(ym) {
+                return txRun('readonly', store => {
+                    const idx = store.index('ym');
+                    const req = idx.getAll(IDBKeyRange.only(ym));
+                    return new Promise((resolve, reject) => {
+                        req.onsuccess = () => resolve(req.result || []);
+                        req.onerror = () => reject(req.error);
+                    });
+                });
+            },
+            async listRecent(limit = 15) {
+                return txRun('readonly', store => {
+                    const idx = store.index('updated_at');
+                    const out = [];
+                    return new Promise((resolve, reject) => {
+                        const cursorReq = idx.openCursor(null, 'prev');
+                        cursorReq.onsuccess = () => {
+                            const cur = cursorReq.result;
+                            if (cur && out.length < limit) { out.push(cur.value); cur.continue(); }
+                            else resolve(out);
+                        };
+                        cursorReq.onerror = () => reject(cursorReq.error);
+                    });
+                });
+            },
+            async search(q) {
+                const needle = String(q).toLowerCase();
+                return txRun('readonly', store => {
+                    const out = [];
+                    return new Promise((resolve, reject) => {
+                        const req = store.openCursor();
+                        req.onsuccess = () => {
+                            const cur = req.result;
+                            if (!cur) return resolve(out);
+                            const v = cur.value;
+                            if ((v.content || '').toLowerCase().includes(needle)) out.push(v);
+                            cur.continue();
+                        };
+                        req.onerror = () => reject(req.error);
+                    });
+                });
+            }
+        };
+        window.db = db;
+    } else {
+        // Electron: defer to preload-exposed db where present; keep a safe stub otherwise
+        db = {
+            get: async () => null,
+            upsert: async (date, content) => ({ id: date, date, content }),
+            listRecent: async () => [],
+            listByYearMonth: async () => [],
+            search: async () => []
+        };
+    }
+}
 
 // Whether a subprogram (team.js) is currently consuming input
 let inputState = false;
@@ -140,6 +234,19 @@ const shell = {
 function esc(s){
     return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 } 
+
+// Browser download helper for TXT fallback (PWA)
+if (!window.downloadText) {
+    window.downloadText = function (content, filename) {
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    };
+}
 
 // Append rendered HTML to the output and keep view scrolled to the bottom
 function print(html) {
@@ -240,10 +347,16 @@ const handleKeydown = async (e) => {
     if (e.key === 'Enter') {
         e.preventDefault();
 
+        // If a subprogram provides its own key handler (e.g., list UI), route Enter there
+        if (activeProgram && typeof activeProgram.onKey === 'function') {
+            activeProgram.onKey(e);
+            return;
+        }
+
         const line = input.value;
         newline();
 
-        // If a subprogram is active, let it consume the line
+        // If a subprogram is active and expects line-based input, deliver the line
         if (activeProgram && typeof activeProgram.consume === 'function') {
             try {
                 await activeProgram.consume(line);
@@ -335,10 +448,25 @@ const updateCaret = () => {
     const borderLeft = parseFloat(styles.borderLeftWidth) || 0;
     const scrollLeft = input.scrollLeft || 0;
 
-    // Position the fake caret at the exact glyph boundary
+    // Vertical positioning: account for padding/border and center within line-height
+    const paddingTop = parseFloat(styles.paddingTop) || 0;
+    const borderTop = parseFloat(styles.borderTopWidth) || 0;
+    const fontSize = parseFloat(styles.fontSize) || 0;
+    let lineHeight = parseFloat(styles.lineHeight);
+    if (!isFinite(lineHeight)) {
+        // Some browsers return 'normal' → approximate as 1.2 * font-size
+        lineHeight = fontSize ? fontSize * 1.2 : 0;
+    }
+    const vertCenterAdjust = Math.max(0, (lineHeight - fontSize) / 2);
+
+    // Optional fine-tune via CSS variable (defaults to 0)
+    const varOffset = parseFloat(styles.getPropertyValue('--caret-offset-y')) || 0;
+
     caret.style.position = 'absolute';
     caret.style.left = (inputRect.left + borderLeft + paddingLeft + measured - scrollLeft) + 'px';
-    caret.style.top = inputRect.top + 'px';
+    caret.style.top = (inputRect.top + borderTop + paddingTop + vertCenterAdjust + varOffset) + 'px';
+    // Keep caret height aligned to the text glyph box
+    if (fontSize) caret.style.height = fontSize + 'px';
 };
 
 let caretRAF = null;
@@ -422,16 +550,36 @@ function createListUI(title, items) {
     };
 }
 
+// Helper to load a text asset (privacy.txt, terms.txt) from disk or server
+async function loadTextAsset(name) {
+    const isElectron = !!(window.electronAPI && typeof window.electronAPI.readTextAsset === 'function');
+    if (isElectron) {
+        return await window.electronAPI.readTextAsset(name);
+    }
+    // Web/PWA: served from packages/ui root
+    const url = new URL(name, window.location.href).href;
+    const resp = await fetch(url, { credentials: 'same-origin' });
+    if (!resp.ok) throw new Error(`Failed to load ${name} (${resp.status})`);
+    return await resp.text();
+}
+
 /* -----------------------------------------------------------------------------
  * BUILT-IN COMMANDS
  * --------------------------------------------------------------------------- */
 
 // Support utilities
 register('help', () => {
-    const rows = Object.keys(state.commands)
+    const rowsHtml = Object.keys(state.commands)
         .sort()
-        .map(k => `  ${k.padEnd(10)} - ${state.commands[k].desc || ''}`);
-    console.log(rows.join('\n'));
+        .map(k => {
+            const desc = state.commands[k].desc || '';
+            return `<div><span class="kbd">${esc(k)}</span> — ${esc(desc)}</div>`;
+        })
+        .join('');
+    print(`
+        <div class="soft">available commands</div>
+        <div class="muted help">${rowsHtml}</div>
+    `);
 }, 'List available commands');
 
 register('clear', () => {
@@ -442,6 +590,26 @@ register('clear', () => {
 register('about', () => {
     console.log('A console style journaling tool built by John Kakuk.');
 }, 'About this console');
+
+register('privacy', async () => {
+    try {
+        const txt = await loadTextAsset('privacy.txt');
+        print(`<div class="soft">PRIVACY POLICY</div>`);
+        print(`<pre class="mono">${esc(txt)}</pre>`);
+    } catch (err) {
+        print(`<div class="error">Unable to load privacy.txt — ${esc(err.message || String(err))}</div>`);
+    }
+}, 'Show Privacy Policy');
+
+register('terms', async () => {
+    try {
+        const txt = await loadTextAsset('terms.txt');
+        print(`<div class="soft">TERMS OF SERVICE</div>`);
+        print(`<pre class="mono">${esc(txt)}</pre>`);
+    } catch (err) {
+        print(`<div class="error">Unable to load terms.txt — ${esc(err.message || String(err))}</div>`);
+    }
+}, 'Show Terms of Service');
 
 // --- Usage helper for journal command ---
 function printJournalHelp() {
@@ -724,21 +892,45 @@ register('export', async (argv = []) => {
         output.appendChild(progress);
         scrollToBottom();
 
-        // Simple dot animation (… -> …. -> …..)
         let dots = 0;
         const timer = setInterval(() => {
             dots = (dots + 1) % 4;
-            const trail = '.'.repeat(dots);
-            progress.innerHTML = `Export in progress${trail}`;
+            progress.innerHTML = `Export in progress${'.'.repeat(dots)}`;
             scrollToBottom();
         }, 400);
 
+        const useElectron = !!(window.electronAPI && typeof window.electronAPI.exportJournal === 'function');
+
         try {
-            const res = await window.electronAPI.exportJournal({ markdown: md, outputPath, cssPath: 'css/pdf.css' });
-            clearInterval(timer);
-            progress.className = 'ok';
-            progress.innerHTML = `Exported PDF to <span class="muted">${esc(res?.path || outputPath)}</span>`;
-            scrollToBottom();
+            if (useElectron) {
+                const res = await window.electronAPI.exportJournal({ markdown: md, outputPath, cssPath: 'packages/ui/css/pdf.css' });
+                clearInterval(timer);
+                progress.className = 'ok';
+                progress.innerHTML = `Exported PDF to <span class="muted">${esc(res?.path || outputPath)}</span>`;
+                scrollToBottom();
+            } else {
+                // Browser server-rendered PDF via Puppeteer
+                const resp = await fetch('/api/export-pdf', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ markdown: md, title: base })
+                });
+                if (!resp.ok) throw new Error(`Server export failed (${resp.status})`);
+                const blob = await resp.blob();
+
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+
+                clearInterval(timer);
+                progress.className = 'ok';
+                progress.innerHTML = `Downloaded PDF file <span class=\"muted\">${esc(filename)}</span>`;
+                scrollToBottom();
+            }
         } catch (err) {
             clearInterval(timer);
             const msg = err?.message || String(err);
@@ -749,7 +941,7 @@ register('export', async (argv = []) => {
         return;
     }
 
-    // Plain text export path — requires a simple IPC that writes a file.
+    // Plain text export path — requires a simple IPC that writes a file, or browser fallback.
     if (window.electronAPI && typeof window.electronAPI.saveText === 'function') {
         try {
             await window.electronAPI.saveText({ content: md, outputPath });
@@ -758,11 +950,57 @@ register('export', async (argv = []) => {
             const msg = err?.message || String(err);
             print(`<div class="error">Export TXT failed: ${esc(msg)}</div>`);
         }
+    } else if (typeof window.downloadText === 'function') {
+        try {
+            window.downloadText(md, filename);
+            print(`<div class="ok">Downloaded TXT file <span class="muted">${esc(filename)}</span></div>`);
+        } catch (err) {
+            const msg = err?.message || String(err);
+            print(`<div class="error">Download TXT failed: ${esc(msg)}</div>`);
+        }
     } else {
-        // Graceful notice if preload bridge isn't wired yet
-        print('<div class="warn">TXT export not wired yet. Use <span class="kbd">-pdf</span> to export now, or add an IPC <span class="kbd">saveText</span> that writes a file.</div>');
+        print('<div class="warn">TXT export not wired yet. Use <span class="kbd">-pdf</span> to export now, or add a <span class="kbd">downloadText</span> function to handle browser downloads.</div>');
     }
 }, 'Export entries (.txt by default, add -pdf)');
+
+// --- Switch command for web/desktop mode ---
+register('switch', async (argv = []) => {
+    const arg = argv[0]?.trim();
+    if (!arg) {
+        print('<div class="error">Usage: switch [mode]\nAvailable modes: web, desktop</div>');
+        return;
+    }
+
+    if (arg === 'web') {
+        print('<div class="muted">Switching to web mode...</div>');
+        if (window.electronAPI && typeof window.electronAPI.openWeb === 'function') {
+            try {
+                await window.electronAPI.openWeb();
+            } catch (err) {
+                print(`<div class="error">Failed to switch: ${esc(err.message || err)}</div>`);
+            }
+        } else {
+            print('<div class="warn">Web mode only available when running in Electron with openWeb bridge.</div>');
+        }
+        return;
+    }
+
+    if (arg === 'desktop') {
+        print('<div class="muted">Switching to desktop mode...</div>');
+        if (window.electronAPI && typeof window.electronAPI.openDesktop === 'function') {
+            try {
+                await window.electronAPI.openDesktop();
+            } catch (err) {
+                print(`<div class="error">Failed to switch: ${esc(err.message || err)}</div>`);
+            }
+        } else {
+            print('<div class="warn">Desktop mode only available when running in Electron with openDesktop bridge.</div>');
+        }
+        return;
+    }
+
+    print(`<div class="error">Invalid mode: ${esc(arg)}<br>Available modes: web, desktop</div>`);
+}, 'Switch between web and desktop modes');
 
 /* -----------------------------------------------------------------------------
  * BOOT
