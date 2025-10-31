@@ -45,7 +45,11 @@ app.post('/api/export-pdf', async (req, res) => {
         const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title ? String(title) : 'Console Journal Export'}</title>
 <style>${cssText}</style></head><body><article class="markdown-body">${bodyHtml}</article></body></html>`;
 
-        const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+        const browser = await puppeteer.launch({
+            headless: true,
+            executablePath: puppeteer.executablePath(),
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
         try {
             const page = await browser.newPage();
 
