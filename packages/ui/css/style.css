@@ -173,6 +173,11 @@ body {
   gap: 8px;
 }
 
+.disabled {
+  pointer-events: none;
+  opacity: 0.6;
+}
+
 .cm-panel.cm-search label {
   color: rgba(var(--text-rgb), 0.9);
 }
@@ -331,4 +336,73 @@ body {
     0%   { transform: scaleX(0);   opacity: 0.9; }
     40%  { transform: scaleX(0.4); opacity: 1; }
     100% { transform: scaleX(1);   opacity: 0.85; }
+}
+
+/* Console Journal — confirmation modal */
+.cj-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: color-mix(in srgb, var(--bg, #000) 40%, transparent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.cj-modal {
+    min-width: 320px;
+    max-width: 520px;
+    background: var(--panel-bg, #0b0b0b);
+    color: var(--fg, #cfcfcf);
+    border: 1px solid var(--border, #2a2a2a);
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.6);
+    padding: 16px 18px;
+    font-family: var(--font-ui, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial);
+}
+
+.cj-modal-title {
+    font-weight: 700;
+    margin: 0 0 8px 0;
+}
+
+.cj-modal-body {
+    line-height: 1.4;
+    margin-bottom: 12px;
+}
+
+.cj-modal-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.cj-modal-actions button {
+    appearance: none;
+    border: 1px solid var(--border, #2a2a2a);
+    background: var(--btn-bg, #151515);
+    color: var(--fg, #cfcfcf);
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font: inherit;
+}
+
+.cj-modal-actions button:hover {
+    background: var(--btn-bg-hover, #1c1c1c);
+}
+
+.cj-modal-actions button.yes {
+    border-color: var(--ok, #3fb950);
+}
+
+.cj-modal-hint {
+    margin-top: 8px;
+    font-size: 12px;
+    opacity: .8;
+    text-align: right;
+}
+/* Buttons and modal actions */
+.cj-modal button:focus {
+    outline: none !important;
+    box-shadow: 0 0 0 2px var(--text, #55df63);
 }

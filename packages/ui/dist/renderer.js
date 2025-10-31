@@ -12016,32 +12016,6 @@ var hideNativeSelection = /* @__PURE__ */ Prec.highest(/* @__PURE__ */ EditorVie
   }
 }));
 var UnicodeRegexpSupport = /x/.unicode != null ? "gu" : "g";
-function highlightActiveLine() {
-  return activeLineHighlighter;
-}
-var lineDeco = /* @__PURE__ */ Decoration.line({ class: "cm-activeLine" });
-var activeLineHighlighter = /* @__PURE__ */ ViewPlugin.fromClass(class {
-  constructor(view) {
-    this.decorations = this.getDeco(view);
-  }
-  update(update) {
-    if (update.docChanged || update.selectionSet)
-      this.decorations = this.getDeco(update.view);
-  }
-  getDeco(view) {
-    let lastLineStart = -1, deco = [];
-    for (let r of view.state.selection.ranges) {
-      let line = view.lineBlockAt(r.head);
-      if (line.from > lastLineStart) {
-        deco.push(lineDeco.range(line.from));
-        lastLineStart = line.from;
-      }
-    }
-    return Decoration.set(deco);
-  }
-}, {
-  decorations: (v) => v.decorations
-});
 var baseTheme = /* @__PURE__ */ EditorView.baseTheme({
   ".cm-tooltip": {
     zIndex: 500,
@@ -25997,7 +25971,11 @@ function startEditor(shell2, opts = {}) {
     ".cm-scroller": { fontFamily: "inherit" },
     ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--editor-caret)" },
     "&.cm-editor.cm-focused": { outline: "none" },
-    ".cm-activeLine": { backgroundColor: "var(--editor-active-line-bg)" },
+    // Disable default paragraph-wide highlight; we’ll draw a single-row overlay instead
+    ".cm-activeLine": { backgroundColor: "transparent" },
+    // current: single-row overlay handles highlight
+    // To restore paragraph-wide highlight instead, uncomment this and remove the overlay plugin in buildExtensions():
+    // '.cm-activeLine': { backgroundColor: 'var(--editor-active-line-bg)' },
     ".cm-selectionBackground, ::selection": { backgroundColor: "var(--editor-selection-bg)" },
     ".cm-lineNumbers": { color: "var(--editor-gutter-fg)" },
     ".cm-gutters": { backgroundColor: "var(--editor-gutter-bg)", borderRight: "1px solid var(--editor-gutter-border)" },
@@ -26067,6 +26045,66 @@ function startEditor(shell2, opts = {}) {
         scroller.scrollTop += delta;
       }
     });
+  });
+  const activeRowPlugin = ViewPlugin.fromClass(class {
+    constructor(view) {
+      this.view = view;
+      this.dom = document.createElement("div");
+      this.dom.className = "cm-activeRow";
+      this.dom.style.position = "absolute";
+      this.dom.style.left = "0";
+      this.dom.style.right = "0";
+      this.dom.style.pointerEvents = "none";
+      this.dom.style.zIndex = "1";
+      const scroller = view.scrollDOM;
+      const cs = getComputedStyle(scroller);
+      if (cs.position === "static") scroller.style.position = "relative";
+      scroller.appendChild(this.dom);
+      this._scheduled = false;
+      this._top = 0;
+      this._height = 0;
+      this._visible = false;
+      this.schedule();
+    }
+    schedule() {
+      if (this._scheduled) return;
+      this._scheduled = true;
+      this.view.requestMeasure({
+        read: () => {
+          const head = this.view.state.selection.main.head;
+          const caret3 = this.view.coordsAtPos(head);
+          if (!caret3) {
+            this._visible = false;
+            return;
+          }
+          const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+          this._top = caret3.top - scrollerRect.top + this.view.scrollDOM.scrollTop;
+          this._height = Math.max(1, caret3.bottom - caret3.top);
+          this._visible = true;
+        },
+        write: () => {
+          this._scheduled = false;
+          if (!this.dom) return;
+          if (!this._visible) {
+            this.dom.style.display = "none";
+            return;
+          }
+          this.dom.style.display = "block";
+          this.dom.style.top = `${this._top}px`;
+          this.dom.style.height = `${this._height}px`;
+          this.dom.style.background = "var(--editor-active-line-bg)";
+        }
+      });
+    }
+    update(update) {
+      if (update.selectionSet || update.viewportChanged || update.domChanged || update.scrollChanged) {
+        this.schedule();
+      }
+    }
+    destroy() {
+      if (this.dom && this.dom.parentNode) this.dom.parentNode.removeChild(this.dom);
+      this.dom = null;
+    }
   });
   const markDirtyListener = EditorView.updateListener.of((update) => {
     if (update.docChanged) {
@@ -26152,7 +26190,13 @@ function startEditor(shell2, opts = {}) {
       retroTheme,
       padTheme,
       drawSelection(),
-      highlightActiveLine(),
+      // === Active line highlight mode ============================================
+      // Current: use a single visual-row overlay (safe measured plugin).
+      // If you prefer the paragraph-wide highlight, comment out `activeRowPlugin`
+      // below and uncomment the `highlightActiveLine()` line here. Also restore the
+      // .cm-activeLine background in the theme above.
+      activeRowPlugin,
+      // highlightActiveLine(), // ← previous behavior (paragraph-wide highlight)
       snapOutOfView,
       markDirtyListener,
       history(),
@@ -26209,7 +26253,107 @@ function startEditor(shell2, opts = {}) {
       ok(`Saved (${summary()})`);
     }
   }
+  function showConfirmModal(message, onYes, onNo) {
+    const prev = document.getElementById("confirmModal");
+    if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
+    const wrap = document.createElement("div");
+    wrap.id = "confirmModal";
+    wrap.className = "cj-modal-backdrop";
+    wrap.innerHTML = `
+            <div class="cj-modal" role="dialog" aria-modal="true" aria-labelledby="cjModalTitle">
+                <div id="cjModalTitle" class="cj-modal-title">Confirm</div>
+                <div class="cj-modal-body">${shell2.esc(message)}</div>
+                <div class="cj-modal-actions">
+                    <button class="yes" autofocus>Yes</button>
+                    <button class="no">No</button>
+                </div>
+                <div class="cj-modal-hint muted">y = yes \xB7 n = no</div>
+            </div>
+        `;
+    document.body.appendChild(wrap);
+    const btnYes = wrap.querySelector("button.yes");
+    const btnNo = wrap.querySelector("button.no");
+    const buttons = [btnYes, btnNo];
+    let focusIdx = 0;
+    const setFocus = (i) => {
+      focusIdx = (i + buttons.length) % buttons.length;
+      const el = buttons[focusIdx];
+      if (el) {
+        try {
+          el.focus({ preventScroll: true });
+        } catch {
+          el.focus();
+        }
+      }
+    };
+    setTimeout(() => setFocus(0), 0);
+    const cleanup = () => {
+      window.removeEventListener("keydown", onKey, true);
+      if (wrap && wrap.parentElement) wrap.parentElement.removeChild(wrap);
+    };
+    const accept = () => {
+      cleanup();
+      try {
+        onYes && onYes();
+      } catch {
+      }
+    };
+    const reject = () => {
+      cleanup();
+      try {
+        onNo && onNo();
+      } catch {
+      }
+    };
+    const onKey = (e) => {
+      const k = (e.key || "").toLowerCase();
+      if (k === "y") {
+        e.preventDefault();
+        e.stopPropagation();
+        accept();
+        return;
+      }
+      if (k === "n" || k === "escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        reject();
+        return;
+      }
+      if (k === "tab") {
+        e.preventDefault();
+        e.stopPropagation();
+        setFocus(focusIdx + (e.shiftKey ? -1 : 1));
+        return;
+      }
+      if (k === "arrowright" || k === "arrowdown") {
+        e.preventDefault();
+        e.stopPropagation();
+        setFocus(focusIdx + 1);
+        return;
+      }
+      if (k === "arrowleft" || k === "arrowup") {
+        e.preventDefault();
+        e.stopPropagation();
+        setFocus(focusIdx - 1);
+        return;
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    btnYes.addEventListener("click", accept);
+    btnNo.addEventListener("click", reject);
+  }
+  function requestExit() {
+    if (state2.dirty || unsaved) {
+      showConfirmModal("Exit without saving?", () => performExit(), () => {
+      });
+      return;
+    }
+    performExit();
+  }
   function exit() {
+    requestExit();
+  }
+  function performExit() {
     window.removeEventListener("keydown", onHotkey, true);
     if (titleEl) {
       if (originalTitle != null) titleEl.textContent = originalTitle;
@@ -28428,16 +28572,30 @@ if (!db) {
             req.onerror = () => reject(req.error);
           });
         });
+      },
+      async delete(date) {
+        return txRun("readwrite", (store) => {
+          const req = store.delete(date);
+          return new Promise((resolve, reject) => {
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => reject(req.error);
+          });
+        });
       }
     };
     window.db = db;
   } else {
+    const invoke = (ch, ...args) => window.electronAPI && typeof window.electronAPI.invoke === "function" ? window.electronAPI.invoke(ch, ...args) : Promise.reject(new Error("electronAPI.invoke not available"));
     db = {
-      get: async () => null,
-      upsert: async (date, content2) => ({ id: date, date, content: content2 }),
-      listRecent: async () => [],
-      listByYearMonth: async () => [],
-      search: async () => []
+      get: (date) => invoke("entry:getByDate", date),
+      upsert: (date, content2 = "") => invoke("entry:upsert", { date, content: content2 }),
+      listRecent: (limit = 15) => invoke("entry:listRecent", limit),
+      listByYearMonth: (ym) => invoke("entry:listByYearMonth", ym),
+      search: (q) => invoke("entry:search", q),
+      delete: async (date) => {
+        const res = await invoke("entry:deleteByDate", date);
+        return !!(res && (res.deleted > 0 || res.ok === true));
+      }
     };
   }
 }
@@ -28466,6 +28624,11 @@ var shell = {
         activeProgram.destroy();
       } catch {
       }
+    }
+    try {
+      const strayLists = document.querySelectorAll(".listui");
+      strayLists.forEach((n) => n.remove());
+    } catch {
     }
     activeProgram = null;
     this.resetPrompt();
@@ -28618,7 +28781,22 @@ var handleKeydown = async (e) => {
     }
   }
   if (activeProgram && typeof activeProgram.onKey === "function") {
-    const navKeys = ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", "Escape", "Enter"];
+    const navKeys = [
+      "ArrowUp",
+      "ArrowDown",
+      "PageUp",
+      "PageDown",
+      "Home",
+      "End",
+      "Escape",
+      "Enter",
+      "Delete",
+      "Backspace",
+      "y",
+      "Y",
+      "n",
+      "N"
+    ];
     if (navKeys.includes(e.key)) {
       e.preventDefault();
       e.stopPropagation();
@@ -28680,9 +28858,12 @@ function createListUI(title, items) {
   container.className = "listui";
   const head = document.createElement("div");
   head.className = "soft";
-  head.innerHTML = `${esc(title)} <span class="muted">(\u2191/\u2193 to navigate \xB7 Enter open \xB7 Esc cancel)</span>`;
+  head.innerHTML = `${esc(title)} <span class="muted">(\u2191/\u2193 to navigate \xB7 Enter open \xB7 Del delete \xB7 Esc cancel)</span>`;
   const ul = document.createElement("ul");
   ul.className = "menu";
+  let confirmPending = false;
+  let pendingDate = null;
+  let confirmDiv = null;
   function render() {
     ul.innerHTML = "";
     items.forEach((it, i) => {
@@ -28712,6 +28893,60 @@ function createListUI(title, items) {
     onKey: (e) => {
       if (container.classList.contains("disabled")) return;
       if (!items.length) return;
+      if (confirmPending) {
+        const k = e.key?.toLowerCase?.() || "";
+        if (k === "y" || k === "n") {
+          e.preventDefault();
+          e.stopPropagation();
+          if (k === "n") {
+            if (confirmDiv) {
+              confirmDiv.classList.add("muted");
+              confirmDiv.innerHTML = `Cancelled.`;
+            }
+            confirmPending = false;
+            pendingDate = null;
+            return;
+          }
+          (async () => {
+            try {
+              const res = await db.delete(pendingDate);
+              const ok = typeof res === "object" ? res.deleted > 0 : !!res;
+              if (confirmDiv) {
+                confirmDiv.className = ok ? "ok" : "error";
+                confirmDiv.innerHTML = ok ? `Deleted <span class="stamp">${esc(pendingDate)}</span>.` : `Nothing deleted for <span class="stamp">${esc(pendingDate)}</span>.`;
+              }
+              if (ok) {
+                const idxToRemove = items.findIndex((it) => String(it.date) === String(pendingDate));
+                if (idxToRemove !== -1) {
+                  items.splice(idxToRemove, 1);
+                  idx = Math.min(idx, Math.max(0, items.length - 1));
+                  if (items.length) {
+                    render();
+                  } else {
+                    print('<div class="muted">No entries left.</div>');
+                    shell.exit();
+                  }
+                }
+              } else {
+              }
+            } catch (err) {
+              const msg = err?.message || String(err);
+              if (confirmDiv) {
+                confirmDiv.className = "error";
+                confirmDiv.innerHTML = `Delete failed: ${esc(msg)}`;
+              }
+            } finally {
+              confirmPending = false;
+              pendingDate = null;
+            }
+          })();
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        shell.exit();
+        return;
+      }
       if (e.key === "ArrowDown") {
         idx = Math.min(idx + 1, items.length - 1);
         render();
@@ -28739,6 +28974,21 @@ function createListUI(title, items) {
       } else if (e.key === "Escape") {
         shell.suspend();
         e.preventDefault();
+      } else if (e.key === "Delete" || e.key === "Backspace") {
+        const chosen = items[idx];
+        if (!chosen) {
+          e.preventDefault();
+          return;
+        }
+        confirmPending = true;
+        pendingDate = chosen.date;
+        confirmDiv = document.createElement("div");
+        confirmDiv.className = "warn";
+        confirmDiv.innerHTML = `Delete <span class="stamp">${esc(pendingDate)}</span>? <span class="warn">y/n</span>`;
+        output.appendChild(confirmDiv);
+        scrollToBottom();
+        e.preventDefault();
+        return;
       } else if (e.key === "Enter") {
         const chosen = items[idx];
         if (!chosen) return;
@@ -28758,6 +29008,10 @@ function createListUI(title, items) {
       container.classList.add("disabled");
       const activeEl = ul.querySelector("li.active");
       if (activeEl) activeEl.classList.remove("active");
+      confirmDiv = document.createElement("div");
+      confirmDiv.className = "muted";
+      confirmDiv.innerHTML = `Canceled`;
+      output.appendChild(confirmDiv);
     },
     destroy: () => {
       container.remove();
@@ -28957,6 +29211,50 @@ register("search", async (argv = []) => {
   shell.setPrompt("search>");
   shell.enter(createListUI(`SEARCH \u2014 ${esc(q)}`, items));
 }, "Search entries by text");
+register("delete", async (argv = []) => {
+  const arg = String(argv[0] || "").trim();
+  const date = arg === "-t" || arg === "--today" ? todayISO() : arg;
+  if (!isISODate(date)) {
+    print('<div class="error">Usage: <span class="kbd">delete YYYY-MM-DD</span> or <span class="kbd">delete -t</span></div>');
+    return;
+  }
+  let row = null;
+  try {
+    row = await db.get(date);
+  } catch {
+  }
+  if (!row) {
+    print(`<div class="muted">No entry found for <span class="stamp">${esc(date)}</span>.</div>`);
+    return;
+  }
+  print(`<div class="warn">Delete <span class="stamp">${esc(date)}</span>? y/n</div>`);
+  const onKey = (e) => {
+    const k = e.key?.toLowerCase?.() || "";
+    if (k !== "y" && k !== "n") return;
+    e.preventDefault();
+    e.stopPropagation();
+    window.removeEventListener("keydown", onKey, true);
+    if (k === "n") {
+      print('<div class="muted">Cancelled.</div>');
+      return;
+    }
+    (async () => {
+      try {
+        const res = await db.delete(date);
+        const ok = typeof res === "object" ? res.deleted > 0 : !!res;
+        if (ok) {
+          print(`<div class="ok">Deleted <span class="stamp">${esc(date)}</span>.</div>`);
+        } else {
+          print(`<div class="error">Nothing deleted for <span class="stamp">${esc(date)}</span>.</div>`);
+        }
+      } catch (err) {
+        const msg = err?.message || String(err);
+        print(`<div class="error">Delete failed: ${esc(msg)}</div>`);
+      }
+    })();
+  };
+  window.addEventListener("keydown", onKey, { capture: true });
+}, "Delete an entry (YYYY-MM-DD or -t)");
 function printExportHelp() {
   print(`
     <div class="soft">export usage</div>

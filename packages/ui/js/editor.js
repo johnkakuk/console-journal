@@ -394,7 +394,10 @@ export function startEditor(shell, opts = {}) {
         '.cm-scroller': { fontFamily: 'inherit' },
         '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--editor-caret)' },
         '&.cm-editor.cm-focused': { outline: 'none' },
-        '.cm-activeLine': { backgroundColor: 'var(--editor-active-line-bg)' },
+        // Disable default paragraph-wide highlight; we’ll draw a single-row overlay instead
+        '.cm-activeLine': { backgroundColor: 'transparent' }, // current: single-row overlay handles highlight
+        // To restore paragraph-wide highlight instead, uncomment this and remove the overlay plugin in buildExtensions():
+        // '.cm-activeLine': { backgroundColor: 'var(--editor-active-line-bg)' },
         '.cm-selectionBackground, ::selection': { backgroundColor: 'var(--editor-selection-bg)' },
         '.cm-lineNumbers': { color: 'var(--editor-gutter-fg)' },
         '.cm-gutters': { backgroundColor: 'var(--editor-gutter-bg)', borderRight: '1px solid var(--editor-gutter-border)' },
@@ -476,6 +479,69 @@ export function startEditor(shell, opts = {}) {
                 scroller.scrollTop += delta;
             }
         });
+    });
+
+    // Single visual-row highlight using safe measurement (no layout reads during updates)
+    const activeRowPlugin = ViewPlugin.fromClass(class {
+        constructor(view) {
+            this.view = view;
+            this.dom = document.createElement('div');
+            this.dom.className = 'cm-activeRow';
+            this.dom.style.position = 'absolute';
+            this.dom.style.left = '0';
+            this.dom.style.right = '0';
+            this.dom.style.pointerEvents = 'none';
+            this.dom.style.zIndex = '1';
+            // Ensure the scrollDOM is relatively positioned so absolute works
+            const scroller = view.scrollDOM;
+            const cs = getComputedStyle(scroller);
+            if (cs.position === 'static') scroller.style.position = 'relative';
+            scroller.appendChild(this.dom);
+            this._scheduled = false;
+            this._top = 0;
+            this._height = 0;
+            this._visible = false;
+            this.schedule();
+        }
+        schedule() {
+            if (this._scheduled) return;
+            this._scheduled = true;
+            this.view.requestMeasure({
+                read: () => {
+                    const head = this.view.state.selection.main.head;
+                    const caret = this.view.coordsAtPos(head);
+                    if (!caret) {
+                        this._visible = false;
+                        return;
+                    }
+                    const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+                    this._top = caret.top - scrollerRect.top + this.view.scrollDOM.scrollTop;
+                    this._height = Math.max(1, caret.bottom - caret.top);
+                    this._visible = true;
+                },
+                write: () => {
+                    this._scheduled = false;
+                    if (!this.dom) return;
+                    if (!this._visible) {
+                        this.dom.style.display = 'none';
+                        return;
+                    }
+                    this.dom.style.display = 'block';
+                    this.dom.style.top = `${this._top}px`;
+                    this.dom.style.height = `${this._height}px`;
+                    this.dom.style.background = 'var(--editor-active-line-bg)';
+                }
+            });
+        }
+        update(update) {
+            if (update.selectionSet || update.viewportChanged || update.domChanged || update.scrollChanged) {
+                this.schedule();
+            }
+        }
+        destroy() {
+            if (this.dom && this.dom.parentNode) this.dom.parentNode.removeChild(this.dom);
+            this.dom = null;
+        }
     });
 
     const markDirtyListener = EditorView.updateListener.of((update) => {
@@ -567,7 +633,13 @@ export function startEditor(shell, opts = {}) {
             retroTheme,
             padTheme,
             drawSelection(),
-            highlightActiveLine(),
+            // === Active line highlight mode ============================================
+            // Current: use a single visual-row overlay (safe measured plugin).
+            // If you prefer the paragraph-wide highlight, comment out `activeRowPlugin`
+            // below and uncomment the `highlightActiveLine()` line here. Also restore the
+            // .cm-activeLine background in the theme above.
+            activeRowPlugin,
+            // highlightActiveLine(), // ← previous behavior (paragraph-wide highlight)
             snapOutOfView,
             markDirtyListener,
             history(),
@@ -626,7 +698,97 @@ export function startEditor(shell, opts = {}) {
         }
     }
 
+    // --- Unsaved-abandon modal -------------------------------------------------
+    function showConfirmModal(message, onYes, onNo) {
+        // If an existing modal is present, remove it first
+        const prev = document.getElementById('confirmModal');
+        if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
+
+        const wrap = document.createElement('div');
+        wrap.id = 'confirmModal';
+        wrap.className = 'cj-modal-backdrop';
+        wrap.innerHTML = `
+            <div class="cj-modal" role="dialog" aria-modal="true" aria-labelledby="cjModalTitle">
+                <div id="cjModalTitle" class="cj-modal-title">Confirm</div>
+                <div class="cj-modal-body">${shell.esc(message)}</div>
+                <div class="cj-modal-actions">
+                    <button class="yes" autofocus>Yes</button>
+                    <button class="no">No</button>
+                </div>
+                <div class="cj-modal-hint muted">y = yes · n = no</div>
+            </div>
+        `;
+        document.body.appendChild(wrap);
+
+        const btnYes = wrap.querySelector('button.yes');
+        const btnNo  = wrap.querySelector('button.no');
+
+        // Focus management
+        const buttons = [btnYes, btnNo];
+        let focusIdx = 0;
+        const setFocus = (i) => {
+            focusIdx = (i + buttons.length) % buttons.length;
+            const el = buttons[focusIdx];
+            if (el) {
+                try { el.focus({ preventScroll: true }); } catch { el.focus(); }
+            }
+        };
+        // Ensure initial focus is on Yes
+        setTimeout(() => setFocus(0), 0);
+
+        const cleanup = () => {
+            window.removeEventListener('keydown', onKey, true);
+            if (wrap && wrap.parentElement) wrap.parentElement.removeChild(wrap);
+        };
+        const accept = () => { cleanup(); try { onYes && onYes(); } catch {} };
+        const reject = () => { cleanup(); try { onNo && onNo(); } catch {} };
+
+        const onKey = (e) => {
+            const k = (e.key || '').toLowerCase();
+
+            // quick accepts/cancels
+            if (k === 'y') { e.preventDefault(); e.stopPropagation(); accept(); return; }
+            if (k === 'n' || k === 'escape') { e.preventDefault(); e.stopPropagation(); reject(); return; }
+
+            // navigation between Yes/No
+            if (k === 'tab') {
+                e.preventDefault();
+                e.stopPropagation();
+                setFocus(focusIdx + (e.shiftKey ? -1 : 1));
+                return;
+            }
+            if (k === 'arrowright' || k === 'arrowdown') {
+                e.preventDefault();
+                e.stopPropagation();
+                setFocus(focusIdx + 1);
+                return;
+            }
+            if (k === 'arrowleft' || k === 'arrowup') {
+                e.preventDefault();
+                e.stopPropagation();
+                setFocus(focusIdx - 1);
+                return;
+            }
+        };
+        window.addEventListener('keydown', onKey, true);
+
+        btnYes.addEventListener('click', accept);
+        btnNo.addEventListener('click', reject);
+    }
+
+    function requestExit() {
+        if (state.dirty || unsaved) {
+            showConfirmModal('Exit without saving?', () => performExit(), () => {/* cancelled */});
+            return;
+        }
+        performExit();
+    }
+
     function exit() {
+        requestExit();
+    }
+
+    function performExit() {
         // Cleanup listeners, restore prompt/title, and return to shell
         window.removeEventListener('keydown', onHotkey, true);
         if (titleEl) {

@@ -171,17 +171,35 @@ if (!db) {
                         req.onerror = () => reject(req.error);
                     });
                 });
+            },
+            async delete(date) {
+                return txRun('readwrite', store => {
+                    const req = store.delete(date);
+                    return new Promise((resolve, reject) => {
+                        req.onsuccess = () => resolve(true);
+                        req.onerror = () => reject(req.error);
+                    });
+                });
             }
         };
         window.db = db;
     } else {
-        // Electron: defer to preload-exposed db where present; keep a safe stub otherwise
+        // Electron: use preload IPC bridges via a generic invoke fallback
+        const invoke = (ch, ...args) =>
+            (window.electronAPI && typeof window.electronAPI.invoke === 'function')
+                ? window.electronAPI.invoke(ch, ...args)
+                : Promise.reject(new Error('electronAPI.invoke not available'));
+
         db = {
-            get: async () => null,
-            upsert: async (date, content) => ({ id: date, date, content }),
-            listRecent: async () => [],
-            listByYearMonth: async () => [],
-            search: async () => []
+            get:           (date)              => invoke('entry:getByDate', date),
+            upsert:        (date, content='') => invoke('entry:upsert', { date, content }),
+            listRecent:    (limit=15)          => invoke('entry:listRecent', limit),
+            listByYearMonth:(ym)               => invoke('entry:listByYearMonth', ym),
+            search:        (q)                 => invoke('entry:search', q),
+            delete:        async (date) => {
+                const res = await invoke('entry:deleteByDate', date);
+                return !!(res && (res.deleted > 0 || res.ok === true));
+            }
         };
     }
 }
@@ -207,13 +225,19 @@ const shell = {
     setPrompt(p) { state.prompt = p; },
     resetPrompt() { state.prompt = 'user:~$'; },
     enter(program) { activeProgram = program; },
-    exit() { 
+    exit() {
+        // Ask any active program to clean up first
         if (activeProgram && typeof activeProgram.destroy === 'function') {
-          try { activeProgram.destroy(); } catch {}
+            try { activeProgram.destroy(); } catch {}
         }
-        activeProgram = null; 
-        this.resetPrompt(); 
-        focus(); 
+        // Hard-remove any lingering list UI containers from the DOM
+        try {
+            const strayLists = document.querySelectorAll('.listui');
+            strayLists.forEach(n => n.remove());
+        } catch {}
+        activeProgram = null;
+        this.resetPrompt();
+        focus();
     },
     suspend() {
         if (activeProgram && typeof activeProgram.disable === 'function') {
@@ -396,7 +420,11 @@ const handleKeydown = async (e) => {
 
     // Navigation for active programs ("list", "search", etc.)
     if (activeProgram && typeof activeProgram.onKey === 'function') {
-        const navKeys = ['ArrowUp','ArrowDown','PageUp','PageDown','Home','End','Escape','Enter'];
+        // Keys that the active program (e.g., list UI) should receive directly
+        const navKeys = [
+            'ArrowUp','ArrowDown','PageUp','PageDown','Home','End','Escape','Enter',
+            'Delete','Backspace','y','Y','n','N'
+        ];
         if (navKeys.includes(e.key)) {
             e.preventDefault();
             e.stopPropagation();
@@ -484,9 +512,12 @@ function createListUI(title, items) {
     container.className = 'listui';
     const head = document.createElement('div');
     head.className = 'soft';
-    head.innerHTML = `${esc(title)} <span class="muted">(↑/↓ to navigate · Enter open · Esc cancel)</span>`;
+    head.innerHTML = `${esc(title)} <span class="muted">(↑/↓ to navigate · Enter open · Del delete · Esc cancel)</span>`;
     const ul = document.createElement('ul');
     ul.className = 'menu';
+    let confirmPending = false;
+    let pendingDate = null;
+    let confirmDiv = null;
 
     function render() {
         ul.innerHTML = '';
@@ -516,6 +547,67 @@ function createListUI(title, items) {
         onKey: (e) => {
             if (container.classList.contains('disabled')) return;
             if (!items.length) return;
+            // If a delete confirmation is pending, only accept y/n
+            if (confirmPending) {
+                const k = e.key?.toLowerCase?.() || '';
+                if (k === 'y' || k === 'n') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (k === 'n') {
+                        if (confirmDiv) {
+                            confirmDiv.classList.add('muted');
+                            confirmDiv.innerHTML = `Cancelled.`;
+                        }
+                        confirmPending = false;
+                        pendingDate = null;
+                        return;
+                    }
+                    (async () => {
+                        try {
+                            const res = await db.delete(pendingDate);
+                            const ok = typeof res === 'object' ? (res.deleted > 0) : !!res;
+                            if (confirmDiv) {
+                                confirmDiv.className = ok ? 'ok' : 'error';
+                                confirmDiv.innerHTML = ok
+                                    ? `Deleted <span class="stamp">${esc(pendingDate)}</span>.`
+                                    : `Nothing deleted for <span class="stamp">${esc(pendingDate)}</span>.`;
+                            }
+                            // Keep list navigable after delete; only exit if list becomes empty
+                            if (ok) {
+                                const idxToRemove = items.findIndex(it => String(it.date) === String(pendingDate));
+                                if (idxToRemove !== -1) {
+                                    items.splice(idxToRemove, 1);
+                                    idx = Math.min(idx, Math.max(0, items.length - 1));
+                                    if (items.length) {
+                                        render(); // re-render list, remain active (no suspend/exit)
+                                    } else {
+                                        print('<div class="muted">No entries left.</div>');
+                                        shell.exit();
+                                    }
+                                } // if nothing matched, keep list as-is and remain active
+                            } else {
+                                // Nothing deleted; keep list visible and active
+                                // (no suspend/exit)
+                            }
+                        } catch (err) {
+                            const msg = err?.message || String(err);
+                            if (confirmDiv) {
+                                confirmDiv.className = 'error';
+                                confirmDiv.innerHTML = `Delete failed: ${esc(msg)}`;
+                            }
+                        } finally {
+                            confirmPending = false;
+                            pendingDate = null;
+                        }
+                    })();
+                    return;
+                }
+                // If the user presses any other key, exit list view entirely
+                e.preventDefault();
+                e.stopPropagation();
+                shell.exit();
+                return;
+            }
             if (e.key === 'ArrowDown') { idx = Math.min(idx + 1, items.length - 1); render(); e.preventDefault(); }
             else if (e.key === 'ArrowUp') { idx = Math.max(idx - 1, 0); render(); e.preventDefault(); }
             else if (e.key === 'PageDown') { idx = Math.min(idx + 5, items.length - 1); render(); e.preventDefault(); }
@@ -523,6 +615,19 @@ function createListUI(title, items) {
             else if (e.key === 'Home') { idx = 0; render(); e.preventDefault(); }
             else if (e.key === 'End') { idx = items.length - 1; render(); e.preventDefault(); }
             else if (e.key === 'Escape') { shell.suspend(); e.preventDefault(); }
+            else if (e.key === 'Delete' || e.key === 'Backspace') {
+                const chosen = items[idx];
+                if (!chosen) { e.preventDefault(); return; }
+                confirmPending = true;
+                pendingDate = chosen.date;
+                confirmDiv = document.createElement('div');
+                confirmDiv.className = 'warn';
+                confirmDiv.innerHTML = `Delete <span class="stamp">${esc(pendingDate)}</span>? <span class="warn">y/n</span>`;
+                output.appendChild(confirmDiv);
+                scrollToBottom();
+                e.preventDefault();
+                return;
+            }
             else if (e.key === 'Enter') {
                 const chosen = items[idx];
                 if (!chosen) return;
@@ -544,8 +649,15 @@ function createListUI(title, items) {
             container.classList.add('disabled');
             const activeEl = ul.querySelector('li.active');
             if (activeEl) activeEl.classList.remove('active');
+            confirmDiv = document.createElement('div');
+            confirmDiv.className = 'muted';
+            confirmDiv.innerHTML = `Canceled`;
+            output.appendChild(confirmDiv);
+
+            // Delete list from screen. Comment out to leave and just grey it out
+            // shell.exit();
         },
-        destroy: () => { container.remove(); }
+        destroy: () => { container.remove() }
     };
 }
 
@@ -754,6 +866,59 @@ register('search', async (argv = []) => {
     shell.setPrompt('search>');
     shell.enter(createListUI(`SEARCH — ${esc(q)}`, items));
 }, 'Search entries by text');
+
+// --- Delete command ---
+// Usage: delete YYYY-MM-DD  |  delete -t
+register('delete', async (argv = []) => {
+    const arg = String(argv[0] || '').trim();
+    const date = (arg === '-t' || arg === '--today') ? todayISO() : arg;
+
+    if (!isISODate(date)) {
+        print('<div class="error">Usage: <span class="kbd">delete YYYY-MM-DD</span> or <span class="kbd">delete -t</span></div>');
+        return;
+    }
+
+    // Verify existence first
+    let row = null;
+    try { row = await db.get(date); } catch {}
+    if (!row) {
+        print(`<div class="muted">No entry found for <span class="stamp">${esc(date)}</span>.</div>`);
+        return;
+    }
+
+    print(`<div class="warn">Delete <span class="stamp">${esc(date)}</span>? y/n</div>`);
+
+    const onKey = (e) => {
+        const k = e.key?.toLowerCase?.() || '';
+        if (k !== 'y' && k !== 'n') return;
+        e.preventDefault();
+        e.stopPropagation();
+        window.removeEventListener('keydown', onKey, true);
+
+        if (k === 'n') {
+            print('<div class="muted">Cancelled.</div>');
+            return;
+        }
+
+        (async () => {
+            try {
+                const res = await db.delete(date);
+                const ok = typeof res === 'object' ? (res.deleted > 0) : !!res;
+                if (ok) {
+                    print(`<div class="ok">Deleted <span class="stamp">${esc(date)}</span>.</div>`);
+                } else {
+                    print(`<div class="error">Nothing deleted for <span class="stamp">${esc(date)}</span>.</div>`);
+                }
+            } catch (err) {
+                const msg = err?.message || String(err);
+                print(`<div class="error">Delete failed: ${esc(msg)}</div>`);
+            }
+        })();
+    };
+
+    // Capture just this one keystroke decisively
+    window.addEventListener('keydown', onKey, { capture: true });
+}, 'Delete an entry (YYYY-MM-DD or -t)');
 
 // --- Usage helper for export command ---
 function printExportHelp() {
