@@ -495,7 +495,7 @@ function createListUI(title, items) {
             if (i === idx) li.classList.add('active');
             const date = esc(it.date);
             const prev = esc(((it.preview || it.content || '').replace(/\n/g,' ').slice(0, 120)));
-            li.innerHTML = `<span class="stamp">${date}</span> — ${prev}`;
+            li.innerHTML = `<span class="stamp">${date} - </span>${prev}`;
             // Click-to-select
             li.addEventListener('click', () => { idx = i; render(); });
             ul.appendChild(li);

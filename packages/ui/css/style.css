@@ -244,7 +244,7 @@ body {
 .menu li .stamp {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   opacity: 0.6;
-  min-width: 7ch;          /* fits YYYY-MM-DD */
+  min-width: 13ch;          /* fits YYYY-MM-DD plus one space */
   color: var(--accent-aux);            /* retro green accent */
 }
 
