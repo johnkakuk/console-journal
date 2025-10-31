@@ -9,11 +9,13 @@ contextBridge.exposeInMainWorld('db', {
     search:   (q)             => ipcRenderer.invoke('entry:search', q),
     listRecent: (limit = 15)  => ipcRenderer.invoke('entry:listRecent', limit),
     deleteByDate: (date)      => ipcRenderer.invoke('entry:deleteByDate', date),
+    delete:   (date)          => ipcRenderer.invoke('entry:deleteByDate', date),
 });
 
 contextBridge.exposeInMainWorld('electronAPI', {
     quitApp: () => ipcRenderer.invoke('app:quit'),
     exportJournal: (args) => ipcRenderer.invoke('export-journal', args),
     getPath: (name) => ipcRenderer.invoke('get-path', name),
-    saveText: ({ content, outputPath }) => ipcRenderer.invoke('save-text', { content, outputPath })
+    saveText: ({ content, outputPath }) => ipcRenderer.invoke('save-text', { content, outputPath }),
+    invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
 });
