@@ -21,44 +21,28 @@ app.use((req, res, next) => {
     next();
 });
 
-function resolveChromeExecutable(puppeteer) {
-    // 1) Explicit override via env
-    if (process.env.PUPPETEER_EXECUTABLE_PATH) return process.env.PUPPETEER_EXECUTABLE_PATH;
-
-    // 2) Puppeteer-managed Chromium inside node_modules
+// Resolve Chromium bundled by puppeteer into node_modules (slug-safe)
+function resolveBundledChromium() {
     try {
-        if (typeof puppeteer.executablePath === 'function') {
-            const p = puppeteer.executablePath();
-            if (p && typeof p === 'string' && p.trim()) return p;
+        // If explicitly provided, honor it
+        if (process.env.PUPPETEER_EXECUTABLE_PATH) return process.env.PUPPETEER_EXECUTABLE_PATH;
+
+        // Project root: apps/web -> ../../
+        const root = path.resolve(__dirname, '../../');
+        const chromeBase = path.join(root, 'node_modules/puppeteer/.local-chromium/chrome');
+        if (!fs.existsSync(chromeBase)) return null;
+
+        // Find newest linux-* folder
+        const entries = fs.readdirSync(chromeBase)
+            .filter(d => d.startsWith('linux-'))
+            .sort()
+            .reverse();
+        for (const d of entries) {
+            const candidate = path.join(chromeBase, d, 'chrome-linux64', 'chrome');
+            if (fs.existsSync(candidate)) return candidate;
         }
     } catch (_) {}
-
-    // 3) Render cache (installed by `npx puppeteer browsers install chrome`)
-    try {
-        const cacheDir = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
-        const base = path.join(cacheDir, 'chrome');
-        if (fs.existsSync(base)) {
-            const entries = fs.readdirSync(base).filter(d => d.startsWith('linux-')).sort().reverse();
-            for (const d of entries) {
-                const candidate = path.join(base, d, 'chrome-linux64', 'chrome');
-                if (fs.existsSync(candidate)) return candidate;
-            }
-        }
-    } catch (_) {}
-
     return null;
-}
-
-function readPdfCss() {
-    const candidates = [
-        path.join(__dirname, '..', '..', 'packages', 'ui', 'css', 'pdf.css'),
-        path.join(process.cwd(), 'packages', 'ui', 'css', 'pdf.css'),
-        path.join(__dirname, 'packages', 'ui', 'css', 'pdf.css'),
-    ];
-    for (const p of candidates) {
-        try { if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8'); } catch (_) {}
-    }
-    return '';
 }
 
 // Heroku / proxies
@@ -73,11 +57,23 @@ app.post('/api/export-pdf', async (req, res) => {
         const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title ? String(title) : 'Console Journal Export'}</title>
 <style>${cssText}</style></head><body><article class="markdown-body">${bodyHtml}</article></body></html>`;
 
-        const execPath = resolveChromeExecutable(puppeteer);
-        console.log('[puppeteer] resolved executablePath:', execPath || '(none)');
+        const bundledExec = resolveBundledChromium();
+        const fallbackExec = (typeof puppeteer.executablePath === 'function') ? puppeteer.executablePath() : undefined;
+        const execPath = bundledExec || fallbackExec || undefined;
+        console.log('[puppeteer] bundledExec:', bundledExec || '(none)');
+        console.log('[puppeteer] fallback execPath():', fallbackExec || '(none)');
+
+        if (!execPath && process.env.NODE_ENV === 'production') {
+            const root = path.resolve(__dirname, '../../');
+            const chromeBase = path.join(root, 'node_modules/puppeteer/.local-chromium/chrome');
+            const haveBase = fs.existsSync(chromeBase);
+            console.error('[puppeteer] No executablePath resolved in production.', { haveBase, chromeBase });
+            return res.status(500).json({ error: 'Chromium not found in deployed slug. Expected under node_modules/puppeteer/.local-chromium.' });
+        }
+
         const browser = await puppeteer.launch({
             headless: true,
-            executablePath: execPath || undefined,
+            executablePath: execPath,
             args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
         try {
@@ -119,6 +115,18 @@ app.post('/api/export-pdf', async (req, res) => {
         res.status(500).json({ error: (err && err.stack) ? err.stack : String(err && err.message ? err.message : err) });
     }
 });
+
+function readPdfCss() {
+    const candidates = [
+        path.join(__dirname, '..', '..', 'packages', 'ui', 'css', 'pdf.css'),
+        path.join(process.cwd(), 'packages', 'ui', 'css', 'pdf.css'),
+        path.join(__dirname, 'packages', 'ui', 'css', 'pdf.css'),
+    ];
+    for (const p of candidates) {
+        try { if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8'); } catch (_) {}
+    }
+    return '';
+}
 
 // Static UI
 app.use(express.static(UI_ROOT, { maxAge: '1y', immutable: true }));
