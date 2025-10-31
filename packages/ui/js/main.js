@@ -1,13 +1,6 @@
 /*
- *  JOURNAL:
- *  - Create view command
- *      - Create an arrow-key-navigable list of latest 15 entries
- *  - Add args to view command
- *      - MM to view all entries from a given month (most recent year)
- *      - YYYY-MM to view all entries from a given month and year
- *  - Create search command (args required)
- *      - search "search content"
- *      - Allow users to search for entries containing the search parameter
+ * TODO:
+ * - Add "quit" functionality to web app (have it close the tab)
  * 
 /* ==== main.js — Shell Router & UI ================================================== */
 import { startEditor } from './editor.js';
@@ -122,7 +115,13 @@ if (!db) {
 
         db = {
             async get(date) {
-                return txRun('readonly', store => store.get(date));
+                return txRun('readonly', store => {
+                    const req = store.get(date);
+                    return new Promise((resolve, reject) => {
+                        req.onsuccess = () => resolve(req.result || null);
+                        req.onerror = () => reject(req.error);
+                    });
+                });
             },
             async upsert(date, content) {
                 const now = new Date().toISOString();
@@ -649,7 +648,37 @@ function printSearchHelp() {
 
 register('quit', async () => {
     print('<div class="muted">Quitting...</div>');
-    await window.electronAPI.quitApp();
+    try {
+        // Electron desktop
+        if (window.electronAPI && typeof window.electronAPI.quitApp === 'function') {
+            await window.electronAPI.quitApp();
+            return;
+        }
+
+        // Web/PWA: attempt to close the tab/window
+        // Note: browsers often block closing non‑script‑opened windows; provide best‑effort + fallback.
+        const attemptClose = () => {
+            try { window.close(); } catch (_) {}
+        };
+
+        attemptClose();
+
+        // If the window wasn't script‑opened, some browsers ignore window.close().
+        // Try a self‑open shim, then close again.
+        setTimeout(() => {
+            try { window.open('', '_self'); } catch (_) {}
+            attemptClose();
+        }, 25);
+
+        // Final fallback: navigate to about:blank so the user sees an empty page if close is blocked.
+        setTimeout(() => {
+            try { if (document.visibilityState !== 'hidden') location.replace('about:blank'); } catch (_) {}
+            print('<div class="muted">If this tab didn\'t close, use ⌘W / Ctrl+W. Browsers may block programmatic tab close.</div>');
+        }, 75);
+    } catch (err) {
+        const msg = err?.message || String(err);
+        print(`<div class="error">Quit failed: ${esc(msg)}</div>`);
+    }
 }, 'Close the application');
 
 // App starters
@@ -732,6 +761,8 @@ function printExportHelp() {
     <div class="soft">export usage</div>
     <div class="muted help">
         <div><span class="kbd">export</span> — export the last 7 entries as <em>.txt</em> to Downloads</div>
+        <div><span class="kbd">export -t</span> — export <em>today’s</em> entry</div>
+        <div><span class="kbd">export -y</span> — export <em>yesterday’s</em> entry</div>
         <div><span class="kbd">export -a</span> — export the entire journal</div>
         <div><span class="kbd">export YYYY</span> — export that year</div>
         <div><span class="kbd">export YYYY-MM</span> — export that month</div>
@@ -779,14 +810,14 @@ async function gatherEntriesForExport(selector) {
 }
 
 function buildMarkdownExport(rows) {
-    if (!rows || !rows.length) return '# Console Journal Export\n\n_No entries._\n';
+    if (!rows || !rows.length) return 'Console Journal Export\n\n_No entries._\n';
     // Ensure chronological order by date ascending
     const sorted = rows.slice().sort((a,b) => String(a.date).localeCompare(String(b.date)));
-    const parts = ['# Console Journal Export\n'];
+    const parts = ['Console Journal Export\n'];
     for (const r of sorted) {
         const date = String(r.date || '').trim();
         const content = (r.content ?? '').replace(/\r\n/g, '\n');
-        parts.push(`\n## ${date}\n\n${content}\n\n---\n`);
+        parts.push(`\n${date}\n\n${content}\n\n---\n`);
     }
     return parts.join('');
 }
@@ -831,6 +862,21 @@ function parseExportArgs(argv) {
     const allIdx = args.indexOf('-a');
     if (allIdx !== -1) { opts.target = { type: 'all' }; args.splice(allIdx, 1); }
 
+    // detect -t (today) and -y (yesterday)
+    const tIdx = args.indexOf('-t');
+    const yIdx = args.indexOf('-y');
+    if (tIdx !== -1) {
+        const ds = todayISO();
+        const [y, m, d] = ds.split('-').map(n => Number(n));
+        opts.target = { type: 'day', y, m, d };
+        args.splice(tIdx, 1);
+    } else if (yIdx !== -1) {
+        const ds = shiftISO(-1);
+        const [y, m, d] = ds.split('-').map(n => Number(n));
+        opts.target = { type: 'day', y, m, d };
+        args.splice(yIdx, 1);
+    }
+
     if (args.length) {
         const a0 = args[0].trim();
         if (/^\d{4}$/.test(a0)) {
@@ -841,7 +887,7 @@ function parseExportArgs(argv) {
         } else if (/^\d{4}-\d{2}-\d{2}$/.test(a0)) {
             const [y, m, d] = a0.split('-').map(n => Number(n));
             opts.target = { type: 'day', y, m, d };
-        } else {
+        } else if (a0.length) {
             opts.invalid = a0;
         }
     }
