@@ -19,8 +19,7 @@
         "dev": "npm-run-all --parallel bundle:watch start:web",
         "build:web": "npm run bundle",
         "build:desktop": "electron-builder",
-        "start": "node apps/web/server.js",
-        "postinstall": "npx puppeteer browsers install chrome"
+        "start": "node apps/web/server.js"
     },
     "dependencies": {
         "@codemirror/autocomplete": "^6",
