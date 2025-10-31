@@ -21,6 +21,34 @@ app.use((req, res, next) => {
     next();
 });
 
+function resolveChromeExecutable(puppeteer) {
+    // 1) Explicit override via env
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) return process.env.PUPPETEER_EXECUTABLE_PATH;
+
+    // 2) Puppeteer-managed Chromium inside node_modules
+    try {
+        if (typeof puppeteer.executablePath === 'function') {
+            const p = puppeteer.executablePath();
+            if (p && typeof p === 'string' && p.trim()) return p;
+        }
+    } catch (_) {}
+
+    // 3) Render cache (installed by `npx puppeteer browsers install chrome`)
+    try {
+        const cacheDir = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
+        const base = path.join(cacheDir, 'chrome');
+        if (fs.existsSync(base)) {
+            const entries = fs.readdirSync(base).filter(d => d.startsWith('linux-')).sort().reverse();
+            for (const d of entries) {
+                const candidate = path.join(base, d, 'chrome-linux64', 'chrome');
+                if (fs.existsSync(candidate)) return candidate;
+            }
+        }
+    } catch (_) {}
+
+    return null;
+}
+
 function readPdfCss() {
     const candidates = [
         path.join(__dirname, '..', '..', 'packages', 'ui', 'css', 'pdf.css'),
@@ -45,9 +73,11 @@ app.post('/api/export-pdf', async (req, res) => {
         const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title ? String(title) : 'Console Journal Export'}</title>
 <style>${cssText}</style></head><body><article class="markdown-body">${bodyHtml}</article></body></html>`;
 
+        const execPath = resolveChromeExecutable(puppeteer);
+        console.log('[puppeteer] resolved executablePath:', execPath || '(none)');
         const browser = await puppeteer.launch({
             headless: true,
-            executablePath: puppeteer.executablePath(),
+            executablePath: execPath || undefined,
             args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
         try {
