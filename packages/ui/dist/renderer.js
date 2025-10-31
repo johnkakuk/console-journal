@@ -25836,6 +25836,7 @@ var todoPlugin = [
   })
 ];
 function startEditor(shell2, opts = {}) {
+  const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent || "");
   const state2 = {
     title: opts.title || (/* @__PURE__ */ new Date()).toLocaleString(),
     id: opts.id ?? null,
@@ -25844,6 +25845,10 @@ function startEditor(shell2, opts = {}) {
     buffer: (typeof opts.initialContent === "string" ? opts.initialContent : "").split("\n"),
     dirty: false
   };
+  if (!opts.initialContent || typeof opts.initialContent === "string" && opts.initialContent.trim() === "") {
+    const banner2 = `# ${fmtBannerDate(state2.date)}`;
+    state2.buffer = [banner2, ""];
+  }
   let cmView = null;
   let domSnapshot = null;
   const outputEl = document.getElementById("output");
@@ -25852,6 +25857,7 @@ function startEditor(shell2, opts = {}) {
   const screenEl = document.getElementById("screen");
   const titleEl = document.querySelector(".title");
   const originalTitle = titleEl ? titleEl.textContent : null;
+  const originalTitleDisplay = titleEl ? titleEl.style.display : null;
   function mountEditorDom() {
     domSnapshot = {
       outputHTML: outputEl ? outputEl.innerHTML : "",
@@ -25876,7 +25882,9 @@ function startEditor(shell2, opts = {}) {
     header.textContent = `JOURNAL - ${fmtBannerDate(state2.date)}`;
     const help = document.createElement("div");
     help.className = "writer-help muted";
-    help.textContent = "CMD + S to save, CTRL + X to exit";
+    const saveCombo = isMac ? "CMD + S" : "CTRL + S";
+    const exitCombo = isMac ? "CTRL + X" : "CTRL + Q";
+    help.textContent = `${saveCombo} to save, ${exitCombo} to exit`;
     const pane = document.createElement("div");
     pane.id = "writerPane";
     pane.style.position = "relative";
@@ -25886,8 +25894,19 @@ function startEditor(shell2, opts = {}) {
     status.id = "writerStatus";
     status.className = "writer-status muted";
     status.textContent = "";
-    root.appendChild(header);
-    root.appendChild(help);
+    const titlebar = document.querySelector(".titlebar");
+    const bars = document.createElement("div");
+    bars.id = "writerBars";
+    bars.style.display = "flex";
+    bars.style.flexDirection = "column";
+    bars.style.gap = "4px";
+    bars.appendChild(header);
+    bars.appendChild(help);
+    if (titlebar) {
+      titlebar.appendChild(bars);
+    } else {
+      if (screenEl) screenEl.prepend(bars);
+    }
     root.appendChild(pane);
     root.appendChild(status);
     if (outputEl && outputEl.parentElement) {
@@ -25924,6 +25943,8 @@ function startEditor(shell2, opts = {}) {
     if (root && root.parentElement) {
       root.parentElement.removeChild(root);
     }
+    const bars = document.getElementById("writerBars");
+    if (bars && bars.parentElement) bars.parentElement.removeChild(bars);
     if (outputEl) outputEl.innerHTML = domSnapshot ? domSnapshot.outputHTML : "";
     if (inputWrapEl) inputWrapEl.style.display = domSnapshot ? domSnapshot.inputDisplay : "";
     if (caretEl) caretEl.style.display = domSnapshot ? domSnapshot.caretDisplay : "";
@@ -26121,7 +26142,7 @@ function startEditor(shell2, opts = {}) {
         save();
         return true;
       } },
-      { key: "Ctrl-x", preventDefault: true, run: () => {
+      { key: isMac ? "Ctrl-x" : "Ctrl-q", preventDefault: true, run: () => {
         exit();
         return true;
       } }
@@ -26155,6 +26176,20 @@ function startEditor(shell2, opts = {}) {
       EditorView.lineWrapping
     ];
   }
+  function flashSaveBar() {
+    try {
+      const prev = document.getElementById("saveFlash");
+      if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
+      const bar = document.createElement("div");
+      bar.id = "saveFlash";
+      bar.className = "save-flash";
+      (document.body || document.documentElement).appendChild(bar);
+      bar.addEventListener("animationend", () => {
+        if (bar && bar.parentElement) bar.parentElement.removeChild(bar);
+      }, { once: true });
+    } catch (_) {
+    }
+  }
   function save() {
     if (cmView) {
       const text = cmView.state.doc.toString();
@@ -26165,6 +26200,7 @@ function startEditor(shell2, opts = {}) {
       }
     }
     clearUnsaved();
+    flashSaveBar();
     state2.dirty = false;
     const status = document.getElementById("writerStatus");
     if (status) {
@@ -26175,7 +26211,10 @@ function startEditor(shell2, opts = {}) {
   }
   function exit() {
     window.removeEventListener("keydown", onHotkey, true);
-    if (titleEl && originalTitle != null) titleEl.textContent = originalTitle;
+    if (titleEl) {
+      if (originalTitle != null) titleEl.textContent = originalTitle;
+      titleEl.style.display = originalTitleDisplay ?? "";
+    }
     if (cmView) {
       const text = cmView.state.doc.toString();
       state2.buffer = text.split("\n");
@@ -26185,22 +26224,24 @@ function startEditor(shell2, opts = {}) {
     ok("Exited writer");
   }
   function onHotkey(e) {
-    if (e.metaKey && (e.key === "s" || e.key === "S")) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      e.stopPropagation();
-      save();
-      return;
-    }
-    if (e.ctrlKey && (e.key === "x" || e.key === "X")) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      e.stopPropagation();
-      exit();
-      return;
+    {
+      if ((isMac && e.metaKey || !isMac && e.ctrlKey) && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        e.stopPropagation();
+        save();
+        return;
+      }
+      if (e.ctrlKey && (isMac && (e.key === "x" || e.key === "X") || !isMac && (e.key === "q" || e.key === "Q"))) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        e.stopPropagation();
+        exit();
+        return;
+      }
     }
   }
-  if (titleEl) titleEl.textContent = "EDITOR";
+  if (titleEl) titleEl.style.display = "none";
   shell2.setPrompt("journal>");
   mountEditorDom();
   const paneEl = document.getElementById("writerPane");
@@ -28329,7 +28370,13 @@ if (!db) {
     };
     db = {
       async get(date) {
-        return txRun("readonly", (store) => store.get(date));
+        return txRun("readonly", (store) => {
+          const req = store.get(date);
+          return new Promise((resolve, reject) => {
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => reject(req.error);
+          });
+        });
       },
       async upsert(date, content2) {
         const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -28794,7 +28841,36 @@ function printSearchHelp() {
 }
 register("quit", async () => {
   print('<div class="muted">Quitting...</div>');
-  await window.electronAPI.quitApp();
+  try {
+    if (window.electronAPI && typeof window.electronAPI.quitApp === "function") {
+      await window.electronAPI.quitApp();
+      return;
+    }
+    const attemptClose = () => {
+      try {
+        window.close();
+      } catch (_) {
+      }
+    };
+    attemptClose();
+    setTimeout(() => {
+      try {
+        window.open("", "_self");
+      } catch (_) {
+      }
+      attemptClose();
+    }, 25);
+    setTimeout(() => {
+      try {
+        if (document.visibilityState !== "hidden") location.replace("about:blank");
+      } catch (_) {
+      }
+      print(`<div class="muted">If this tab didn't close, use \u2318W / Ctrl+W. Browsers may block programmatic tab close.</div>`);
+    }, 75);
+  } catch (err) {
+    const msg = err?.message || String(err);
+    print(`<div class="error">Quit failed: ${esc(msg)}</div>`);
+  }
 }, "Close the application");
 register("journal", async (argv = []) => {
   let date;
@@ -28886,6 +28962,8 @@ function printExportHelp() {
     <div class="soft">export usage</div>
     <div class="muted help">
         <div><span class="kbd">export</span> \u2014 export the last 7 entries as <em>.txt</em> to Downloads</div>
+        <div><span class="kbd">export -t</span> \u2014 export <em>today\u2019s</em> entry</div>
+        <div><span class="kbd">export -y</span> \u2014 export <em>yesterday\u2019s</em> entry</div>
         <div><span class="kbd">export -a</span> \u2014 export the entire journal</div>
         <div><span class="kbd">export YYYY</span> \u2014 export that year</div>
         <div><span class="kbd">export YYYY-MM</span> \u2014 export that month</div>
@@ -28923,14 +29001,14 @@ async function gatherEntriesForExport(selector) {
   return Array.isArray(rows) ? rows.slice().reverse() : [];
 }
 function buildMarkdownExport(rows) {
-  if (!rows || !rows.length) return "# Console Journal Export\n\n_No entries._\n";
+  if (!rows || !rows.length) return "Console Journal Export\n\n_No entries._\n";
   const sorted = rows.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  const parts = ["# Console Journal Export\n"];
+  const parts = ["Console Journal Export\n"];
   for (const r of sorted) {
     const date = String(r.date || "").trim();
     const content2 = (r.content ?? "").replace(/\r\n/g, "\n");
     parts.push(`
-## ${date}
+${date}
 
 ${content2}
 
@@ -28975,6 +29053,19 @@ function parseExportArgs(argv) {
     opts.target = { type: "all" };
     args.splice(allIdx, 1);
   }
+  const tIdx = args.indexOf("-t");
+  const yIdx = args.indexOf("-y");
+  if (tIdx !== -1) {
+    const ds = todayISO();
+    const [y, m, d] = ds.split("-").map((n) => Number(n));
+    opts.target = { type: "day", y, m, d };
+    args.splice(tIdx, 1);
+  } else if (yIdx !== -1) {
+    const ds = shiftISO(-1);
+    const [y, m, d] = ds.split("-").map((n) => Number(n));
+    opts.target = { type: "day", y, m, d };
+    args.splice(yIdx, 1);
+  }
   if (args.length) {
     const a0 = args[0].trim();
     if (/^\d{4}$/.test(a0)) {
@@ -28985,7 +29076,7 @@ function parseExportArgs(argv) {
     } else if (/^\d{4}-\d{2}-\d{2}$/.test(a0)) {
       const [y, m, d] = a0.split("-").map((n) => Number(n));
       opts.target = { type: "day", y, m, d };
-    } else {
+    } else if (a0.length) {
       opts.invalid = a0;
     }
   }

@@ -204,6 +204,7 @@ const todoPlugin = [
 ];
 
 export function startEditor(shell, opts = {}) {
+    const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent || '');
     // --- Editor-local state ---------------------------------------------------
     const state = {
         title: opts.title || new Date().toLocaleString(),
@@ -212,6 +213,12 @@ export function startEditor(shell, opts = {}) {
         buffer: (typeof opts.initialContent === 'string' ? opts.initialContent : '').split('\n'),
         dirty: false,
     };
+
+    // If this is a brand-new entry (no existing content), seed first line with the formatted date
+    if (!opts.initialContent || (typeof opts.initialContent === 'string' && opts.initialContent.trim() === '')) {
+        const banner = `# ${fmtBannerDate(state.date)}`;
+        state.buffer = [banner, ''];
+    }
 
     // CodeMirror editor view
     let cmView = null;
@@ -224,6 +231,7 @@ export function startEditor(shell, opts = {}) {
     const screenEl = document.getElementById('screen');
     const titleEl = document.querySelector('.title');
     const originalTitle = titleEl ? titleEl.textContent : null;
+    const originalTitleDisplay = titleEl ? titleEl.style.display : null;
 
     // Save current console UI and mount writer UI
     function mountEditorDom() {
@@ -259,7 +267,9 @@ export function startEditor(shell, opts = {}) {
         // Help line
         const help = document.createElement('div');
         help.className = 'writer-help muted';
-        help.textContent = 'CMD + S to save, CTRL + X to exit';
+        const saveCombo = isMac ? 'CMD + S' : 'CTRL + S';
+        const exitCombo = isMac ? 'CTRL + X' : 'CTRL + Q';
+        help.textContent = `${saveCombo} to save, ${exitCombo} to exit`;
 
         // Editor pane wrapper (where CodeMirror will mount)
         const pane = document.createElement('div');
@@ -274,8 +284,22 @@ export function startEditor(shell, opts = {}) {
         status.className = 'writer-status muted';
         status.textContent = '';
 
-        root.appendChild(header);
-        root.appendChild(help);
+        // Mount header/help under the .titlebar (as child)
+        const titlebar = document.querySelector('.titlebar');
+        const bars = document.createElement('div');
+        bars.id = 'writerBars';
+        bars.style.display = 'flex';
+        bars.style.flexDirection = 'column';
+        bars.style.gap = '4px';
+        bars.appendChild(header);
+        bars.appendChild(help);
+        if (titlebar) {
+            titlebar.appendChild(bars);
+        } else {
+            // Fallback if titlebar isn’t present
+            if (screenEl) screenEl.prepend(bars);
+        }
+
         root.appendChild(pane);
         root.appendChild(status);
 
@@ -322,6 +346,8 @@ export function startEditor(shell, opts = {}) {
         if (root && root.parentElement) {
             root.parentElement.removeChild(root);
         }
+        const bars = document.getElementById('writerBars');
+        if (bars && bars.parentElement) bars.parentElement.removeChild(bars);
         if (outputEl) outputEl.innerHTML = domSnapshot ? domSnapshot.outputHTML : '';
         if (inputWrapEl) inputWrapEl.style.display = domSnapshot ? domSnapshot.inputDisplay : '';
         if (caretEl) caretEl.style.display = domSnapshot ? domSnapshot.caretDisplay : '';
@@ -531,7 +557,7 @@ export function startEditor(shell, opts = {}) {
     function buildExtensions() {
         const saveExitKeymap = keymap.of([
             { key: 'Mod-s', preventDefault: true, run: () => { save(); return true; } },
-            { key: 'Ctrl-x', preventDefault: true, run: () => { exit(); return true; } },
+            { key: isMac ? 'Ctrl-x' : 'Ctrl-q', preventDefault: true, run: () => { exit(); return true; } },
         ]);
 
         // Add some bottom padding to simulate scrollPastEnd effect
@@ -566,6 +592,21 @@ export function startEditor(shell, opts = {}) {
         ];
     }
 
+    // Visual feedback: quick save sweep bar along the bottom
+    function flashSaveBar() {
+        try {
+            const prev = document.getElementById('saveFlash');
+            if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
+            const bar = document.createElement('div');
+            bar.id = 'saveFlash';
+            bar.className = 'save-flash';
+            (document.body || document.documentElement).appendChild(bar);
+            bar.addEventListener('animationend', () => {
+                if (bar && bar.parentElement) bar.parentElement.removeChild(bar);
+            }, { once: true });
+        } catch (_) {}
+    }
+
     function save() {
         if (cmView) {
             const text = cmView.state.doc.toString();
@@ -574,6 +615,7 @@ export function startEditor(shell, opts = {}) {
             try { window.db && typeof window.db.upsert === 'function' && window.db.upsert(state.date, text); } catch {}
         }
         clearUnsaved();
+        flashSaveBar();
         state.dirty = false;
 
         const status = document.getElementById('writerStatus');
@@ -587,7 +629,10 @@ export function startEditor(shell, opts = {}) {
     function exit() {
         // Cleanup listeners, restore prompt/title, and return to shell
         window.removeEventListener('keydown', onHotkey, true);
-        if (titleEl && originalTitle != null) titleEl.textContent = originalTitle;
+        if (titleEl) {
+            if (originalTitle != null) titleEl.textContent = originalTitle;
+            titleEl.style.display = originalTitleDisplay ?? '';
+        }
 
         // sync buffer from CodeMirror one last time (no confirmation)
         if (cmView) {
@@ -604,27 +649,29 @@ export function startEditor(shell, opts = {}) {
 
     // --- Hotkeys --------------------------------------------------------------
     function onHotkey(e) {
-        // Meta+S (⌘S on macOS)
-        if (e.metaKey && (e.key === 's' || e.key === 'S')) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            e.stopPropagation();
-            save();
-            return;
-        }
-        // Ctrl+X
-        if (e.ctrlKey && (e.key === 'x' || e.key === 'X')) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            e.stopPropagation();
-            exit();
-            return;
+        {
+            // Save: Cmd+S (mac) or Ctrl+S (win/linux)
+            if ((isMac && e.metaKey || (!isMac && e.ctrlKey)) && (e.key === 's' || e.key === 'S')) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                e.stopPropagation();
+                save();
+                return;
+            }
+            // Exit: Ctrl+X (mac) or Ctrl+Q (win/linux)
+            if (e.ctrlKey && ((isMac && (e.key === 'x' || e.key === 'X')) || (!isMac && (e.key === 'q' || e.key === 'Q')))) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                e.stopPropagation();
+                exit();
+                return;
+            }
         }
     }
 
     // --- Mount ---------------------------------------------------------------
-    // Swap the titlebar text
-    if (titleEl) titleEl.textContent = 'EDITOR';
+    // Hide the title while the editor is active (superfluous during writing)
+    if (titleEl) titleEl.style.display = 'none';
     // Prompt change for editor mode
     shell.setPrompt('journal>');
     // Replace the console output with a full-screen editor surface
