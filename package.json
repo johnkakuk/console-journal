@@ -19,7 +19,6 @@
         "dev": "npm-run-all --parallel bundle:watch start:web",
         "build:web": "npm run bundle",
         "build:desktop": "electron-builder",
-        "postinstall": "npx puppeteer browsers install chrome --cache-dir=$PUPPETEER_CACHE_DIR || npx puppeteer browsers install chrome",
         "start": "node apps/web/server.js"
     },
     "dependencies": {
