@@ -27,7 +27,8 @@ Type, reflect, and organize your thoughts in a glowing green terminal that feels
 	- Unsaved change indicator (\* in banner)
 	- Built-in search (CMD+F, Enter/Shift+Enter to navigate)
 - Entry Management
-	- view → browse latest 15 entries with arrow-key navigation
+	- view → browse latest 15 entries with arrow-key navigation, open/delete options
+	- delete YYYY-MM-DD, -t → deletes specific entries
 	- search "term" → find entries by keyword
 	- Smooth keyboard-driven navigation between results
 	- Non-interactive frozen views remain visible in the console
@@ -47,6 +48,8 @@ Type, reflect, and organize your thoughts in a glowing green terminal that feels
 		- ... -pdf → export as .pdf instead of .txt
 		- Theme can be edited in css/pdf.css
 - Theme can be edited in css/theme.css
+- Browser-based web app
+	- Saves to local storage
 
 ---- 
 
@@ -56,8 +59,6 @@ Type, reflect, and organize your thoughts in a glowing green terminal that feels
 	- Chronological indexing for journal entries (YYYY/MM/entry.md)
 - Theme Engine
 	- Switch between retro CRT themes and modern minimal aesthetics.
-- Browser-based web app
-	- Saves to local storage
 - Windows/Linux ports
 
 ---- 
