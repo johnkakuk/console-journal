@@ -85,6 +85,7 @@ function initDB() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
             content TEXT NOT NULL,
+            schedule TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
@@ -101,6 +102,11 @@ function initDB() {
         --     INSERT INTO entries_fts(entries_fts, rowid, content) VALUES('delete', old.id, old.content);
         -- END;
     `);
+
+    const templateColumns = db.prepare(`PRAGMA table_info(templates)`).all();
+    if (!templateColumns.some(col => col.name === 'schedule')) {
+        db.exec(`ALTER TABLE templates ADD COLUMN schedule TEXT`);
+    }
 
     // Prepared statements
     db._upsertEntry = db.prepare(`
@@ -138,12 +144,13 @@ function initDB() {
         ORDER BY date ASC
     `);
     db._upsertTemplate = db.prepare(`
-        INSERT INTO templates (name, content)
-        VALUES (@name, @content)
+        INSERT INTO templates (name, content, schedule)
+        VALUES (@name, @content, @schedule)
         ON CONFLICT(name) DO UPDATE SET
             content = excluded.content,
+            schedule = excluded.schedule,
             updated_at = datetime('now')
-        RETURNING id, name, content, created_at, updated_at
+        RETURNING id, name, content, schedule, created_at, updated_at
     `);
     db._getTemplateByName = db.prepare(`SELECT * FROM templates WHERE name = ?`);
     db._deleteTemplate = db.prepare(`DELETE FROM templates WHERE name = ?`);
@@ -151,6 +158,7 @@ function initDB() {
         SELECT name,
                substr(content, 1, 200) AS preview,
                content,
+               schedule,
                created_at,
                updated_at
         FROM templates
@@ -247,10 +255,35 @@ ipcMain.handle('entry:listByYearMonth', (evt, ym) => {
     return db._listByMonth.all(ym);
 });
 
-ipcMain.handle('template:upsert', (_evt, { name, content }) => {
+ipcMain.handle('template:upsert', (_evt, { name, content, schedule }) => {
     if (typeof name !== 'string' || !name.trim()) throw new Error('Bad template name');
     if (typeof content !== 'string') throw new Error('Bad template content');
-    return db._upsertTemplate.get({ name: name.trim(), content });
+
+    let schedulePayload = null;
+    if (schedule !== null && schedule !== undefined) {
+        if (typeof schedule === 'string') {
+            try {
+                schedulePayload = JSON.parse(schedule);
+            } catch (err) {
+                throw new Error('Bad template schedule');
+            }
+        } else if (typeof schedule === 'object' && !Array.isArray(schedule)) {
+            schedulePayload = schedule;
+        } else {
+            throw new Error('Bad template schedule');
+        }
+    }
+
+    let scheduleJson = null;
+    if (schedulePayload) {
+        try {
+            scheduleJson = JSON.stringify(schedulePayload);
+        } catch (err) {
+            throw new Error('Unable to serialize schedule');
+        }
+    }
+
+    return db._upsertTemplate.get({ name: name.trim(), content, schedule: scheduleJson });
 });
 
 ipcMain.handle('template:getByName', (_evt, name) => {

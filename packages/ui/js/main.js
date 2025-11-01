@@ -7,6 +7,7 @@ import { startEditor } from './editor.js';
 import { startThemeApp } from './themeApp.js';
 import { ensureActiveTheme, applyTheme, getDefaultTheme, saveActiveTheme } from './theme.js';
 import { marked } from 'marked';
+import { parseTemplateSchedule, normalizeTemplateSchedule, matchTemplateSchedule, cloneTemplateSchedule, TEMPLATE_SCHEDULE_WEIGHT } from './schedule.js';
 
 // === date helpers ===
 function todayISO(tz = Intl.DateTimeFormat().resolvedOptions().timeZone) {
@@ -71,6 +72,35 @@ function resolveMonthDayPast(mmdd, tz = Intl.DateTimeFormat().resolvedOptions().
     }
     // Fallback: return today if somehow invalid repeatedly (shouldn't happen)
     return today;
+}
+
+function pickTemplateForDate(templates, dateStr) {
+    if (!Array.isArray(templates) || !templates.length) return null;
+    const matches = [];
+    for (const tpl of templates) {
+        const schedule = parseTemplateSchedule(tpl.schedule);
+        if (!schedule) continue;
+        const result = matchTemplateSchedule(schedule, dateStr);
+        if (!result) continue;
+        const weight = TEMPLATE_SCHEDULE_WEIGHT[result.level] ?? -1;
+        matches.push({
+            template: tpl,
+            schedule: result.schedule || schedule,
+            level: result.level,
+            weight
+        });
+    }
+    if (!matches.length) return null;
+    matches.sort((a, b) => {
+        if (a.weight !== b.weight) return b.weight - a.weight;
+        const updatedA = a.template.updated_at || a.template.updatedAt || '';
+        const updatedB = b.template.updated_at || b.template.updatedAt || '';
+        if (updatedA !== updatedB) return updatedA > updatedB ? -1 : 1;
+        const nameA = (a.template.name || '').toLowerCase();
+        const nameB = (b.template.name || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+    });
+    return matches[0];
 }
 
 /* -----------------------------------------------------------------------------
@@ -193,10 +223,13 @@ if (!db) {
                     });
                 });
             },
-            async saveTemplate(name, content = '') {
+            async saveTemplate(name, content = '', schedule = null) {
                 const trimmed = String(name ?? '').trim();
                 if (!trimmed) throw new Error('Template name required');
                 const now = new Date().toISOString();
+                const normalizedSchedule = schedule
+                    ? normalizeTemplateSchedule(schedule, { defaultAnchorDate: schedule.anchorDate })
+                    : null;
                 return txRunStore(TEMPLATE_STORE, 'readwrite', store => {
                     return new Promise((resolve, reject) => {
                         const getReq = store.get(trimmed);
@@ -206,7 +239,8 @@ if (!db) {
                                 name: trimmed,
                                 content: String(content ?? ''),
                                 created_at: existing?.created_at ?? now,
-                                updated_at: now
+                                updated_at: now,
+                                schedule: normalizedSchedule ? cloneTemplateSchedule(normalizedSchedule) : null
                             };
                             const putReq = store.put(row);
                             putReq.onsuccess = () => resolve(row);
@@ -222,7 +256,12 @@ if (!db) {
                 return txRunStore(TEMPLATE_STORE, 'readonly', store => {
                     return new Promise((resolve, reject) => {
                         const req = store.get(trimmed);
-                        req.onsuccess = () => resolve(req.result || null);
+                        req.onsuccess = () => {
+                            const row = req.result || null;
+                            if (!row) return resolve(null);
+                            const schedule = parseTemplateSchedule(row.schedule);
+                            resolve({ ...row, schedule });
+                        };
                         req.onerror = () => reject(req.error);
                     });
                 });
@@ -238,8 +277,10 @@ if (!db) {
                             const cur = cursorReq.result;
                             if (cur && out.length < max) {
                                 const value = cur.value || {};
+                                const schedule = parseTemplateSchedule(value.schedule);
                                 out.push({
                                     ...value,
+                                    schedule,
                                     preview: (value.content || '').slice(0, 200)
                                 });
                                 cur.continue();
@@ -317,9 +358,27 @@ if (!db) {
                 const res = await invoke('entry:deleteByDate', date);
                 return !!(res && res.deleted);
             },
-            saveTemplate: (name, content='') => invoke('template:upsert', { name, content }),
-            getTemplate:  (name)             => invoke('template:getByName', name),
-            listTemplates: ()                => invoke('template:list'),
+            saveTemplate: async (name, content='', schedule=null) => {
+                const normalized = schedule
+                    ? normalizeTemplateSchedule(schedule, { defaultAnchorDate: schedule.anchorDate })
+                    : null;
+                const res = await invoke('template:upsert', { name, content, schedule: normalized });
+                if (!res) return res;
+                return { ...res, schedule: parseTemplateSchedule(res.schedule) };
+            },
+            getTemplate:  async (name) => {
+                const res = await invoke('template:getByName', name);
+                if (!res) return null;
+                return { ...res, schedule: parseTemplateSchedule(res.schedule) };
+            },
+            listTemplates: async () => {
+                const rows = await invoke('template:list');
+                if (!Array.isArray(rows)) return [];
+                return rows.map(row => ({
+                    ...row,
+                    schedule: parseTemplateSchedule(row.schedule)
+                }));
+            },
             deleteTemplate: (name)           => invoke('template:delete', name)
         };
     }
@@ -361,7 +420,7 @@ const shell = {
         } catch {}
         activeProgram = null;
         this.resetPrompt();
-        focus();
+        focusInput();
     },
     suspend() {
         if (activeProgram && typeof activeProgram.disable === 'function') {
@@ -369,7 +428,7 @@ const shell = {
         }
         activeProgram = null;
         this.resetPrompt();
-        focus();
+        focusInput();
     },
 };
 
@@ -562,7 +621,7 @@ const handleKeydown = async (e) => {
     }
 };
 
-const focus = () => {
+const focusInput = () => {
     input.focus();
     updateCaret();
 };
@@ -1068,7 +1127,26 @@ register('journal', async (argv = []) => {
         }
 
         let row = await db.get(date);
-        if (!row) row = await db.upsert(date, '');
+        if (!row) {
+            let seededContent = '';
+            let usedTemplateName = null;
+            if (db && typeof db.listTemplates === 'function') {
+                try {
+                    const templates = await db.listTemplates();
+                    const match = pickTemplateForDate(templates, date);
+                    if (match && match.template) {
+                        seededContent = match.template.content ?? '';
+                        usedTemplateName = match.template.name ?? null;
+                    }
+                } catch (err) {
+                    console.warn('Repeating template selection failed:', err);
+                }
+            }
+            row = await db.upsert(date, seededContent);
+            if (usedTemplateName) {
+                print(`<div class="muted">Initialized with template "${esc(usedTemplateName)}".</div>`);
+            }
+        }
 
         startEditor(shell, {
             id: row.id ?? date,
@@ -1132,6 +1210,7 @@ register('view', async (argv = []) => {
                     templateName: item.name,
                     id: item.name,
                     initialContent: record.content ?? '',
+                    templateSchedule: record.schedule ?? null,
                     title: `Template: ${item.name}`
                 });
             },
@@ -1529,13 +1608,11 @@ register('switch', async (argv = []) => {
  * BOOT
  * --------------------------------------------------------------------------- */
 (() => {
-    window.onload = () => {
-        banner();
-        focus();
-    };
+    banner();
+    focusInput();
 
     input.addEventListener('keydown', handleKeydown);
-    screen.addEventListener('click', focus);
+    screen.addEventListener('click', focusInput);
     input.addEventListener('input', scheduleCaret);
     input.addEventListener('click', scheduleCaret);
     input.addEventListener('keyup', scheduleCaret);

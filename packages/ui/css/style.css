@@ -159,20 +159,20 @@ body {
 }
 
 .cm-editor {
-    max-width: calc(var(--editor-max-width) + 30px);
+    max-width: calc(var(--editor-max-width) + 1ch + 30px);
     margin: 30px auto;
 }
 
 .cm-content {
     margin: 50px auto !important;
-    max-width: var(--editor-max-width);
+    max-width: calc(var(--editor-max-width) + 1ch);
 }
 
 /* CodeMirror search panel theming */
 .cm-panels {
   background-color: rgba(0, 0, 0, 0.85);
   color: var(--text);
-  border-bottom: 1px solid rgba(var(--text-rgb), 0.25);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   font-family: var(--font-mono);
 }
 
@@ -189,26 +189,26 @@ body {
 }
 
 .cm-panel.cm-search label {
-  color: rgba(var(--text-rgb), 0.9);
+  color: color-mix(in srgb, var(--accent) 85%, var(--app-fg) 15%);
 }
 
 .cm-panel.cm-search input {
-  background-color: rgba(var(--text-rgb), 0.08);
+  background-color: color-mix(in srgb, var(--accent) 8%, transparent);
   color: var(--text);
-  border: 1px solid rgba(var(--text-rgb), 0.25);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   border-radius: 4px;
   padding: 4px 6px;
   outline: none;
 }
 
 .cm-panel.cm-search input::placeholder {
-  color: rgba(var(--text-rgb), 0.5);
+  color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .cm-panel.cm-search button {
   background: transparent;
   color: var(--text);
-  border: 1px solid rgba(var(--text-rgb), 0.25);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   border-radius: 4px;
   padding: 2px 6px;
   cursor: pointer;
@@ -216,15 +216,15 @@ body {
 }
 
 .cm-panel.cm-search button:hover {
-  background-color: rgba(var(--text-rgb), 0.1);
+  background-color: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .cm-searchMatch {
-  background-color: rgba(var(--text-rgb), 0.15);
+  background-color: color-mix(in srgb, var(--accent) 15%, transparent);
 }
 
 .cm-searchMatch.cm-searchMatch-selected {
-  background-color: rgba(var(--text-rgb), 0.3);
+  background-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .help {
@@ -242,7 +242,7 @@ body {
   padding: 0;
   max-height: 40vh;          /* keeps lists compact */
   overflow: auto;            /* allow scrolling */
-  border: 1px solid rgba(var(--text-rgb), 0.12);
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, transparent);
   border-radius: 6px;
   background: rgba(0,0,0,0.35);
 }
@@ -260,16 +260,16 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   opacity: 0.6;
   min-width: 13ch;          /* fits YYYY-MM-DD plus one space */
-  color: var(--accent-aux);            /* retro green accent */
+  color: var(--accent);
 }
 
 .menu li:not(.active):hover {
-  background: rgba(var(--text-rgb), 0.06);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .menu li.active {
-  background: rgba(var(--text-rgb), 0.18);
-  outline: 1px solid rgba(var(--text-rgb), 0.35);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .menu::-webkit-scrollbar {
@@ -277,7 +277,7 @@ body {
   width: 10px;
 }
 .menu::-webkit-scrollbar-thumb {
-  background: rgba(var(--text-rgb), 0.25);
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
   border-radius: 6px;
 }
 .menu::-webkit-scrollbar-track {
@@ -405,6 +405,113 @@ body {
 .cj-modal-body {
     line-height: 1.4;
     margin-bottom: 12px;
+}
+
+.cj-modal-field + .cj-modal-field.cj-schedule {
+    margin-top: 12px;
+}
+
+.cj-schedule {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--border, #2a2a2a);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--panel-bg, #0b0b0b) 85%, transparent);
+}
+
+.cj-schedule-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.cj-schedule-intro {
+    font-size: 0.75rem;
+}
+
+.cj-schedule-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px 8px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    transition: border-color 120ms ease, background-color 120ms ease, opacity 120ms ease;
+}
+
+.cj-schedule-section[data-section="day"] {
+    margin-top: 4px;
+}
+
+.cj-schedule-section[data-active="0"] {
+    opacity: 0.65;
+}
+
+.cj-schedule-section[data-active="1"] {
+    border-color: color-mix(in srgb, var(--ok, #3fb950) 35%, transparent);
+    background: color-mix(in srgb, var(--ok, #3fb950) 8%, transparent);
+    opacity: 1;
+}
+
+.cj-schedule-section [disabled] {
+    cursor: not-allowed;
+}
+
+.cj-schedule-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    flex-wrap: wrap;
+}
+
+.cj-schedule-row input[type="number"] {
+    width: 64px;
+}
+
+.cj-schedule-weekdays {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 0.8rem;
+}
+
+.cj-schedule-weekdays label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--panel-bg, #0d0d0d) 70%, transparent);
+}
+
+.cj-schedule-month {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    flex-wrap: wrap;
+}
+
+.cj-schedule-month input[type="number"] {
+    width: 70px;
+}
+
+.cj-schedule-month select {
+    min-width: 90px;
+}
+
+.cj-month-nth {
+    min-width: 110px;
+}
+
+.cj-schedule-row-year input[type="number"] {
+    width: 70px;
+}
+
+.cj-schedule-row-year input[type="date"] {
+    min-width: 150px;
 }
 
 .cj-modal-actions {

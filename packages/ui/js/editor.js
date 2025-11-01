@@ -6,6 +6,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { indentOnInput, indentUnit, syntaxHighlighting, HighlightStyle } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import { search, searchKeymap, openSearchPanel, findNext, findPrevious } from '@codemirror/search';
+import { normalizeTemplateSchedule, cloneTemplateSchedule, isISODate } from './schedule.js';
 
 // Widget for clickable overlay on the [ ] or [x] in todo list
 class TodoClickTargetWidget extends WidgetType {
@@ -210,6 +211,7 @@ export function startEditor(shell, opts = {}) {
     const rawTemplateName = isTemplate ? String(opts.templateName ?? '').trim() : '';
     const templateName = isTemplate ? (rawTemplateName || 'Untitled Template') : null;
     const initialText = typeof opts.initialContent === 'string' ? opts.initialContent : '';
+    const initialSchedule = isTemplate ? cloneTemplateSchedule(opts.templateSchedule) : null;
     // --- Editor-local state ---------------------------------------------------
     const state = {
         title: opts.title || (isTemplate ? templateName : new Date().toLocaleString()),
@@ -218,15 +220,16 @@ export function startEditor(shell, opts = {}) {
         templateName,
         buffer: initialText.split('\n'),
         dirty: false,
+        templateSchedule: initialSchedule
     };
 
-    // If this is a brand-new entry (no existing content), seed first line with the formatted date
-    if (!isTemplate && (!initialText || initialText.trim() === '')) {
-        const banner = `# ${fmtBannerDate(state.date)}`;
-        state.buffer = [banner, ''];
-    } else if (!state.buffer.length) {
-        state.buffer = [''];
-    }
+    // // If this is a brand-new entry (no existing content), seed first line with the formatted date
+    // if (!isTemplate && (!initialText || initialText.trim() === '')) {
+    //     const banner = `# ${fmtBannerDate(state.date)}`;
+    //     state.buffer = [banner, ''];
+    // } else if (!state.buffer.length) {
+    //     state.buffer = [''];
+    // }
 
     // CodeMirror editor view
     let cmView = null;
@@ -271,7 +274,7 @@ export function startEditor(shell, opts = {}) {
         const header = document.createElement('div');
         header.className = 'writer-header soft';
         header.textContent = isTemplate
-            ? `TEMPLATE - ${templateName}`
+            ? `TEMPLATE - ${(state.templateName ?? templateName)}`
             : `JOURNAL - ${fmtBannerDate(state.date)}`;
 
         // Help line
@@ -736,38 +739,34 @@ export function startEditor(shell, opts = {}) {
     }
 
     async function save() {
-        if (cmView) {
-            const text = cmView.state.doc.toString();
-            state.buffer = text.split('\n');
-            try {
-                if (isTemplate) {
-                    if (!window.db || typeof window.db.saveTemplate !== 'function') {
-                        throw new Error('Template storage is not available.');
-                    }
-                    await window.db.saveTemplate(templateName, text);
-                    showTemplateSavedToast();
-                } else if (window.db && typeof window.db.upsert === 'function') {
-                    await window.db.upsert(state.date, text);
-                }
-            } catch (err) {
-                const msg = err?.message || String(err);
-                const statusEl = document.getElementById('writerStatus');
-                if (statusEl) {
-                    statusEl.textContent = `Save failed: ${msg}`;
-                } else {
-                    info(`Save failed: ${msg}`);
-                }
-                return;
+        if (!cmView) return;
+        if (isTemplate) {
+            promptTemplateSave();
+            return;
+        }
+
+        const text = cmView.state.doc.toString();
+        state.buffer = text.split('\n');
+        try {
+            if (window.db && typeof window.db.upsert === 'function') {
+                await window.db.upsert(state.date, text);
             }
+        } catch (err) {
+            const msg = err?.message || String(err);
+            const statusEl = document.getElementById('writerStatus');
+            if (statusEl) {
+                statusEl.textContent = `Save failed: ${msg}`;
+            } else {
+                info(`Save failed: ${msg}`);
+            }
+            return;
         }
         clearUnsaved();
         flashSaveBar();
         state.dirty = false;
 
         const status = document.getElementById('writerStatus');
-        const message = isTemplate
-            ? `Template "${templateName}" saved (${summary()})`
-            : `Saved (${summary()})`;
+        const message = `Saved (${summary()})`;
         if (status) {
             status.textContent = message;
         } else {
@@ -790,7 +789,7 @@ export function startEditor(shell, opts = {}) {
         } catch (_) {}
     }
 
-    function showTemplateModal({ onSave, onCancel, initialValue = '' } = {}) {
+    function showTemplateModal({ onSave, onCancel, initialValue = '', initialSchedule = null } = {}) {
         const prev = document.getElementById('templateModal');
         if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
 
@@ -805,6 +804,72 @@ export function startEditor(shell, opts = {}) {
                         <span>Template name</span>
                         <input type="text" name="templateName" autocomplete="off" spellcheck="false" />
                     </label>
+                    <div class="cj-modal-field cj-schedule">
+                        <span class="cj-schedule-title">Repeating schedule</span>
+                        <div class="cj-schedule-intro muted">Optional schedule. More specific rules win (Year &gt; Month &gt; Week &gt; Day).</div>
+                        <div class="cj-schedule-section" data-section="day">
+                            <label class="cj-schedule-row">
+                                <input type="checkbox" class="cj-sched-enable" name="schedDayEnabled" />
+                                <span>Every</span>
+                                <input type="number" min="1" step="1" name="schedDayInterval" />
+                                <span>day(s)</span>
+                            </label>
+                        </div>
+                        <div class="cj-schedule-section" data-section="week">
+                            <label class="cj-schedule-row">
+                                <input type="checkbox" class="cj-sched-enable" name="schedWeekEnabled" />
+                                <span>Repeat every</span>
+                                <input type="number" min="1" step="1" name="schedWeekInterval" />
+                                <span>week(s) on</span>
+                            </label>
+                            <div class="cj-schedule-weekdays">
+                                <label><input type="checkbox" name="schedWeekDay" value="1">Mon</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="2">Tue</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="3">Wed</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="4">Thu</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="5">Fri</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="6">Sat</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="0">Sun</label>
+                            </div>
+                        </div>
+                        <div class="cj-schedule-section" data-section="month">
+                            <label class="cj-schedule-row">
+                                <input type="checkbox" class="cj-sched-enable" name="schedMonthEnabled" />
+                                <span>Repeat every</span>
+                                <input type="number" min="1" step="1" name="schedMonthInterval" />
+                                <span>month(s) on the</span>
+                            </label>
+                            <div class="cj-schedule-month">
+                                <input type="number" min="1" max="31" step="1" name="schedMonthDay" class="cj-month-day" />
+                                <select name="schedMonthNth" class="cj-month-nth" style="display:none;">
+                                    <option value="1">1st</option>
+                                    <option value="2">2nd</option>
+                                    <option value="3">3rd</option>
+                                    <option value="4">4th</option>
+                                    <option value="last">Last</option>
+                                </select>
+                                <select name="schedMonthTarget">
+                                    <option value="day">Day</option>
+                                    <option value="1">Mon</option>
+                                    <option value="2">Tue</option>
+                                    <option value="3">Wed</option>
+                                    <option value="4">Thu</option>
+                                    <option value="5">Fri</option>
+                                    <option value="6">Sat</option>
+                                    <option value="0">Sun</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="cj-schedule-section" data-section="year">
+                            <label class="cj-schedule-row cj-schedule-row-year">
+                                <input type="checkbox" class="cj-sched-enable" name="schedYearEnabled" />
+                                <span>Repeat every</span>
+                                <input type="number" min="1" step="1" name="schedYearInterval" />
+                                <span>year(s) on</span>
+                                <input type="date" name="schedYearDate" />
+                            </label>
+                        </div>
+                    </div>
                     <div class="cj-modal-error error" style="display:none;"></div>
                 </div>
                 <div class="cj-modal-actions">
@@ -821,6 +886,83 @@ export function startEditor(shell, opts = {}) {
         const btnCancel = wrap.querySelector('button.cancel');
         const errorEl = wrap.querySelector('.cj-modal-error');
 
+        const dayEnable = wrap.querySelector('input[name="schedDayEnabled"]');
+        const dayInterval = wrap.querySelector('input[name="schedDayInterval"]');
+        const weekEnable = wrap.querySelector('input[name="schedWeekEnabled"]');
+        const weekInterval = wrap.querySelector('input[name="schedWeekInterval"]');
+        const weekDayInputs = Array.from(wrap.querySelectorAll('input[name="schedWeekDay"]'));
+        const monthEnable = wrap.querySelector('input[name="schedMonthEnabled"]');
+        const monthInterval = wrap.querySelector('input[name="schedMonthInterval"]');
+        const monthDayInput = wrap.querySelector('input[name="schedMonthDay"]');
+        const monthNthSelect = wrap.querySelector('select[name="schedMonthNth"]');
+        const monthTarget = wrap.querySelector('select[name="schedMonthTarget"]');
+        const yearEnable = wrap.querySelector('input[name="schedYearEnabled"]');
+        const yearInterval = wrap.querySelector('input[name="schedYearInterval"]');
+        const yearDate = wrap.querySelector('input[name="schedYearDate"]');
+
+        const sectionDescriptors = [
+            { key: 'day', checkbox: dayEnable, inputs: [dayInterval] },
+            { key: 'week', checkbox: weekEnable, inputs: [weekInterval, ...weekDayInputs] },
+            { key: 'month', checkbox: monthEnable, inputs: [monthInterval, monthDayInput, monthNthSelect, monthTarget] },
+            { key: 'year', checkbox: yearEnable, inputs: [yearInterval, yearDate] }
+        ];
+        const primaryCheckboxes = sectionDescriptors.map(s => s.checkbox).filter(Boolean);
+
+        const scheduleInitial = cloneTemplateSchedule(initialSchedule);
+        const todayIso = new Date().toISOString().slice(0, 10);
+        let anchorSeed = (scheduleInitial && isISODate(scheduleInitial.anchorDate))
+            ? scheduleInitial.anchorDate
+            : todayIso;
+
+        const setInputsDisabled = (inputs, disabled) => {
+            for (const inputEl of inputs) {
+                if (!inputEl) continue;
+                inputEl.disabled = !!disabled;
+            }
+        };
+
+        const refreshSectionLocks = () => {
+            const activeDescriptor = sectionDescriptors.find(({ checkbox }) => checkbox && checkbox.checked) || null;
+            sectionDescriptors.forEach(({ checkbox, inputs }) => {
+                if (!checkbox) return;
+                const section = checkbox.closest('.cj-schedule-section');
+                const isActive = checkbox.checked;
+                if (section) {
+                    section.dataset.active = isActive ? '1' : '0';
+                }
+                checkbox.disabled = !!activeDescriptor && checkbox !== activeDescriptor.checkbox;
+                setInputsDisabled(inputs, !isActive);
+            });
+            syncMonthMode();
+        };
+
+        const ensureSectionEnabled = (checkbox) => {
+            if (!checkbox || checkbox.disabled || checkbox.checked) return;
+            checkbox.checked = true;
+            refreshSectionLocks();
+        };
+
+        primaryCheckboxes.forEach((checkbox) => {
+            if (!checkbox) return;
+            checkbox.addEventListener('change', () => {
+                if (checkbox.checked) {
+                    sectionDescriptors.forEach(({ checkbox: sibling }) => {
+                        if (sibling && sibling !== checkbox) sibling.checked = false;
+                    });
+                }
+                refreshSectionLocks();
+            });
+        });
+
+        sectionDescriptors.forEach(({ checkbox, inputs }) => {
+            inputs.forEach(ctrl => {
+                if (!ctrl) return;
+                ctrl.addEventListener('focus', () => ensureSectionEnabled(checkbox), { passive: true });
+            });
+        });
+
+        refreshSectionLocks();
+
         if (input) {
             input.value = initialValue;
             try { input.setSelectionRange(0, input.value.length); } catch {}
@@ -835,6 +977,100 @@ export function startEditor(shell, opts = {}) {
                 errorEl.textContent = '';
                 errorEl.style.display = 'none';
             }
+        };
+
+        function syncMonthMode() {
+            if (!monthTarget) return;
+            const useDay = monthTarget.value === 'day';
+
+            if (monthDayInput) {
+                monthDayInput.style.display = useDay ? '' : 'none';
+                monthDayInput.disabled = !useDay || (monthEnable && !monthEnable.checked);
+                if (useDay) {
+                    monthDayInput.min = '1';
+                    monthDayInput.max = '31';
+                    if (!monthDayInput.value) monthDayInput.value = '1';
+                }
+            }
+            if (monthNthSelect) {
+                monthNthSelect.style.display = useDay ? 'none' : '';
+                monthNthSelect.disabled = useDay || (monthEnable && !monthEnable.checked);
+                if (!useDay && !monthNthSelect.value) {
+                    monthNthSelect.value = '1';
+                }
+            }
+        }
+
+        const applyInitialSchedule = () => {
+            if (dayInterval) dayInterval.value = scheduleInitial?.day?.interval ?? '1';
+            if (dayEnable) dayEnable.checked = !!scheduleInitial?.day;
+
+            if (weekInterval) weekInterval.value = scheduleInitial?.week?.interval ?? '1';
+            if (weekEnable) weekEnable.checked = !!scheduleInitial?.week;
+            if (scheduleInitial?.week?.weekdays && weekDayInputs.length) {
+                const set = new Set(scheduleInitial.week.weekdays.map(Number));
+                weekDayInputs.forEach(cb => { cb.checked = set.has(Number(cb.value)); });
+            } else {
+                weekDayInputs.forEach(cb => { cb.checked = false; });
+            }
+
+            if (monthInterval) monthInterval.value = scheduleInitial?.month?.interval ?? '1';
+            if (monthEnable) monthEnable.checked = !!scheduleInitial?.month;
+            if (scheduleInitial?.month?.mode === 'weekday' && scheduleInitial.month.weekday !== undefined) {
+                if (monthTarget) monthTarget.value = String(scheduleInitial.month.weekday);
+                if (monthNthSelect) monthNthSelect.value = String(scheduleInitial.month.nth === 'last' ? 'last' : (scheduleInitial.month.nth ?? '1'));
+                if (monthDayInput && !monthDayInput.value) monthDayInput.value = '1';
+            } else {
+                if (monthTarget) monthTarget.value = 'day';
+                if (monthDayInput) monthDayInput.value = scheduleInitial?.month?.day ?? '1';
+                if (monthNthSelect && !monthNthSelect.value) monthNthSelect.value = '1';
+            }
+
+            if (yearInterval) yearInterval.value = scheduleInitial?.year?.interval ?? '1';
+            if (yearEnable) yearEnable.checked = !!scheduleInitial?.year;
+            const yearDefault = scheduleInitial?.year?.startDate && isISODate(scheduleInitial.year.startDate)
+                ? scheduleInitial.year.startDate
+                : anchorSeed;
+            if (yearDate) yearDate.value = yearDefault;
+            refreshSectionLocks();
+        };
+
+        const collectRawSchedule = () => {
+            const yearDateVal = (yearDate && yearDate.value) ? yearDate.value : '';
+            const yearDateValid = isISODate(yearDateVal);
+            const anchorDate = (yearEnable && yearEnable.checked && yearDateValid) ? yearDateVal : anchorSeed;
+            return {
+                anchorDate,
+                day: {
+                    enabled: !!(dayEnable && dayEnable.checked),
+                    interval: dayInterval ? dayInterval.value : ''
+                },
+                week: {
+                    enabled: !!(weekEnable && weekEnable.checked),
+                    interval: weekInterval ? weekInterval.value : '',
+                    weekdays: weekDayInputs.map(cb => cb.checked ? Number(cb.value) : null).filter(v => v !== null)
+                },
+                month: {
+                    enabled: !!(monthEnable && monthEnable.checked),
+                    interval: monthInterval ? monthInterval.value : '',
+                    mode: monthTarget && monthTarget.value !== 'day' ? 'weekday' : 'day',
+                    value: (monthTarget && monthTarget.value !== 'day')
+                        ? (monthNthSelect ? monthNthSelect.value : '')
+                        : (monthDayInput ? monthDayInput.value : ''),
+                    weekday: monthTarget && monthTarget.value !== 'day' ? Number(monthTarget.value) : null
+                },
+                year: {
+                    enabled: !!(yearEnable && yearEnable.checked),
+                    interval: yearInterval ? yearInterval.value : '',
+                    date: yearDateValid ? yearDateVal : ''
+                }
+            };
+        };
+
+        const focusElement = (el) => {
+            if (!el) return;
+            try { el.focus({ preventScroll: true }); }
+            catch { el.focus(); }
         };
 
         let submitting = false;
@@ -856,16 +1092,89 @@ export function startEditor(shell, opts = {}) {
             if (!value) {
                 showError('Template name is required.');
                 if (input) {
-                    try { input.focus({ preventScroll: true }); } catch { input.focus(); }
+                    focusElement(input);
                     try { input.select(); } catch {}
                 }
                 return;
             }
+
+            const rawSchedule = collectRawSchedule();
+            const normalized = normalizeTemplateSchedule(rawSchedule, { defaultAnchorDate: rawSchedule.anchorDate });
+
+            if (rawSchedule.day.enabled && (!normalized || !normalized.day)) {
+                showError('Daily schedule interval must be at least 1.');
+                focusElement(dayInterval);
+                return;
+            }
+            if (rawSchedule.week.enabled) {
+                if (!rawSchedule.week.weekdays.length) {
+                    showError('Select at least one weekday for the weekly schedule.');
+                    focusElement(weekDayInputs[0]);
+                    return;
+                }
+                if (!normalized || !normalized.week) {
+                    showError('Weekly schedule interval must be at least 1.');
+                    focusElement(weekInterval);
+                    return;
+                }
+            }
+            if (rawSchedule.month.enabled) {
+                if (rawSchedule.month.mode === 'day') {
+                    const dayVal = Number(rawSchedule.month.value);
+                    if (!Number.isFinite(dayVal) || dayVal < 1 || dayVal > 31) {
+                        showError('Choose a day between 1 and 31 for the monthly schedule.');
+                        focusElement(monthDayInput);
+                        return;
+                    }
+                    if (!normalized || !normalized.month || normalized.month.mode !== 'day') {
+                        showError('Monthly schedule interval must be at least 1.');
+                        focusElement(monthInterval);
+                        return;
+                    }
+                } else {
+                    if (rawSchedule.month.weekday === null) {
+                        showError('Choose a weekday for the monthly schedule.');
+                        focusElement(monthTarget);
+                        return;
+                    }
+                    if (!normalized || !normalized.month || normalized.month.mode !== 'weekday') {
+                        showError('Monthly schedule interval must be at least 1.');
+                        focusElement(monthInterval);
+                        return;
+                    }
+                    if (normalized.month.nth !== 'last') {
+                        const nthVal = Number(rawSchedule.month.value);
+                        if (!Number.isFinite(nthVal) || nthVal < 1 || nthVal > 4) {
+                            showError('Choose 1st, 2nd, 3rd, 4th, or Last for the monthly schedule.');
+                            focusElement(monthNthSelect);
+                            return;
+                        }
+                    }
+                }
+            }
+            if (rawSchedule.year.enabled) {
+                if (!isISODate(rawSchedule.year.date)) {
+                    showError('Pick a valid date for the yearly schedule.');
+                    focusElement(yearDate);
+                    return;
+                }
+                if (!normalized || !normalized.year) {
+                    showError('Yearly schedule interval must be at least 1.');
+                    focusElement(yearInterval);
+                    return;
+                }
+            }
+
+            const schedulePayload = normalized ? cloneTemplateSchedule(normalized) : null;
+            if (normalized && normalized.anchorDate) {
+                anchorSeed = normalized.anchorDate;
+            }
+
             showError('');
             submitting = true;
             try {
                 if (typeof onSave === 'function') {
-                    await onSave(value);
+                    await onSave(value, schedulePayload);
                 }
                 cleanup();
             } catch (err) {
@@ -873,7 +1182,7 @@ export function startEditor(shell, opts = {}) {
                 const message = err?.message || String(err);
                 showError(message);
                 if (input) {
-                    try { input.focus({ preventScroll: true }); } catch { input.focus(); }
+                    focusElement(input);
                     try { input.select(); } catch {}
                 }
             }
@@ -887,9 +1196,8 @@ export function startEditor(shell, opts = {}) {
                 reject();
                 return;
             }
-            if (k === 'enter') {
-                // allow Enter from input or Save button
-                if (document.activeElement === input || document.activeElement === btnSave) {
+            if (k === 'enter' && !e.shiftKey) {
+                if (wrap.contains(document.activeElement)) {
                     e.preventDefault();
                     e.stopPropagation();
                     accept();
@@ -899,6 +1207,18 @@ export function startEditor(shell, opts = {}) {
         };
 
         window.addEventListener('keydown', onKey, true);
+
+        applyInitialSchedule();
+
+        if (monthTarget) monthTarget.addEventListener('change', () => {
+            syncMonthMode();
+            refreshSectionLocks();
+        });
+        if (yearDate) yearDate.addEventListener('change', () => {
+            if (yearEnable && yearEnable.checked && yearDate && isISODate(yearDate.value)) {
+                anchorSeed = yearDate.value;
+            }
+        });
 
         if (btnSave) btnSave.addEventListener('click', (e) => {
             e.preventDefault();
@@ -920,8 +1240,7 @@ export function startEditor(shell, opts = {}) {
 
         setTimeout(() => {
             if (input) {
-                try { input.focus({ preventScroll: true }); }
-                catch (_) { input.focus(); }
+                focusElement(input);
             }
         }, 0);
     }
@@ -935,8 +1254,20 @@ export function startEditor(shell, opts = {}) {
         const text = cmView.state.doc.toString();
         state.buffer = text.split('\n');
         showTemplateModal({
-            onSave: async (name) => {
-                await window.db.saveTemplate(name, text);
+            onSave: async (name, schedule) => {
+                const saved = await window.db.saveTemplate(name, text, schedule);
+                const nextSchedule = saved && saved.schedule
+                    ? cloneTemplateSchedule(saved.schedule)
+                    : cloneTemplateSchedule(schedule);
+                state.templateSchedule = nextSchedule;
+                state.templateName = name;
+                state.id = name;
+                state.title = `Template: ${name}`;
+                const headerEl = document.querySelector('.writer-header');
+                if (headerEl) headerEl.textContent = `TEMPLATE - ${name}`;
+                clearUnsaved();
+                flashSaveBar();
+                state.dirty = false;
                 const status = document.getElementById('writerStatus');
                 if (status) {
                     status.textContent = `Template "${name}" saved (${summary()})`;
@@ -945,7 +1276,8 @@ export function startEditor(shell, opts = {}) {
                 }
                 showTemplateSavedToast();
             },
-            initialValue: isTemplate ? (templateName ?? '') : ''
+            initialValue: isTemplate ? ((state.templateName ?? templateName) ?? '') : '',
+            initialSchedule: state.templateSchedule
         });
     }
 

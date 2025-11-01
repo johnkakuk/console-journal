@@ -27,7 +27,8 @@ export const THEME_VAR_WHITELIST = [
     '--base-font-size',
     '--editor-font-size',
     '--editor-line-height',
-    '--caret-offset-y'
+    '--caret-offset-y',
+    '--editor-max-width'
 ];
 
 const COLOR_ALPHA = {
@@ -50,7 +51,13 @@ const COLOR_FALLBACKS = {
     '--border': '--text'
 };
 
-const COLOR_VARS = THEME_VAR_WHITELIST.filter(v => !v.startsWith('--font') && !v.endsWith('-size') && !v.endsWith('-line-height') && v !== '--caret-offset-y');
+const COLOR_VARS = THEME_VAR_WHITELIST.filter(v =>
+    !v.startsWith('--font') &&
+    !v.endsWith('-size') &&
+    !v.endsWith('-line-height') &&
+    v !== '--caret-offset-y' &&
+    v !== '--editor-max-width'
+);
 
 const GOOGLE_FONT_CATALOG = {
     'inter': { family: 'Inter', weights: [400, 600] },

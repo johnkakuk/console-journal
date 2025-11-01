@@ -8186,10 +8186,10 @@ handlers.copy = handlers.cut = (view, event) => {
   }
 };
 var isFocusChange = /* @__PURE__ */ Annotation.define();
-function focusChangeTransaction(state2, focus2) {
+function focusChangeTransaction(state2, focus) {
   let effects = [];
   for (let getEffect of state2.facet(focusChangeEffect)) {
-    let effect = getEffect(state2, focus2);
+    let effect = getEffect(state2, focus);
     if (effect)
       effects.push(effect);
   }
@@ -8197,9 +8197,9 @@ function focusChangeTransaction(state2, focus2) {
 }
 function updateForFocusChange(view) {
   setTimeout(() => {
-    let focus2 = view.hasFocus;
-    if (focus2 != view.inputState.notifiedFocused) {
-      let tr = focusChangeTransaction(view.state, focus2);
+    let focus = view.hasFocus;
+    if (focus != view.inputState.notifiedFocused) {
+      let tr = focusChangeTransaction(view.state, focus);
       if (tr)
         view.dispatch(tr);
       else
@@ -10679,13 +10679,13 @@ var EditorView = class _EditorView {
       this.viewState.state = state2;
       return;
     }
-    let focus2 = this.hasFocus, focusFlag = 0, dispatchFocus = null;
+    let focus = this.hasFocus, focusFlag = 0, dispatchFocus = null;
     if (transactions.some((tr) => tr.annotation(isFocusChange))) {
-      this.inputState.notifiedFocused = focus2;
+      this.inputState.notifiedFocused = focus;
       focusFlag = 1;
-    } else if (focus2 != this.inputState.notifiedFocused) {
-      this.inputState.notifiedFocused = focus2;
-      dispatchFocus = focusChangeTransaction(state2, focus2);
+    } else if (focus != this.inputState.notifiedFocused) {
+      this.inputState.notifiedFocused = focus;
+      dispatchFocus = focusChangeTransaction(state2, focus);
       if (!dispatchFocus)
         focusFlag = 1;
     }
@@ -25665,6 +25665,292 @@ var searchExtensions = [
   baseTheme3
 ];
 
+// packages/ui/js/schedule.js
+var ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+var WEEKDAY_MAP = {
+  sun: 0,
+  sunday: 0,
+  "0": 0,
+  mon: 1,
+  monday: 1,
+  "1": 1,
+  tue: 2,
+  tuesday: 2,
+  "2": 2,
+  wed: 3,
+  wednesday: 3,
+  "3": 3,
+  thu: 4,
+  thursday: 4,
+  "4": 4,
+  fri: 5,
+  friday: 5,
+  "5": 5,
+  sat: 6,
+  saturday: 6,
+  "6": 6
+};
+var DAY_MS = 864e5;
+var TEMPLATE_SCHEDULE_WEIGHT = { year: 3, month: 2, week: 1, day: 0 };
+function cloneTemplateSchedule(schedule) {
+  if (!schedule) return null;
+  return JSON.parse(JSON.stringify(schedule));
+}
+function isISODate(value) {
+  return typeof value === "string" && ISO_DATE_RE.test(value);
+}
+function isoToday() {
+  return (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+}
+function toPositiveInt(value) {
+  if (value === "" || value === null || value === void 0) return null;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  const int = Math.floor(num);
+  return int >= 1 ? int : null;
+}
+function normalizeWeekday(value) {
+  if (value === null || value === void 0) return null;
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return (value % 7 + 7) % 7;
+  }
+  const str = String(value).trim().toLowerCase();
+  if (!str) return null;
+  if (WEEKDAY_MAP.hasOwnProperty(str)) return WEEKDAY_MAP[str];
+  if (/^[0-6]$/.test(str)) return Number(str);
+  if (str.length === 1) {
+    if (str === "m") return 1;
+    if (str === "t") return 2;
+    if (str === "w") return 3;
+    if (str === "r") return 4;
+    if (str === "f") return 5;
+    if (str === "s") return 6;
+  }
+  return null;
+}
+function normalizeWeekdayList(values2) {
+  if (values2 === null || values2 === void 0) return [];
+  const arr = Array.isArray(values2) ? values2 : [values2];
+  const out = [];
+  for (const v of arr) {
+    const n = normalizeWeekday(v);
+    if (n !== null) out.push(n);
+  }
+  return Array.from(new Set(out)).sort((a, b) => a - b);
+}
+function isSectionEnabled(section) {
+  if (!section || typeof section !== "object") return false;
+  if (typeof section.enabled === "boolean") return section.enabled;
+  const keys = Object.keys(section);
+  return keys.length > 0;
+}
+function normalizeTemplateSchedule(raw, { defaultAnchorDate } = {}) {
+  if (!raw || typeof raw !== "object") return null;
+  const anchorCandidate = typeof raw.anchorDate === "string" ? raw.anchorDate : typeof raw.anchor === "string" ? raw.anchor : null;
+  const fallbackAnchor = isISODate(defaultAnchorDate) ? defaultAnchorDate : isoToday();
+  const anchorDate = isISODate(anchorCandidate) ? anchorCandidate : fallbackAnchor;
+  const candidate = {};
+  let candidateAnchor = anchorDate;
+  const daySection = raw.day;
+  if (isSectionEnabled(daySection)) {
+    const interval = toPositiveInt(
+      daySection?.interval ?? daySection?.every ?? daySection?.value ?? daySection
+    );
+    if (interval) {
+      candidate.day = { interval };
+    }
+  }
+  const weekSection = raw.week;
+  if (isSectionEnabled(weekSection)) {
+    const interval = toPositiveInt(
+      weekSection?.interval ?? weekSection?.every ?? weekSection?.value
+    );
+    const weekdays = normalizeWeekdayList(weekSection?.weekdays ?? weekSection?.days ?? weekSection?.day);
+    if (interval && weekdays.length) {
+      candidate.week = { interval, weekdays };
+    }
+  }
+  const monthSection = raw.month;
+  if (isSectionEnabled(monthSection)) {
+    const interval = toPositiveInt(
+      monthSection?.interval ?? monthSection?.every ?? monthSection?.value
+    );
+    const modeRaw = String(monthSection?.mode || "").toLowerCase();
+    const mode = modeRaw === "weekday" ? "weekday" : "day";
+    if (interval) {
+      if (mode === "day") {
+        const dayValue = toPositiveInt(monthSection?.day ?? monthSection?.value ?? monthSection?.number);
+        if (dayValue) {
+          candidate.month = {
+            interval,
+            mode: "day",
+            day: Math.min(Math.max(dayValue, 1), 31)
+          };
+        }
+      } else {
+        const rawNth = monthSection?.nth ?? monthSection?.value ?? monthSection?.number;
+        let nthValue = null;
+        if (typeof rawNth === "string") {
+          const trimmed = rawNth.trim().toLowerCase();
+          if (trimmed === "last") {
+            nthValue = "last";
+          } else {
+            const n = toPositiveInt(trimmed);
+            if (n) nthValue = Math.min(Math.max(n, 1), 4);
+          }
+        } else {
+          const n = toPositiveInt(rawNth);
+          if (n) nthValue = Math.min(Math.max(n, 1), 4);
+        }
+        const weekdayValue = normalizeWeekday(monthSection?.weekday ?? monthSection?.day ?? monthSection?.weekdayIndex);
+        if (nthValue && weekdayValue !== null) {
+          candidate.month = {
+            interval,
+            mode: "weekday",
+            weekday: weekdayValue,
+            nth: nthValue
+          };
+        }
+      }
+    }
+  }
+  const yearSection = raw.year;
+  if (isSectionEnabled(yearSection)) {
+    const interval = toPositiveInt(yearSection?.interval ?? yearSection?.every ?? yearSection?.value);
+    const dateValue = typeof yearSection?.date === "string" ? yearSection.date : typeof yearSection?.startDate === "string" ? yearSection.startDate : null;
+    if (interval && isISODate(dateValue)) {
+      candidate.year = {
+        interval,
+        monthDay: dateValue.slice(5),
+        startDate: dateValue
+      };
+      candidateAnchor = dateValue;
+    }
+  }
+  const priorityOrder = ["year", "month", "week", "day"];
+  let chosenLevel = null;
+  for (const level of priorityOrder) {
+    if (candidate[level]) {
+      chosenLevel = level;
+      break;
+    }
+  }
+  if (!chosenLevel) return null;
+  const schedule = {
+    version: 1,
+    anchorDate: candidateAnchor,
+    [chosenLevel]: candidate[chosenLevel]
+  };
+  return schedule;
+}
+function parseTemplateSchedule(raw, options2 = {}) {
+  if (!raw) return null;
+  let parsed = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  return normalizeTemplateSchedule(parsed, options2);
+}
+function parseISODate(dateStr) {
+  if (!isISODate(dateStr)) return null;
+  const dt = /* @__PURE__ */ new Date(dateStr + "T00:00:00Z");
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt;
+}
+function diffDays(start, end) {
+  return Math.floor((end.getTime() - start.getTime()) / DAY_MS);
+}
+function diffMonths(anchor, target) {
+  return (target.getUTCFullYear() - anchor.getUTCFullYear()) * 12 + (target.getUTCMonth() - anchor.getUTCMonth());
+}
+function getDaysInMonth(year, monthIndex) {
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+}
+function getNthWeekdayOfMonth(year, monthIndex, weekday, nth) {
+  const dim = getDaysInMonth(year, monthIndex);
+  if (nth === "last") {
+    const lastOfMonth = new Date(Date.UTC(year, monthIndex, dim));
+    const lastWeekday = lastOfMonth.getUTCDay();
+    const offset = (lastWeekday - weekday + 7) % 7;
+    return dim - offset;
+  }
+  const n = Number(nth);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const firstOfMonth = new Date(Date.UTC(year, monthIndex, 1));
+  const firstWeekday = firstOfMonth.getUTCDay();
+  const delta = (weekday - firstWeekday + 7) % 7;
+  const date = 1 + delta + (n - 1) * 7;
+  if (date > dim) return null;
+  return date;
+}
+function matchesDay(rule, target, anchor) {
+  const days = diffDays(anchor, target);
+  if (days < 0) return false;
+  return days % rule.interval === 0;
+}
+function matchesWeek(rule, target, anchor) {
+  const days = diffDays(anchor, target);
+  if (days < 0) return false;
+  const weeks = Math.floor(days / 7);
+  if (weeks % rule.interval !== 0) return false;
+  const weekday = target.getUTCDay();
+  return rule.weekdays.includes(weekday);
+}
+function matchesMonth(rule, target, anchor) {
+  const months = diffMonths(anchor, target);
+  if (months < 0) return false;
+  if (months % rule.interval !== 0) return false;
+  const year = target.getUTCFullYear();
+  const monthIdx = target.getUTCMonth();
+  if (rule.mode === "day") {
+    const dim = getDaysInMonth(year, monthIdx);
+    const targetDay = target.getUTCDate();
+    const desired = Math.min(rule.day, dim);
+    return targetDay === desired;
+  }
+  const nth = rule.nth;
+  const weekday = rule.weekday;
+  const date = getNthWeekdayOfMonth(year, monthIdx, weekday, nth);
+  if (date === null) return false;
+  return target.getUTCDate() === date;
+}
+function matchesYear(rule, target) {
+  const targetMonthDay = `${String(target.getUTCMonth() + 1).padStart(2, "0")}-${String(target.getUTCDate()).padStart(2, "0")}`;
+  if (targetMonthDay !== rule.monthDay) return false;
+  const baseDate = parseISODate(rule.startDate);
+  if (!baseDate) return false;
+  const years = target.getUTCFullYear() - baseDate.getUTCFullYear();
+  if (years < 0) return false;
+  return years % rule.interval === 0;
+}
+function matchTemplateSchedule(schedule, dateStr) {
+  const normalized = normalizeTemplateSchedule(schedule, {
+    defaultAnchorDate: schedule?.anchorDate
+  });
+  if (!normalized) return null;
+  const target = parseISODate(dateStr);
+  if (!target) return null;
+  const anchor = parseISODate(normalized.anchorDate);
+  if (!anchor) return null;
+  if (normalized.year && matchesYear(normalized.year, target)) {
+    return { level: "year", schedule: normalized };
+  }
+  if (normalized.month && matchesMonth(normalized.month, target, anchor)) {
+    return { level: "month", schedule: normalized };
+  }
+  if (normalized.week && matchesWeek(normalized.week, target, anchor)) {
+    return { level: "week", schedule: normalized };
+  }
+  if (normalized.day && matchesDay(normalized.day, target, anchor)) {
+    return { level: "day", schedule: normalized };
+  }
+  return null;
+}
+
 // packages/ui/js/editor.js
 var todoDecorationPlugin = ViewPlugin.fromClass(class {
   constructor(view) {
@@ -25816,6 +26102,7 @@ function startEditor(shell2, opts = {}) {
   const rawTemplateName = isTemplate ? String(opts.templateName ?? "").trim() : "";
   const templateName = isTemplate ? rawTemplateName || "Untitled Template" : null;
   const initialText = typeof opts.initialContent === "string" ? opts.initialContent : "";
+  const initialSchedule = isTemplate ? cloneTemplateSchedule(opts.templateSchedule) : null;
   const state2 = {
     title: opts.title || (isTemplate ? templateName : (/* @__PURE__ */ new Date()).toLocaleString()),
     id: opts.id ?? (isTemplate ? templateName : null),
@@ -25823,14 +26110,9 @@ function startEditor(shell2, opts = {}) {
     // 'YYYY-MM-DD'
     templateName,
     buffer: initialText.split("\n"),
-    dirty: false
+    dirty: false,
+    templateSchedule: initialSchedule
   };
-  if (!isTemplate && (!initialText || initialText.trim() === "")) {
-    const banner2 = `# ${fmtBannerDate(state2.date)}`;
-    state2.buffer = [banner2, ""];
-  } else if (!state2.buffer.length) {
-    state2.buffer = [""];
-  }
   let cmView = null;
   let domSnapshot = null;
   const outputEl = document.getElementById("output");
@@ -25861,7 +26143,7 @@ function startEditor(shell2, opts = {}) {
     root.style.gap = "8px";
     const header = document.createElement("div");
     header.className = "writer-header soft";
-    header.textContent = isTemplate ? `TEMPLATE - ${templateName}` : `JOURNAL - ${fmtBannerDate(state2.date)}`;
+    header.textContent = isTemplate ? `TEMPLATE - ${state2.templateName ?? templateName}` : `JOURNAL - ${fmtBannerDate(state2.date)}`;
     const help = document.createElement("div");
     help.className = "writer-help muted";
     const saveCombo = isMac ? "CMD + S" : "CTRL + S";
@@ -26284,35 +26566,32 @@ function startEditor(shell2, opts = {}) {
     }
   }
   async function save() {
-    if (cmView) {
-      const text = cmView.state.doc.toString();
-      state2.buffer = text.split("\n");
-      try {
-        if (isTemplate) {
-          if (!window.db || typeof window.db.saveTemplate !== "function") {
-            throw new Error("Template storage is not available.");
-          }
-          await window.db.saveTemplate(templateName, text);
-          showTemplateSavedToast();
-        } else if (window.db && typeof window.db.upsert === "function") {
-          await window.db.upsert(state2.date, text);
-        }
-      } catch (err) {
-        const msg = err?.message || String(err);
-        const statusEl = document.getElementById("writerStatus");
-        if (statusEl) {
-          statusEl.textContent = `Save failed: ${msg}`;
-        } else {
-          info(`Save failed: ${msg}`);
-        }
-        return;
+    if (!cmView) return;
+    if (isTemplate) {
+      promptTemplateSave();
+      return;
+    }
+    const text = cmView.state.doc.toString();
+    state2.buffer = text.split("\n");
+    try {
+      if (window.db && typeof window.db.upsert === "function") {
+        await window.db.upsert(state2.date, text);
       }
+    } catch (err) {
+      const msg = err?.message || String(err);
+      const statusEl = document.getElementById("writerStatus");
+      if (statusEl) {
+        statusEl.textContent = `Save failed: ${msg}`;
+      } else {
+        info(`Save failed: ${msg}`);
+      }
+      return;
     }
     clearUnsaved();
     flashSaveBar();
     state2.dirty = false;
     const status = document.getElementById("writerStatus");
-    const message = isTemplate ? `Template "${templateName}" saved (${summary()})` : `Saved (${summary()})`;
+    const message = `Saved (${summary()})`;
     if (status) {
       status.textContent = message;
     } else {
@@ -26334,7 +26613,7 @@ function startEditor(shell2, opts = {}) {
     } catch (_) {
     }
   }
-  function showTemplateModal({ onSave, onCancel, initialValue = "" } = {}) {
+  function showTemplateModal({ onSave, onCancel, initialValue = "", initialSchedule: initialSchedule2 = null } = {}) {
     const prev = document.getElementById("templateModal");
     if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
     const wrap = document.createElement("div");
@@ -26348,6 +26627,72 @@ function startEditor(shell2, opts = {}) {
                         <span>Template name</span>
                         <input type="text" name="templateName" autocomplete="off" spellcheck="false" />
                     </label>
+                    <div class="cj-modal-field cj-schedule">
+                        <span class="cj-schedule-title">Repeating schedule</span>
+                        <div class="cj-schedule-intro muted">Optional schedule. More specific rules win (Year &gt; Month &gt; Week &gt; Day).</div>
+                        <div class="cj-schedule-section" data-section="day">
+                            <label class="cj-schedule-row">
+                                <input type="checkbox" class="cj-sched-enable" name="schedDayEnabled" />
+                                <span>Every</span>
+                                <input type="number" min="1" step="1" name="schedDayInterval" />
+                                <span>day(s)</span>
+                            </label>
+                        </div>
+                        <div class="cj-schedule-section" data-section="week">
+                            <label class="cj-schedule-row">
+                                <input type="checkbox" class="cj-sched-enable" name="schedWeekEnabled" />
+                                <span>Repeat every</span>
+                                <input type="number" min="1" step="1" name="schedWeekInterval" />
+                                <span>week(s) on</span>
+                            </label>
+                            <div class="cj-schedule-weekdays">
+                                <label><input type="checkbox" name="schedWeekDay" value="1">Mon</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="2">Tue</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="3">Wed</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="4">Thu</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="5">Fri</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="6">Sat</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="0">Sun</label>
+                            </div>
+                        </div>
+                        <div class="cj-schedule-section" data-section="month">
+                            <label class="cj-schedule-row">
+                                <input type="checkbox" class="cj-sched-enable" name="schedMonthEnabled" />
+                                <span>Repeat every</span>
+                                <input type="number" min="1" step="1" name="schedMonthInterval" />
+                                <span>month(s) on the</span>
+                            </label>
+                            <div class="cj-schedule-month">
+                                <input type="number" min="1" max="31" step="1" name="schedMonthDay" class="cj-month-day" />
+                                <select name="schedMonthNth" class="cj-month-nth" style="display:none;">
+                                    <option value="1">1st</option>
+                                    <option value="2">2nd</option>
+                                    <option value="3">3rd</option>
+                                    <option value="4">4th</option>
+                                    <option value="last">Last</option>
+                                </select>
+                                <select name="schedMonthTarget">
+                                    <option value="day">Day</option>
+                                    <option value="1">Mon</option>
+                                    <option value="2">Tue</option>
+                                    <option value="3">Wed</option>
+                                    <option value="4">Thu</option>
+                                    <option value="5">Fri</option>
+                                    <option value="6">Sat</option>
+                                    <option value="0">Sun</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="cj-schedule-section" data-section="year">
+                            <label class="cj-schedule-row cj-schedule-row-year">
+                                <input type="checkbox" class="cj-sched-enable" name="schedYearEnabled" />
+                                <span>Repeat every</span>
+                                <input type="number" min="1" step="1" name="schedYearInterval" />
+                                <span>year(s) on</span>
+                                <input type="date" name="schedYearDate" />
+                            </label>
+                        </div>
+                    </div>
                     <div class="cj-modal-error error" style="display:none;"></div>
                 </div>
                 <div class="cj-modal-actions">
@@ -26362,6 +26707,72 @@ function startEditor(shell2, opts = {}) {
     const btnSave = wrap.querySelector("button.save");
     const btnCancel = wrap.querySelector("button.cancel");
     const errorEl = wrap.querySelector(".cj-modal-error");
+    const dayEnable = wrap.querySelector('input[name="schedDayEnabled"]');
+    const dayInterval = wrap.querySelector('input[name="schedDayInterval"]');
+    const weekEnable = wrap.querySelector('input[name="schedWeekEnabled"]');
+    const weekInterval = wrap.querySelector('input[name="schedWeekInterval"]');
+    const weekDayInputs = Array.from(wrap.querySelectorAll('input[name="schedWeekDay"]'));
+    const monthEnable = wrap.querySelector('input[name="schedMonthEnabled"]');
+    const monthInterval = wrap.querySelector('input[name="schedMonthInterval"]');
+    const monthDayInput = wrap.querySelector('input[name="schedMonthDay"]');
+    const monthNthSelect = wrap.querySelector('select[name="schedMonthNth"]');
+    const monthTarget = wrap.querySelector('select[name="schedMonthTarget"]');
+    const yearEnable = wrap.querySelector('input[name="schedYearEnabled"]');
+    const yearInterval = wrap.querySelector('input[name="schedYearInterval"]');
+    const yearDate = wrap.querySelector('input[name="schedYearDate"]');
+    const sectionDescriptors = [
+      { key: "day", checkbox: dayEnable, inputs: [dayInterval] },
+      { key: "week", checkbox: weekEnable, inputs: [weekInterval, ...weekDayInputs] },
+      { key: "month", checkbox: monthEnable, inputs: [monthInterval, monthDayInput, monthNthSelect, monthTarget] },
+      { key: "year", checkbox: yearEnable, inputs: [yearInterval, yearDate] }
+    ];
+    const primaryCheckboxes = sectionDescriptors.map((s) => s.checkbox).filter(Boolean);
+    const scheduleInitial = cloneTemplateSchedule(initialSchedule2);
+    const todayIso = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    let anchorSeed = scheduleInitial && isISODate(scheduleInitial.anchorDate) ? scheduleInitial.anchorDate : todayIso;
+    const setInputsDisabled = (inputs, disabled) => {
+      for (const inputEl of inputs) {
+        if (!inputEl) continue;
+        inputEl.disabled = !!disabled;
+      }
+    };
+    const refreshSectionLocks = () => {
+      const activeDescriptor = sectionDescriptors.find(({ checkbox }) => checkbox && checkbox.checked) || null;
+      sectionDescriptors.forEach(({ checkbox, inputs }) => {
+        if (!checkbox) return;
+        const section = checkbox.closest(".cj-schedule-section");
+        const isActive = checkbox.checked;
+        if (section) {
+          section.dataset.active = isActive ? "1" : "0";
+        }
+        checkbox.disabled = !!activeDescriptor && checkbox !== activeDescriptor.checkbox;
+        setInputsDisabled(inputs, !isActive);
+      });
+      syncMonthMode();
+    };
+    const ensureSectionEnabled = (checkbox) => {
+      if (!checkbox || checkbox.disabled || checkbox.checked) return;
+      checkbox.checked = true;
+      refreshSectionLocks();
+    };
+    primaryCheckboxes.forEach((checkbox) => {
+      if (!checkbox) return;
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          sectionDescriptors.forEach(({ checkbox: sibling }) => {
+            if (sibling && sibling !== checkbox) sibling.checked = false;
+          });
+        }
+        refreshSectionLocks();
+      });
+    });
+    sectionDescriptors.forEach(({ checkbox, inputs }) => {
+      inputs.forEach((ctrl) => {
+        if (!ctrl) return;
+        ctrl.addEventListener("focus", () => ensureSectionEnabled(checkbox), { passive: true });
+      });
+    });
+    refreshSectionLocks();
     if (input2) {
       input2.value = initialValue;
       try {
@@ -26377,6 +26788,95 @@ function startEditor(shell2, opts = {}) {
       } else {
         errorEl.textContent = "";
         errorEl.style.display = "none";
+      }
+    };
+    function syncMonthMode() {
+      if (!monthTarget) return;
+      const useDay = monthTarget.value === "day";
+      if (monthDayInput) {
+        monthDayInput.style.display = useDay ? "" : "none";
+        monthDayInput.disabled = !useDay || monthEnable && !monthEnable.checked;
+        if (useDay) {
+          monthDayInput.min = "1";
+          monthDayInput.max = "31";
+          if (!monthDayInput.value) monthDayInput.value = "1";
+        }
+      }
+      if (monthNthSelect) {
+        monthNthSelect.style.display = useDay ? "none" : "";
+        monthNthSelect.disabled = useDay || monthEnable && !monthEnable.checked;
+        if (!useDay && !monthNthSelect.value) {
+          monthNthSelect.value = "1";
+        }
+      }
+    }
+    const applyInitialSchedule = () => {
+      if (dayInterval) dayInterval.value = scheduleInitial?.day?.interval ?? "1";
+      if (dayEnable) dayEnable.checked = !!scheduleInitial?.day;
+      if (weekInterval) weekInterval.value = scheduleInitial?.week?.interval ?? "1";
+      if (weekEnable) weekEnable.checked = !!scheduleInitial?.week;
+      if (scheduleInitial?.week?.weekdays && weekDayInputs.length) {
+        const set = new Set(scheduleInitial.week.weekdays.map(Number));
+        weekDayInputs.forEach((cb) => {
+          cb.checked = set.has(Number(cb.value));
+        });
+      } else {
+        weekDayInputs.forEach((cb) => {
+          cb.checked = false;
+        });
+      }
+      if (monthInterval) monthInterval.value = scheduleInitial?.month?.interval ?? "1";
+      if (monthEnable) monthEnable.checked = !!scheduleInitial?.month;
+      if (scheduleInitial?.month?.mode === "weekday" && scheduleInitial.month.weekday !== void 0) {
+        if (monthTarget) monthTarget.value = String(scheduleInitial.month.weekday);
+        if (monthNthSelect) monthNthSelect.value = String(scheduleInitial.month.nth === "last" ? "last" : scheduleInitial.month.nth ?? "1");
+        if (monthDayInput && !monthDayInput.value) monthDayInput.value = "1";
+      } else {
+        if (monthTarget) monthTarget.value = "day";
+        if (monthDayInput) monthDayInput.value = scheduleInitial?.month?.day ?? "1";
+        if (monthNthSelect && !monthNthSelect.value) monthNthSelect.value = "1";
+      }
+      if (yearInterval) yearInterval.value = scheduleInitial?.year?.interval ?? "1";
+      if (yearEnable) yearEnable.checked = !!scheduleInitial?.year;
+      const yearDefault = scheduleInitial?.year?.startDate && isISODate(scheduleInitial.year.startDate) ? scheduleInitial.year.startDate : anchorSeed;
+      if (yearDate) yearDate.value = yearDefault;
+      refreshSectionLocks();
+    };
+    const collectRawSchedule = () => {
+      const yearDateVal = yearDate && yearDate.value ? yearDate.value : "";
+      const yearDateValid = isISODate(yearDateVal);
+      const anchorDate = yearEnable && yearEnable.checked && yearDateValid ? yearDateVal : anchorSeed;
+      return {
+        anchorDate,
+        day: {
+          enabled: !!(dayEnable && dayEnable.checked),
+          interval: dayInterval ? dayInterval.value : ""
+        },
+        week: {
+          enabled: !!(weekEnable && weekEnable.checked),
+          interval: weekInterval ? weekInterval.value : "",
+          weekdays: weekDayInputs.map((cb) => cb.checked ? Number(cb.value) : null).filter((v) => v !== null)
+        },
+        month: {
+          enabled: !!(monthEnable && monthEnable.checked),
+          interval: monthInterval ? monthInterval.value : "",
+          mode: monthTarget && monthTarget.value !== "day" ? "weekday" : "day",
+          value: monthTarget && monthTarget.value !== "day" ? monthNthSelect ? monthNthSelect.value : "" : monthDayInput ? monthDayInput.value : "",
+          weekday: monthTarget && monthTarget.value !== "day" ? Number(monthTarget.value) : null
+        },
+        year: {
+          enabled: !!(yearEnable && yearEnable.checked),
+          interval: yearInterval ? yearInterval.value : "",
+          date: yearDateValid ? yearDateVal : ""
+        }
+      };
+    };
+    const focusElement = (el) => {
+      if (!el) return;
+      try {
+        el.focus({ preventScroll: true });
+      } catch {
+        el.focus();
       }
     };
     let submitting = false;
@@ -26398,11 +26898,7 @@ function startEditor(shell2, opts = {}) {
       if (!value) {
         showError("Template name is required.");
         if (input2) {
-          try {
-            input2.focus({ preventScroll: true });
-          } catch {
-            input2.focus();
-          }
+          focusElement(input2);
           try {
             input2.select();
           } catch {
@@ -26410,11 +26906,80 @@ function startEditor(shell2, opts = {}) {
         }
         return;
       }
+      const rawSchedule = collectRawSchedule();
+      const normalized = normalizeTemplateSchedule(rawSchedule, { defaultAnchorDate: rawSchedule.anchorDate });
+      if (rawSchedule.day.enabled && (!normalized || !normalized.day)) {
+        showError("Daily schedule interval must be at least 1.");
+        focusElement(dayInterval);
+        return;
+      }
+      if (rawSchedule.week.enabled) {
+        if (!rawSchedule.week.weekdays.length) {
+          showError("Select at least one weekday for the weekly schedule.");
+          focusElement(weekDayInputs[0]);
+          return;
+        }
+        if (!normalized || !normalized.week) {
+          showError("Weekly schedule interval must be at least 1.");
+          focusElement(weekInterval);
+          return;
+        }
+      }
+      if (rawSchedule.month.enabled) {
+        if (rawSchedule.month.mode === "day") {
+          const dayVal = Number(rawSchedule.month.value);
+          if (!Number.isFinite(dayVal) || dayVal < 1 || dayVal > 31) {
+            showError("Choose a day between 1 and 31 for the monthly schedule.");
+            focusElement(monthDayInput);
+            return;
+          }
+          if (!normalized || !normalized.month || normalized.month.mode !== "day") {
+            showError("Monthly schedule interval must be at least 1.");
+            focusElement(monthInterval);
+            return;
+          }
+        } else {
+          if (rawSchedule.month.weekday === null) {
+            showError("Choose a weekday for the monthly schedule.");
+            focusElement(monthTarget);
+            return;
+          }
+          if (!normalized || !normalized.month || normalized.month.mode !== "weekday") {
+            showError("Monthly schedule interval must be at least 1.");
+            focusElement(monthInterval);
+            return;
+          }
+          if (normalized.month.nth !== "last") {
+            const nthVal = Number(rawSchedule.month.value);
+            if (!Number.isFinite(nthVal) || nthVal < 1 || nthVal > 4) {
+              showError("Choose 1st, 2nd, 3rd, 4th, or Last for the monthly schedule.");
+              focusElement(monthNthSelect);
+              return;
+            }
+          }
+        }
+      }
+      if (rawSchedule.year.enabled) {
+        if (!isISODate(rawSchedule.year.date)) {
+          showError("Pick a valid date for the yearly schedule.");
+          focusElement(yearDate);
+          return;
+        }
+        if (!normalized || !normalized.year) {
+          showError("Yearly schedule interval must be at least 1.");
+          focusElement(yearInterval);
+          return;
+        }
+      }
+      const schedulePayload = normalized ? cloneTemplateSchedule(normalized) : null;
+      if (normalized && normalized.anchorDate) {
+        anchorSeed = normalized.anchorDate;
+      }
       showError("");
       submitting = true;
       try {
         if (typeof onSave === "function") {
-          await onSave(value);
+          await onSave(value, schedulePayload);
         }
         cleanup();
       } catch (err) {
@@ -26422,11 +26987,7 @@ function startEditor(shell2, opts = {}) {
         const message = err?.message || String(err);
         showError(message);
         if (input2) {
-          try {
-            input2.focus({ preventScroll: true });
-          } catch {
-            input2.focus();
-          }
+          focusElement(input2);
           try {
             input2.select();
           } catch {
@@ -26442,8 +27003,8 @@ function startEditor(shell2, opts = {}) {
         reject();
         return;
       }
-      if (k === "enter") {
-        if (document.activeElement === input2 || document.activeElement === btnSave) {
+      if (k === "enter" && !e.shiftKey) {
+        if (wrap.contains(document.activeElement)) {
           e.preventDefault();
           e.stopPropagation();
           accept();
@@ -26452,6 +27013,16 @@ function startEditor(shell2, opts = {}) {
       }
     };
     window.addEventListener("keydown", onKey, true);
+    applyInitialSchedule();
+    if (monthTarget) monthTarget.addEventListener("change", () => {
+      syncMonthMode();
+      refreshSectionLocks();
+    });
+    if (yearDate) yearDate.addEventListener("change", () => {
+      if (yearEnable && yearEnable.checked && yearDate && isISODate(yearDate.value)) {
+        anchorSeed = yearDate.value;
+      }
+    });
     if (btnSave) btnSave.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -26471,11 +27042,7 @@ function startEditor(shell2, opts = {}) {
     });
     setTimeout(() => {
       if (input2) {
-        try {
-          input2.focus({ preventScroll: true });
-        } catch (_) {
-          input2.focus();
-        }
+        focusElement(input2);
       }
     }, 0);
   }
@@ -26488,8 +27055,18 @@ function startEditor(shell2, opts = {}) {
     const text = cmView.state.doc.toString();
     state2.buffer = text.split("\n");
     showTemplateModal({
-      onSave: async (name2) => {
-        await window.db.saveTemplate(name2, text);
+      onSave: async (name2, schedule) => {
+        const saved = await window.db.saveTemplate(name2, text, schedule);
+        const nextSchedule = saved && saved.schedule ? cloneTemplateSchedule(saved.schedule) : cloneTemplateSchedule(schedule);
+        state2.templateSchedule = nextSchedule;
+        state2.templateName = name2;
+        state2.id = name2;
+        state2.title = `Template: ${name2}`;
+        const headerEl = document.querySelector(".writer-header");
+        if (headerEl) headerEl.textContent = `TEMPLATE - ${name2}`;
+        clearUnsaved();
+        flashSaveBar();
+        state2.dirty = false;
         const status = document.getElementById("writerStatus");
         if (status) {
           status.textContent = `Template "${name2}" saved (${summary()})`;
@@ -26498,7 +27075,8 @@ function startEditor(shell2, opts = {}) {
         }
         showTemplateSavedToast();
       },
-      initialValue: isTemplate ? templateName ?? "" : ""
+      initialValue: isTemplate ? state2.templateName ?? templateName ?? "" : "",
+      initialSchedule: state2.templateSchedule
     });
   }
   function showConfirmModal(message, onYes, onNo) {
@@ -26690,7 +27268,8 @@ var THEME_VAR_WHITELIST = [
   "--base-font-size",
   "--editor-font-size",
   "--editor-line-height",
-  "--caret-offset-y"
+  "--caret-offset-y",
+  "--editor-max-width"
 ];
 var COLOR_ALPHA = {
   "--editor-selection-bg": 0.25,
@@ -26710,7 +27289,9 @@ var COLOR_FALLBACKS = {
   "--editor-gutter-bg": "--bg",
   "--border": "--text"
 };
-var COLOR_VARS = THEME_VAR_WHITELIST.filter((v) => !v.startsWith("--font") && !v.endsWith("-size") && !v.endsWith("-line-height") && v !== "--caret-offset-y");
+var COLOR_VARS = THEME_VAR_WHITELIST.filter(
+  (v) => !v.startsWith("--font") && !v.endsWith("-size") && !v.endsWith("-line-height") && v !== "--caret-offset-y" && v !== "--editor-max-width"
+);
 var GOOGLE_FONT_CATALOG = {
   "inter": { family: "Inter", weights: [400, 600] },
   "ibm plex sans": { family: "IBM Plex Sans", weights: [400, 600] },
@@ -29590,7 +30171,7 @@ function shiftISO(days = 0, tz = Intl.DateTimeFormat().resolvedOptions().timeZon
   const shifted = new Date(base2.getTime() + days * 864e5);
   return fmt.format(shifted);
 }
-function isISODate(s) {
+function isISODate2(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 function isMonthDay(s) {
@@ -29626,6 +30207,34 @@ function resolveMonthDayPast(mmdd, tz = Intl.DateTimeFormat().resolvedOptions().
     }
   }
   return today;
+}
+function pickTemplateForDate(templates, dateStr) {
+  if (!Array.isArray(templates) || !templates.length) return null;
+  const matches = [];
+  for (const tpl of templates) {
+    const schedule = parseTemplateSchedule(tpl.schedule);
+    if (!schedule) continue;
+    const result = matchTemplateSchedule(schedule, dateStr);
+    if (!result) continue;
+    const weight = TEMPLATE_SCHEDULE_WEIGHT[result.level] ?? -1;
+    matches.push({
+      template: tpl,
+      schedule: result.schedule || schedule,
+      level: result.level,
+      weight
+    });
+  }
+  if (!matches.length) return null;
+  matches.sort((a, b) => {
+    if (a.weight !== b.weight) return b.weight - a.weight;
+    const updatedA = a.template.updated_at || a.template.updatedAt || "";
+    const updatedB = b.template.updated_at || b.template.updatedAt || "";
+    if (updatedA !== updatedB) return updatedA > updatedB ? -1 : 1;
+    const nameA = (a.template.name || "").toLowerCase();
+    const nameB = (b.template.name || "").toLowerCase();
+    return nameA.localeCompare(nameB);
+  });
+  return matches[0];
 }
 var input = document.querySelector("#cmdInput");
 var output = document.querySelector("#output");
@@ -29745,10 +30354,11 @@ if (!db) {
           });
         });
       },
-      async saveTemplate(name2, content2 = "") {
+      async saveTemplate(name2, content2 = "", schedule = null) {
         const trimmed = String(name2 ?? "").trim();
         if (!trimmed) throw new Error("Template name required");
         const now = (/* @__PURE__ */ new Date()).toISOString();
+        const normalizedSchedule = schedule ? normalizeTemplateSchedule(schedule, { defaultAnchorDate: schedule.anchorDate }) : null;
         return txRunStore(TEMPLATE_STORE, "readwrite", (store) => {
           return new Promise((resolve, reject) => {
             const getReq = store.get(trimmed);
@@ -29758,7 +30368,8 @@ if (!db) {
                 name: trimmed,
                 content: String(content2 ?? ""),
                 created_at: existing?.created_at ?? now,
-                updated_at: now
+                updated_at: now,
+                schedule: normalizedSchedule ? cloneTemplateSchedule(normalizedSchedule) : null
               };
               const putReq = store.put(row);
               putReq.onsuccess = () => resolve(row);
@@ -29774,7 +30385,12 @@ if (!db) {
         return txRunStore(TEMPLATE_STORE, "readonly", (store) => {
           return new Promise((resolve, reject) => {
             const req = store.get(trimmed);
-            req.onsuccess = () => resolve(req.result || null);
+            req.onsuccess = () => {
+              const row = req.result || null;
+              if (!row) return resolve(null);
+              const schedule = parseTemplateSchedule(row.schedule);
+              resolve({ ...row, schedule });
+            };
             req.onerror = () => reject(req.error);
           });
         });
@@ -29790,8 +30406,10 @@ if (!db) {
               const cur = cursorReq.result;
               if (cur && out.length < max) {
                 const value = cur.value || {};
+                const schedule = parseTemplateSchedule(value.schedule);
                 out.push({
                   ...value,
+                  schedule,
                   preview: (value.content || "").slice(0, 200)
                 });
                 cur.continue();
@@ -29864,9 +30482,25 @@ if (!db) {
         const res = await invoke("entry:deleteByDate", date);
         return !!(res && res.deleted);
       },
-      saveTemplate: (name2, content2 = "") => invoke("template:upsert", { name: name2, content: content2 }),
-      getTemplate: (name2) => invoke("template:getByName", name2),
-      listTemplates: () => invoke("template:list"),
+      saveTemplate: async (name2, content2 = "", schedule = null) => {
+        const normalized = schedule ? normalizeTemplateSchedule(schedule, { defaultAnchorDate: schedule.anchorDate }) : null;
+        const res = await invoke("template:upsert", { name: name2, content: content2, schedule: normalized });
+        if (!res) return res;
+        return { ...res, schedule: parseTemplateSchedule(res.schedule) };
+      },
+      getTemplate: async (name2) => {
+        const res = await invoke("template:getByName", name2);
+        if (!res) return null;
+        return { ...res, schedule: parseTemplateSchedule(res.schedule) };
+      },
+      listTemplates: async () => {
+        const rows = await invoke("template:list");
+        if (!Array.isArray(rows)) return [];
+        return rows.map((row) => ({
+          ...row,
+          schedule: parseTemplateSchedule(row.schedule)
+        }));
+      },
       deleteTemplate: (name2) => invoke("template:delete", name2)
     };
   }
@@ -29906,7 +30540,7 @@ var shell = {
     }
     activeProgram = null;
     this.resetPrompt();
-    focus();
+    focusInput();
   },
   suspend() {
     if (activeProgram && typeof activeProgram.disable === "function") {
@@ -29917,7 +30551,7 @@ var shell = {
     }
     activeProgram = null;
     this.resetPrompt();
-    focus();
+    focusInput();
   }
 };
 function esc(s) {
@@ -30082,7 +30716,7 @@ var handleKeydown = async (e) => {
     }
   }
 };
-var focus = () => {
+var focusInput = () => {
   input.focus();
   updateCaret();
 };
@@ -30509,7 +31143,7 @@ register("journal", async (argv = []) => {
     date = shiftISO(-1);
   } else if (dateToken === "-t") {
     date = shiftISO(1);
-  } else if (isISODate(dateToken)) {
+  } else if (isISODate2(dateToken)) {
     date = dateToken;
   } else if (isMonthDay(dateToken)) {
     date = resolveMonthDayPast(dateToken);
@@ -30550,7 +31184,26 @@ register("journal", async (argv = []) => {
       return;
     }
     let row = await db.get(date);
-    if (!row) row = await db.upsert(date, "");
+    if (!row) {
+      let seededContent = "";
+      let usedTemplateName = null;
+      if (db && typeof db.listTemplates === "function") {
+        try {
+          const templates = await db.listTemplates();
+          const match = pickTemplateForDate(templates, date);
+          if (match && match.template) {
+            seededContent = match.template.content ?? "";
+            usedTemplateName = match.template.name ?? null;
+          }
+        } catch (err) {
+          console.warn("Repeating template selection failed:", err);
+        }
+      }
+      row = await db.upsert(date, seededContent);
+      if (usedTemplateName) {
+        print(`<div class="muted">Initialized with template "${esc(usedTemplateName)}".</div>`);
+      }
+    }
     startEditor(shell, {
       id: row.id ?? date,
       date: row.date ?? date,
@@ -30618,6 +31271,7 @@ register("view", async (argv = []) => {
           templateName: item.name,
           id: item.name,
           initialContent: record.content ?? "",
+          templateSchedule: record.schedule ?? null,
           title: `Template: ${item.name}`
         });
       },
@@ -30681,7 +31335,7 @@ register("search", async (argv = []) => {
 register("delete", async (argv = []) => {
   const arg = String(argv[0] || "").trim();
   const date = arg === "-t" || arg === "--today" ? todayISO() : arg;
-  if (!isISODate(date)) {
+  if (!isISODate2(date)) {
     print('<div class="error">Usage: <span class="kbd">delete YYYY-MM-DD</span> or <span class="kbd">delete -t</span></div>');
     return;
   }
@@ -30988,12 +31642,10 @@ register("switch", async (argv = []) => {
   print(`<div class="error">Invalid mode: ${esc(arg)}<br>Available modes: web, desktop</div>`);
 }, "Switch between web and desktop modes");
 (() => {
-  window.onload = () => {
-    banner();
-    focus();
-  };
+  banner();
+  focusInput();
   input.addEventListener("keydown", handleKeydown);
-  screen.addEventListener("click", focus);
+  screen.addEventListener("click", focusInput);
   input.addEventListener("input", scheduleCaret);
   input.addEventListener("click", scheduleCaret);
   input.addEventListener("keyup", scheduleCaret);

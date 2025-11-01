@@ -18,11 +18,9 @@
     --accent: var(--text);
 
     /* Useful computed values */
-    --text-rgb: 115, 255, 122; /* matches #73ff7a */
     --bg-radial: #0e160f;
     --soft: #9cff9f;
-    --accent-aux: #7CFFB2;
-    --border: rgba(var(--text-rgb), 0.12);
+    --border: color-mix(in srgb, var(--accent) 12%, transparent);
 
     /* Console theme */
     --console-bg: var(--app-bg);
@@ -32,11 +30,11 @@
     --editor-bg: var(--app-bg);
     --editor-fg: var(--app-fg);
     --editor-caret: var(--app-fg);
-    --editor-selection-bg: rgba(var(--text-rgb), 0.25);
+    --editor-selection-bg: color-mix(in srgb, var(--accent) 25%, transparent);
     --editor-active-line-bg: color-mix(in srgb, var(--text) 18%, transparent);
     --editor-gutter-bg: transparent;
     --editor-panel-bg: transparent;
-    --editor-todo-hover-bg: rgba(var(--text-rgb), 0.08);
+    --editor-todo-hover-bg: color-mix(in srgb, var(--accent) 8%, transparent);
     --editor-max-width: 81ch;
 
     --base-font-size: 14px;

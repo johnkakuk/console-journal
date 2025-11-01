@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld('db', {
     listRecent: (limit = 15)  => ipcRenderer.invoke('entry:listRecent', limit),
     deleteByDate: (date)      => ipcRenderer.invoke('entry:deleteByDate', date),
     delete:   (date)          => ipcRenderer.invoke('entry:deleteByDate', date),
-    saveTemplate: (name, content) => ipcRenderer.invoke('template:upsert', { name, content }),
+    saveTemplate: (name, content, schedule) => ipcRenderer.invoke('template:upsert', { name, content, schedule }),
     getTemplate:  (name)          => ipcRenderer.invoke('template:getByName', name),
     listTemplates: ()             => ipcRenderer.invoke('template:list'),
     deleteTemplate: (name)        => ipcRenderer.invoke('template:delete', name),
