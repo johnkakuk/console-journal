@@ -432,21 +432,6 @@ export function startEditor(shell, opts = {}) {
         { tag: [t.heading4, t.heading5, t.heading6], fontWeight: '700' }
     ]);
 
-    // Scroll by one line height when Enter is pressed
-    const scrollByLine = keymap.of([{
-        key: 'Enter' || 'Backspace',
-        run: (view) => {
-            // Let CodeMirror handle the newline normally
-            const tr = view.state.replaceSelection('\n');
-            view.dispatch(tr);
-            // Scroll the scroller by one line height
-            const scroller = document.querySelector("#screen");
-            if (scroller && view.defaultLineHeight) {
-                scroller.scrollTop += view.defaultLineHeight;
-            }
-            return true;
-        }
-    }]);
 
     // When the active line leaves the #screen viewport, snap it back to the nearer edge
     const snapOutOfView = EditorView.updateListener.of((update) => {
@@ -544,6 +529,63 @@ export function startEditor(shell, opts = {}) {
         }
     });
 
+    // Typewriter: pixel-accurate scroll advance when caret moves to a new visual row (no drift)
+    function typewriterAdvanceScroll(screenEl) {
+        return ViewPlugin.fromClass(class {
+            constructor(view) {
+                this.view = view;
+                this._scheduled = false;
+                this._lastBottom = null;   // last caret bottom (px) relative to screenEl scroll
+                this._lineH = view.defaultLineHeight || 24;
+                this.schedule();
+            }
+            schedule() {
+                if (this._scheduled) return;
+                this._scheduled = true;
+                this.view.requestMeasure({
+                    read: () => {
+                        const head = this.view.state.selection.main.head;
+                        const caret = this.view.coordsAtPos(head);
+                        if (!caret || !screenEl) {
+                            this._curBottom = null;
+                            return;
+                        }
+                        const scrRect = screenEl.getBoundingClientRect();
+                        // caret bottom in scroller coordinates (include current scrollTop)
+                        this._curBottom = (caret.bottom - scrRect.top) + screenEl.scrollTop;
+                    },
+                    write: () => {
+                        this._scheduled = false;
+                        const cur = this._curBottom;
+                        if (cur == null) return;
+                        if (this._lastBottom == null) {
+                            this._lastBottom = cur;
+                            return;
+                        }
+                        // Positive delta when caret advanced to a lower visual row (enter or soft-wrap)
+                        let dy = cur - this._lastBottom;
+                        // Ignore tiny jitter; only act when we clearly crossed to next row
+                        const threshold = this._lineH * 0.6;
+                        if (dy > threshold) {
+                            // Scroll by the measured delta (rounded to pixel) to avoid fractional drift
+                            screenEl.scrollTop += Math.round(dy);
+                            this._lastBottom = cur;
+                        } else if (dy < -threshold) {
+                            // Caret moved up (e.g., arrow up); resync baseline without scrolling
+                            this._lastBottom = cur;
+                        }
+                    }
+                });
+            }
+            update(update) {
+                // Reschedule on any user action that may shift caret position/layout
+                if (update.selectionSet || update.docChanged || update.viewportChanged || update.scrollChanged || update.domChanged) {
+                    this.schedule();
+                }
+            }
+        });
+    }
+
     const markDirtyListener = EditorView.updateListener.of((update) => {
         if (update.docChanged) {
             markUnsaved();
@@ -639,12 +681,11 @@ export function startEditor(shell, opts = {}) {
             // below and uncomment the `highlightActiveLine()` line here. Also restore the
             // .cm-activeLine background in the theme above.
             activeRowPlugin,
-            // highlightActiveLine(), // ← previous behavior (paragraph-wide highlight)
+            typewriterAdvanceScroll(screenEl),
             snapOutOfView,
             markDirtyListener,
             history(),
             todoPlugin,
-            scrollByLine,
             indentConfig,
             smartListTabKeymap,
             keymap.of([

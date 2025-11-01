@@ -26010,18 +26010,6 @@ function startEditor(shell2, opts = {}) {
     { tag: tags.heading3, fontWeight: "700", fontSize: "1.2em" },
     { tag: [tags.heading4, tags.heading5, tags.heading6], fontWeight: "700" }
   ]);
-  const scrollByLine = keymap.of([{
-    key: "Enter",
-    run: (view) => {
-      const tr = view.state.replaceSelection("\n");
-      view.dispatch(tr);
-      const scroller = document.querySelector("#screen");
-      if (scroller && view.defaultLineHeight) {
-        scroller.scrollTop += view.defaultLineHeight;
-      }
-      return true;
-    }
-  }]);
   const snapOutOfView = EditorView.updateListener.of((update) => {
     if (!(update.docChanged || update.selectionSet)) return;
     const view = update.view;
@@ -26106,6 +26094,55 @@ function startEditor(shell2, opts = {}) {
       this.dom = null;
     }
   });
+  function typewriterAdvanceScroll(screenEl2) {
+    return ViewPlugin.fromClass(class {
+      constructor(view) {
+        this.view = view;
+        this._scheduled = false;
+        this._lastBottom = null;
+        this._lineH = view.defaultLineHeight || 24;
+        this.schedule();
+      }
+      schedule() {
+        if (this._scheduled) return;
+        this._scheduled = true;
+        this.view.requestMeasure({
+          read: () => {
+            const head = this.view.state.selection.main.head;
+            const caret3 = this.view.coordsAtPos(head);
+            if (!caret3 || !screenEl2) {
+              this._curBottom = null;
+              return;
+            }
+            const scrRect = screenEl2.getBoundingClientRect();
+            this._curBottom = caret3.bottom - scrRect.top + screenEl2.scrollTop;
+          },
+          write: () => {
+            this._scheduled = false;
+            const cur = this._curBottom;
+            if (cur == null) return;
+            if (this._lastBottom == null) {
+              this._lastBottom = cur;
+              return;
+            }
+            let dy = cur - this._lastBottom;
+            const threshold = this._lineH * 0.6;
+            if (dy > threshold) {
+              screenEl2.scrollTop += Math.round(dy);
+              this._lastBottom = cur;
+            } else if (dy < -threshold) {
+              this._lastBottom = cur;
+            }
+          }
+        });
+      }
+      update(update) {
+        if (update.selectionSet || update.docChanged || update.viewportChanged || update.scrollChanged || update.domChanged) {
+          this.schedule();
+        }
+      }
+    });
+  }
   const markDirtyListener = EditorView.updateListener.of((update) => {
     if (update.docChanged) {
       markUnsaved();
@@ -26196,12 +26233,11 @@ function startEditor(shell2, opts = {}) {
       // below and uncomment the `highlightActiveLine()` line here. Also restore the
       // .cm-activeLine background in the theme above.
       activeRowPlugin,
-      // highlightActiveLine(), // ← previous behavior (paragraph-wide highlight)
+      typewriterAdvanceScroll(screenEl),
       snapOutOfView,
       markDirtyListener,
       history(),
       todoPlugin,
-      scrollByLine,
       indentConfig,
       smartListTabKeymap,
       keymap.of([
