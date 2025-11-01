@@ -388,7 +388,7 @@ function newline() {
 // Initial banner
 function banner() {
   print(`<div class="soft">console-journal <span class="muted">v1.0</span> — <span class="stamp">${todayISO()}</span></div>`);
-  print(`<div class="muted">Type <span class="kbd">help</span> to list commands.</div>`);
+  print(`<div class="muted">Type <span class="kbd">tutorial</span> for help.</div>`);
 };
 
 /* -----------------------------------------------------------------------------
@@ -800,6 +800,19 @@ register('help', () => {
         <div class="muted help">${rowsHtml}</div>
     `);
 }, 'List available commands');
+
+register('tutorial', () => {
+    print(`
+    <div class="soft">journal quickstart</div>
+    <div class="muted help">
+        <div><span class="kbd">journal</span> — open today's entry</div>
+        <div><span class="kbd">view</span> — browse the latest entries; use ↑/↓ then Enter to reopen one</div>
+        <div><span class="kbd">search "coffee"</span> — find entries containing your keywords</div>
+        <div><span class="kbd">export -pdf</span> — create a PDF export of the last week when you need a snapshot</div>
+        <div><span class="kbd">help</span> — view all commands</div>
+        <div><span class="kbd">-help</span> — add this flag to most commands for more information</div>
+    </div>`);
+}, 'Quick journaling workflow overview');
 
 register('clear', () => {
     output.innerHTML = '';

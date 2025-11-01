@@ -29026,7 +29026,7 @@ function newline4() {
 }
 function banner() {
   print(`<div class="soft">console-journal <span class="muted">v1.0</span> \u2014 <span class="stamp">${todayISO()}</span></div>`);
-  print(`<div class="muted">Type <span class="kbd">help</span> to list commands.</div>`);
+  print(`<div class="muted">Type <span class="kbd">tutorial</span> for help.</div>`);
 }
 var native = {
   log: console.log,
@@ -29412,6 +29412,18 @@ register("help", () => {
         <div class="muted help">${rowsHtml}</div>
     `);
 }, "List available commands");
+register("tutorial", () => {
+  print(`
+    <div class="soft">journal quickstart</div>
+    <div class="muted help">
+        <div><span class="kbd">journal</span> \u2014 open today's entry</div>
+        <div><span class="kbd">view</span> \u2014 browse the latest entries; use \u2191/\u2193 then Enter to reopen one</div>
+        <div><span class="kbd">search "coffee"</span> \u2014 find entries containing your keywords</div>
+        <div><span class="kbd">export -pdf</span> \u2014 create a PDF export of the last week when you need a snapshot</div>
+        <div><span class="kbd">help</span> \u2014 view all commands</div>
+        <div><span class="kbd">-help</span> \u2014 add this flag to most commands for more information</div>
+    </div>`);
+}, "Quick journaling workflow overview");
 register("clear", () => {
   output.innerHTML = "";
   banner();
