@@ -4,7 +4,10 @@
  * 
 /* ==== main.js — Shell Router & UI ================================================== */
 import { startEditor } from './editor.js';
+import { startThemeApp } from './themeApp.js';
+import { ensureActiveTheme, applyTheme, getDefaultTheme, saveActiveTheme } from './theme.js';
 import { marked } from 'marked';
+import { parseTemplateSchedule, normalizeTemplateSchedule, matchTemplateSchedule, cloneTemplateSchedule, TEMPLATE_SCHEDULE_WEIGHT } from './schedule.js';
 
 // === date helpers ===
 function todayISO(tz = Intl.DateTimeFormat().resolvedOptions().timeZone) {
@@ -71,6 +74,35 @@ function resolveMonthDayPast(mmdd, tz = Intl.DateTimeFormat().resolvedOptions().
     return today;
 }
 
+function pickTemplateForDate(templates, dateStr) {
+    if (!Array.isArray(templates) || !templates.length) return null;
+    const matches = [];
+    for (const tpl of templates) {
+        const schedule = parseTemplateSchedule(tpl.schedule);
+        if (!schedule) continue;
+        const result = matchTemplateSchedule(schedule, dateStr);
+        if (!result) continue;
+        const weight = TEMPLATE_SCHEDULE_WEIGHT[result.level] ?? -1;
+        matches.push({
+            template: tpl,
+            schedule: result.schedule || schedule,
+            level: result.level,
+            weight
+        });
+    }
+    if (!matches.length) return null;
+    matches.sort((a, b) => {
+        if (a.weight !== b.weight) return b.weight - a.weight;
+        const updatedA = a.template.updated_at || a.template.updatedAt || '';
+        const updatedB = b.template.updated_at || b.template.updatedAt || '';
+        if (updatedA !== updatedB) return updatedA > updatedB ? -1 : 1;
+        const nameA = (a.template.name || '').toLowerCase();
+        const nameB = (b.template.name || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+    });
+    return matches[0];
+}
+
 /* -----------------------------------------------------------------------------
  * DOM REFS & SHELL STATE
  * --------------------------------------------------------------------------- */
@@ -84,8 +116,10 @@ if (!db) {
     if (!window.electronAPI) {
         // ===== Minimal IndexedDB adapter for PWA =====
         const DB_NAME = 'console-journal';
-        const DB_VERSION = 1;
+        const DB_VERSION = 3;
         const STORE = 'entries';
+        const TEMPLATE_STORE = 'templates';
+        const SETTINGS_STORE = 'settings';
 
         const openDB = () => new Promise((resolve, reject) => {
             const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -96,22 +130,30 @@ if (!db) {
                     s.createIndex('ym', 'ym', { unique: false });
                     s.createIndex('updated_at', 'updated_at', { unique: false });
                 }
+                if (!db.objectStoreNames.contains(TEMPLATE_STORE)) {
+                    const t = db.createObjectStore(TEMPLATE_STORE, { keyPath: 'name' });
+                    t.createIndex('updated_at', 'updated_at', { unique: false });
+                }
+                if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
+                    db.createObjectStore(SETTINGS_STORE, { keyPath: 'key' });
+                }
             };
             req.onsuccess = () => resolve(req.result);
             req.onerror = () => reject(req.error);
         });
 
-        const txRun = async (mode, fn) => {
+        const txRunStore = async (storeName, mode, fn) => {
             const dbi = await openDB();
             return new Promise((resolve, reject) => {
-                const tx = dbi.transaction(STORE, mode);
-                const store = tx.objectStore(STORE);
+                const tx = dbi.transaction(storeName, mode);
+                const store = tx.objectStore(storeName);
                 let result;
                 try { result = fn(store, tx); } catch (e) { reject(e); return; }
                 tx.oncomplete = () => resolve(result);
                 tx.onerror = () => reject(tx.error);
             });
         };
+        const txRun = (mode, fn) => txRunStore(STORE, mode, fn);
 
         db = {
             async get(date) {
@@ -180,9 +222,125 @@ if (!db) {
                         req.onerror = () => reject(req.error);
                     });
                 });
+            },
+            async saveTemplate(name, content = '', schedule = null) {
+                const trimmed = String(name ?? '').trim();
+                if (!trimmed) throw new Error('Template name required');
+                const now = new Date().toISOString();
+                const normalizedSchedule = schedule
+                    ? normalizeTemplateSchedule(schedule, { defaultAnchorDate: schedule.anchorDate })
+                    : null;
+                return txRunStore(TEMPLATE_STORE, 'readwrite', store => {
+                    return new Promise((resolve, reject) => {
+                        const getReq = store.get(trimmed);
+                        getReq.onsuccess = () => {
+                            const existing = getReq.result;
+                            const row = {
+                                name: trimmed,
+                                content: String(content ?? ''),
+                                created_at: existing?.created_at ?? now,
+                                updated_at: now,
+                                schedule: normalizedSchedule ? cloneTemplateSchedule(normalizedSchedule) : null
+                            };
+                            const putReq = store.put(row);
+                            putReq.onsuccess = () => resolve(row);
+                            putReq.onerror = () => reject(putReq.error);
+                        };
+                        getReq.onerror = () => reject(getReq.error);
+                    });
+                });
+            },
+            async getTemplate(name) {
+                const trimmed = String(name ?? '').trim();
+                if (!trimmed) throw new Error('Template name required');
+                return txRunStore(TEMPLATE_STORE, 'readonly', store => {
+                    return new Promise((resolve, reject) => {
+                        const req = store.get(trimmed);
+                        req.onsuccess = () => {
+                            const row = req.result || null;
+                            if (!row) return resolve(null);
+                            const schedule = parseTemplateSchedule(row.schedule);
+                            resolve({ ...row, schedule });
+                        };
+                        req.onerror = () => reject(req.error);
+                    });
+                });
+            },
+            async listTemplates(limit = 200) {
+                const max = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 500) : 200;
+                return txRunStore(TEMPLATE_STORE, 'readonly', store => {
+                    return new Promise((resolve, reject) => {
+                        const idx = store.index('updated_at');
+                        const out = [];
+                        const cursorReq = idx.openCursor(null, 'prev');
+                        cursorReq.onsuccess = () => {
+                            const cur = cursorReq.result;
+                            if (cur && out.length < max) {
+                                const value = cur.value || {};
+                                const schedule = parseTemplateSchedule(value.schedule);
+                                out.push({
+                                    ...value,
+                                    schedule,
+                                    preview: (value.content || '').slice(0, 200)
+                                });
+                                cur.continue();
+                            } else {
+                                resolve(out);
+                            }
+                        };
+                        cursorReq.onerror = () => reject(cursorReq.error);
+                    });
+                });
+            },
+            async deleteTemplate(name) {
+                const trimmed = String(name ?? '').trim();
+                if (!trimmed) throw new Error('Template name required');
+                return txRunStore(TEMPLATE_STORE, 'readwrite', store => {
+                    return new Promise((resolve, reject) => {
+                        const getReq = store.get(trimmed);
+                        getReq.onsuccess = () => {
+                            const exists = !!getReq.result;
+                            if (!exists) {
+                                resolve({ deleted: 0 });
+                                return;
+                            }
+                            const delReq = store.delete(trimmed);
+                            delReq.onsuccess = () => resolve({ deleted: 1 });
+                            delReq.onerror = () => reject(delReq.error);
+                        };
+                        getReq.onerror = () => reject(getReq.error);
+                    });
+                });
             }
         };
         window.db = db;
+        if (!window.settings) {
+            window.settings = {
+                async get(key) {
+                    const trimmed = String(key ?? '').trim();
+                    if (!trimmed) return null;
+                    return txRunStore(SETTINGS_STORE, 'readonly', store => {
+                        return new Promise((resolve, reject) => {
+                            const req = store.get(trimmed);
+                            req.onsuccess = () => resolve(req.result ? String(req.result.value ?? '') : null);
+                            req.onerror = () => reject(req.error);
+                        });
+                    });
+                },
+                async set(key, value) {
+                    const trimmed = String(key ?? '').trim();
+                    if (!trimmed) throw new Error('Settings key required');
+                    const strValue = String(value ?? '');
+                    return txRunStore(SETTINGS_STORE, 'readwrite', store => {
+                        return new Promise((resolve, reject) => {
+                            const req = store.put({ key: trimmed, value: strValue });
+                            req.onsuccess = () => resolve({ ok: true });
+                            req.onerror = () => reject(req.error);
+                        });
+                    });
+                }
+            };
+        }
     } else {
         // Electron: use preload IPC bridges via a generic invoke fallback
         const invoke = (ch, ...args) =>
@@ -198,11 +356,36 @@ if (!db) {
             search:        (q)                 => invoke('entry:search', q),
             delete:        async (date) => {
                 const res = await invoke('entry:deleteByDate', date);
-                return !!(res && (res.deleted > 0 || res.ok === true));
-            }
+                return !!(res && res.deleted);
+            },
+            saveTemplate: async (name, content='', schedule=null) => {
+                const normalized = schedule
+                    ? normalizeTemplateSchedule(schedule, { defaultAnchorDate: schedule.anchorDate })
+                    : null;
+                const res = await invoke('template:upsert', { name, content, schedule: normalized });
+                if (!res) return res;
+                return { ...res, schedule: parseTemplateSchedule(res.schedule) };
+            },
+            getTemplate:  async (name) => {
+                const res = await invoke('template:getByName', name);
+                if (!res) return null;
+                return { ...res, schedule: parseTemplateSchedule(res.schedule) };
+            },
+            listTemplates: async () => {
+                const rows = await invoke('template:list');
+                if (!Array.isArray(rows)) return [];
+                return rows.map(row => ({
+                    ...row,
+                    schedule: parseTemplateSchedule(row.schedule)
+                }));
+            },
+            deleteTemplate: (name)           => invoke('template:delete', name)
         };
     }
 }
+
+const bootTheme = await ensureActiveTheme();
+applyTheme(bootTheme);
 
 // Whether a subprogram (team.js) is currently consuming input
 let inputState = false;
@@ -237,7 +420,7 @@ const shell = {
         } catch {}
         activeProgram = null;
         this.resetPrompt();
-        focus();
+        focusInput();
     },
     suspend() {
         if (activeProgram && typeof activeProgram.disable === 'function') {
@@ -245,7 +428,7 @@ const shell = {
         }
         activeProgram = null;
         this.resetPrompt();
-        focus();
+        focusInput();
     },
 };
 
@@ -300,7 +483,7 @@ function newline() {
 // Initial banner
 function banner() {
   print(`<div class="soft">console-journal <span class="muted">v1.0</span> — <span class="stamp">${todayISO()}</span></div>`);
-  print(`<div class="muted">Type <span class="kbd">help</span> to list commands.</div>`);
+  print(`<div class="muted">Type <span class="kbd">tutorial</span> for help.</div>`);
 };
 
 /* -----------------------------------------------------------------------------
@@ -438,7 +621,7 @@ const handleKeydown = async (e) => {
     }
 };
 
-const focus = () => {
+const focusInput = () => {
     input.focus();
     updateCaret();
 };
@@ -505,9 +688,37 @@ const scheduleCaret = () => {
 /* -----------------------------------------------------------------------------
  * List UI subprogram
  * --------------------------------------------------------------------------- */
-function createListUI(title, items) {
-    // items: [{ date, preview }]
+function createListUI(title, items, opts = {}) {
+    // items: [{ date, preview }] by default
     let idx = 0;
+    const {
+        getKey = (item) => String(item.date),
+        getStamp = (item) => String(item.date),
+        getPreview = (item) => {
+            const text = (item.preview ?? item.content ?? '').replace(/\n/g, ' ');
+            return text.slice(0, 120);
+        },
+        onOpen = async (item) => {
+            const key = getKey(item);
+            const row = await db.get(key);
+            startEditor(shell, {
+                id: row?.id ?? key,
+                date: key,
+                initialContent: row?.content ?? ''
+            });
+        },
+        onDelete = async (item) => {
+            const key = getKey(item);
+            const res = await db.delete(key);
+            if (typeof res === 'object' && res) {
+                if (typeof res.deleted === 'number') return res.deleted > 0;
+                if ('ok' in res) return !!res.ok;
+            }
+            return !!res;
+        },
+        emptyMessage = '<div class="muted">No entries left.</div>'
+    } = opts;
+
     const container = document.createElement('div');
     container.className = 'listui';
     const head = document.createElement('div');
@@ -516,7 +727,7 @@ function createListUI(title, items) {
     const ul = document.createElement('ul');
     ul.className = 'menu';
     let confirmPending = false;
-    let pendingDate = null;
+    let pendingItem = null;
     let confirmDiv = null;
 
     function render() {
@@ -524,14 +735,16 @@ function createListUI(title, items) {
         items.forEach((it, i) => {
             const li = document.createElement('li');
             if (i === idx) li.classList.add('active');
-            const date = esc(it.date);
-            const prev = esc(((it.preview || it.content || '').replace(/\n/g,' ').slice(0, 120)));
-            li.innerHTML = `<span class="stamp">${date} - </span>${prev}`;
-            // Click-to-select
+            const stampText = esc(String(getStamp(it)));
+            let preview = getPreview(it);
+            if (typeof preview !== 'string') preview = '';
+            const trimmed = preview.trim();
+            const previewHtml = trimmed ? esc(trimmed) : '';
+            const sep = previewHtml ? ' - ' : '';
+            li.innerHTML = `<span class="stamp">${stampText}</span>${sep}${previewHtml}`;
             li.addEventListener('click', () => { idx = i; render(); });
             ul.appendChild(li);
         });
-        // Keep the active row visible when navigating
         const activeEl = ul.querySelector('li.active');
         if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
     }
@@ -547,7 +760,6 @@ function createListUI(title, items) {
         onKey: (e) => {
             if (container.classList.contains('disabled')) return;
             if (!items.length) return;
-            // If a delete confirmation is pending, only accept y/n
             if (confirmPending) {
                 const k = e.key?.toLowerCase?.() || '';
                 if (k === 'y' || k === 'n') {
@@ -559,35 +771,32 @@ function createListUI(title, items) {
                             confirmDiv.innerHTML = `Cancelled.`;
                         }
                         confirmPending = false;
-                        pendingDate = null;
+                        pendingItem = null;
                         return;
                     }
                     (async () => {
                         try {
-                            const res = await db.delete(pendingDate);
-                            const ok = typeof res === 'object' ? (res.deleted > 0) : !!res;
+                            const ok = await onDelete(pendingItem);
+                            const stamp = pendingItem ? esc(String(getStamp(pendingItem))) : '';
                             if (confirmDiv) {
                                 confirmDiv.className = ok ? 'ok' : 'error';
                                 confirmDiv.innerHTML = ok
-                                    ? `Deleted <span class="stamp">${esc(pendingDate)}</span>.`
-                                    : `Nothing deleted for <span class="stamp">${esc(pendingDate)}</span>.`;
+                                    ? `Deleted <span class="stamp">${stamp}</span>.`
+                                    : `Nothing deleted for <span class="stamp">${stamp}</span>.`;
                             }
-                            // Keep list navigable after delete; only exit if list becomes empty
                             if (ok) {
-                                const idxToRemove = items.findIndex(it => String(it.date) === String(pendingDate));
+                                const keyToRemove = pendingItem ? getKey(pendingItem) : null;
+                                const idxToRemove = items.findIndex(it => getKey(it) === keyToRemove);
                                 if (idxToRemove !== -1) {
                                     items.splice(idxToRemove, 1);
                                     idx = Math.min(idx, Math.max(0, items.length - 1));
                                     if (items.length) {
-                                        render(); // re-render list, remain active (no suspend/exit)
+                                        render();
                                     } else {
-                                        print('<div class="muted">No entries left.</div>');
+                                        print(emptyMessage);
                                         shell.exit();
                                     }
-                                } // if nothing matched, keep list as-is and remain active
-                            } else {
-                                // Nothing deleted; keep list visible and active
-                                // (no suspend/exit)
+                                }
                             }
                         } catch (err) {
                             const msg = err?.message || String(err);
@@ -597,12 +806,11 @@ function createListUI(title, items) {
                             }
                         } finally {
                             confirmPending = false;
-                            pendingDate = null;
+                            pendingItem = null;
                         }
                     })();
                     return;
                 }
-                // If the user presses any other key, exit list view entirely
                 e.preventDefault();
                 e.stopPropagation();
                 shell.exit();
@@ -619,10 +827,10 @@ function createListUI(title, items) {
                 const chosen = items[idx];
                 if (!chosen) { e.preventDefault(); return; }
                 confirmPending = true;
-                pendingDate = chosen.date;
+                pendingItem = chosen;
                 confirmDiv = document.createElement('div');
                 confirmDiv.className = 'warn';
-                confirmDiv.innerHTML = `Delete <span class="stamp">${esc(pendingDate)}</span>? <span class="warn">y/n</span>`;
+                confirmDiv.innerHTML = `Delete <span class="stamp">${esc(String(getStamp(chosen)))}</span>? <span class="warn">y/n</span>`;
                 output.appendChild(confirmDiv);
                 scrollToBottom();
                 e.preventDefault();
@@ -631,16 +839,14 @@ function createListUI(title, items) {
             else if (e.key === 'Enter') {
                 const chosen = items[idx];
                 if (!chosen) return;
-                // Freeze the current list so it's static when returning from editor
                 shell.suspend();
-                // Fetch full content then open editor
                 (async () => {
-                    const row = await db.get(chosen.date);
-                    startEditor(shell, {
-                        id: row?.id ?? chosen.date,
-                        date: chosen.date,
-                        initialContent: row?.content ?? ''
-                    });
+                    try {
+                        await onOpen(chosen);
+                    } catch (err) {
+                        const msg = err?.message || String(err);
+                        print(`<div class="error">${esc(msg)}</div>`);
+                    }
                 })();
                 e.preventDefault();
             }
@@ -653,11 +859,8 @@ function createListUI(title, items) {
             confirmDiv.className = 'muted';
             confirmDiv.innerHTML = `Canceled`;
             output.appendChild(confirmDiv);
-
-            // Delete list from screen. Comment out to leave and just grey it out
-            // shell.exit();
         },
-        destroy: () => { container.remove() }
+        destroy: () => { container.remove(); }
     };
 }
 
@@ -692,6 +895,42 @@ register('help', () => {
         <div class="muted help">${rowsHtml}</div>
     `);
 }, 'List available commands');
+
+register('tutorial', () => {
+    print(`
+    <div class="soft">journal quickstart</div>
+    <div class="muted help">
+        <div><span class="kbd">journal</span> — open today's entry; add a date afterwards for a specific day</div>
+        <div><span class="kbd">journal -tmp "Template"</span> — spin up a fresh entry pre-filled from a template</div>
+        <div><span class="kbd">view</span> — browse the latest entries; use ↑/↓ then Enter to reopen one</div>
+        <div><span class="kbd">view templates</span> — review, edit, or delete saved templates</div>
+        <div><span class="kbd">search "coffee"</span> — find entries containing your keywords</div>
+        <div><span class="kbd">export -a</span> — create a full PDF export when you need a snapshot</div>
+    </div>`);
+}, 'Quick journaling workflow overview');
+
+register('theme', async (argv = []) => {
+    const arg = (argv[0] || '').trim().toLowerCase();
+    if (!arg) {
+        await startThemeApp(shell);
+        return;
+    }
+    if (arg === 'reset') {
+        try {
+            const defaults = await getDefaultTheme();
+            defaults.name = 'Default';
+            defaults.meta = { version: 1, source: 'defaults', reset_at: new Date().toISOString() };
+            await saveActiveTheme(defaults);
+            applyTheme(defaults);
+            print('<div class="ok">Theme reset to defaults.</div>');
+        } catch (err) {
+            const msg = err?.message || String(err);
+            print(`<div class="error">Theme reset failed: ${esc(msg)}</div>`);
+        }
+        return;
+    }
+    print('<div class="error">Usage: <span class="kbd">theme</span> or <span class="kbd">theme reset</span></div>');
+}, 'Customize fonts and colors');
 
 register('clear', () => {
     output.innerHTML = '';
@@ -732,6 +971,7 @@ function printJournalHelp() {
         <div><span class="kbd">journal MM-DD</span> — open the most recent past occurrence of that month/day</div>
         <div><span class="kbd">journal -y</span> — open yesterday</div>
         <div><span class="kbd">journal -t</span> — open tomorrow</div>
+        <div><span class="kbd">journal -tmp "Template"</span> — create a new entry from a template (append date to target another day)</div>
         <div><span class="kbd">journal -help</span> — show this help</div>
     </div>`);
 }
@@ -744,6 +984,7 @@ function printViewHelp() {
         <div><span class="kbd">view</span> — list latest 15 entries</div>
         <div><span class="kbd">view MM</span> — list entries for month <em>MM</em> in the most recent past year</div>
         <div><span class="kbd">view YYYY-MM</span> — list entries for that month and year</div>
+        <div><span class="kbd">view templates</span> — manage saved templates</div>
         <div><span class="kbd">view -help</span> — show this help</div>
     </div>`);
 }
@@ -801,30 +1042,121 @@ register('journal', async (argv = []) => {
     //   journal MM-DD           -> most recent past occurrence of that month-day
     //   journal -y               -> yesterday
     //   journal -t               -> tomorrow
-    let date;
-    if (!argv.length) {
-        date = todayISO();
-    } else {
-        const arg = String(argv[0]).trim();
+    const args = argv.map(a => String(a).trim()).filter(a => a.length > 0);
+    let templateName = null;
+    let dateToken = null;
+
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
         if (arg === '-help') { printJournalHelp(); return; }
-        else if (arg === '-y') date = shiftISO(-1);
-        else if (arg === '-t') date = shiftISO(1);
-        else if (isISODate(arg)) date = arg;
-        else if (isMonthDay(arg)) date = resolveMonthDayPast(arg);
-        else {
-            print(`<div class="error">Invalid argument for journal: ${esc(arg)}<br>Use YYYY-MM-DD, MM-DD (most recent past), -y for yesterday, -t for tomorrow, or -help for usage.</div>`);
-            return;
+        if (arg === '-tmp') {
+            if (templateName !== null) {
+                print('<div class="error">Duplicate -tmp arguments. Specify the template name once.</div>');
+                return;
+            }
+            const next = args[++i];
+            if (typeof next !== 'string') {
+                print('<div class="error">Missing template name after -tmp.</div>');
+                return;
+            }
+            const name = next.trim();
+            if (!name) {
+                print('<div class="error">Template name cannot be empty.</div>');
+                return;
+            }
+            templateName = name;
+            continue;
         }
+        if (dateToken === null) {
+            dateToken = arg;
+            continue;
+        }
+        print('<div class="error">Too many arguments for journal. Use -help for usage.</div>');
+        return;
     }
 
-    let row = await db.get(date);
-    if (!row) row = await db.upsert(date, '');
+    let date;
+    if (!dateToken) {
+        date = todayISO();
+    } else if (dateToken === '-y') {
+        date = shiftISO(-1);
+    } else if (dateToken === '-t') {
+        date = shiftISO(1);
+    } else if (isISODate(dateToken)) {
+        date = dateToken;
+    } else if (isMonthDay(dateToken)) {
+        date = resolveMonthDayPast(dateToken);
+    } else {
+        print(`<div class="error">Invalid argument for journal: ${esc(dateToken)}<br>Use YYYY-MM-DD, MM-DD (most recent past), -y for yesterday, -t for tomorrow, or -help for usage.</div>`);
+        return;
+    }
 
-    startEditor(shell, {
-        id: row.id ?? date,
-        date: row.date ?? date,
-        initialContent: row.content ?? ''
-    });
+    try {
+        if (templateName !== null) {
+            if (!db || typeof db.getTemplate !== 'function' || typeof db.upsert !== 'function') {
+                print('<div class="error">Templates are not available in this environment.</div>');
+                return;
+            }
+            let template;
+            try {
+                template = await db.getTemplate(templateName);
+            } catch (err) {
+                const msg = err?.message || String(err);
+                print(`<div class="error">Unable to load template: ${esc(msg)}</div>`);
+                return;
+            }
+            if (!template || typeof template.content !== 'string') {
+                print(`<div class="error">Template "${esc(templateName)}" not found.</div>`);
+                return;
+            }
+
+            const existing = await db.get(date);
+            if (existing) {
+                print(`<div class="error">An entry already exists for ${esc(date)}. Remove it before using -tmp.</div>`);
+                return;
+            }
+
+            const inserted = await db.upsert(date, template.content ?? '');
+            const row = inserted || { date, content: template.content ?? '' };
+            startEditor(shell, {
+                id: row.id ?? date,
+                date: row.date ?? date,
+                initialContent: row.content ?? (template.content ?? '')
+            });
+            return;
+        }
+
+        let row = await db.get(date);
+        if (!row) {
+            let seededContent = '';
+            let usedTemplateName = null;
+            if (db && typeof db.listTemplates === 'function') {
+                try {
+                    const templates = await db.listTemplates();
+                    const match = pickTemplateForDate(templates, date);
+                    if (match && match.template) {
+                        seededContent = match.template.content ?? '';
+                        usedTemplateName = match.template.name ?? null;
+                    }
+                } catch (err) {
+                    console.warn('Repeating template selection failed:', err);
+                }
+            }
+            row = await db.upsert(date, seededContent);
+            if (usedTemplateName) {
+                print(`<div class="muted">Initialized with template "${esc(usedTemplateName)}".</div>`);
+            }
+        }
+
+        startEditor(shell, {
+            id: row.id ?? date,
+            date: row.date ?? date,
+            initialContent: row.content ?? ''
+        });
+    } catch (err) {
+        const msg = err?.message || String(err);
+        print(`<div class="error">${esc(msg)}</div>`);
+    }
 }, "Open journal (YYYY-MM-DD | MM-DD | -y | -t | -help)");
 
 register('view', async (argv = []) => {
@@ -837,7 +1169,66 @@ register('view', async (argv = []) => {
         return;
     }
     const a0 = String(argv[0]).trim();
+    const a0Lower = a0.toLowerCase();
     if (a0 === '-help') { printViewHelp(); return; }
+    if (a0Lower === 'templates') {
+        if (!db || typeof db.listTemplates !== 'function') {
+            print('<div class="error">Templates are not available in this environment.</div>');
+            return;
+        }
+        let templates = [];
+        try {
+            templates = await db.listTemplates();
+        } catch (err) {
+            const msg = err?.message || String(err);
+            print(`<div class="error">Unable to list templates: ${esc(msg)}</div>`);
+            return;
+        }
+        if (!templates || !templates.length) {
+            print('<div class="muted">No templates saved yet.</div>');
+            return;
+        }
+        shell.setPrompt('templates>');
+        shell.enter(createListUI('TEMPLATES', templates, {
+            getKey: (item) => String(item.name),
+            getStamp: (item) => item.name,
+            getPreview: (item) => {
+                const src = item.preview ?? item.content ?? '';
+                return src.replace(/\n/g, ' ').slice(0, 120);
+            },
+            onOpen: async (item) => {
+                if (!db || typeof db.getTemplate !== 'function') {
+                    throw new Error('Template retrieval is not available.');
+                }
+                const tpl = await db.getTemplate(item.name);
+                const record = (tpl && typeof tpl.content === 'string') ? tpl : item;
+                if (!record || typeof record.content !== 'string') {
+                    throw new Error(`Template "${item.name}" not found.`);
+                }
+                startEditor(shell, {
+                    mode: 'template',
+                    templateName: item.name,
+                    id: item.name,
+                    initialContent: record.content ?? '',
+                    templateSchedule: record.schedule ?? null,
+                    title: `Template: ${item.name}`
+                });
+            },
+            onDelete: async (item) => {
+                if (!db || typeof db.deleteTemplate !== 'function') {
+                    throw new Error('Template deletion is not available.');
+                }
+                const res = await db.deleteTemplate(item.name);
+                if (typeof res === 'object' && res) {
+                    if (typeof res.deleted === 'number') return res.deleted > 0;
+                    if ('ok' in res) return !!res.ok;
+                }
+                return !!res;
+            },
+            emptyMessage: '<div class="muted">No templates left.</div>'
+        }));
+        return;
+    }
     if (isYearMonth(a0)) {
         items = await db.listByYearMonth(a0);
         if (!items.length) { print(`<div class="muted">No entries for ${esc(a0)}.</div>`); return; }
@@ -1217,13 +1608,11 @@ register('switch', async (argv = []) => {
  * BOOT
  * --------------------------------------------------------------------------- */
 (() => {
-    window.onload = () => {
-        banner();
-        focus();
-    };
+    banner();
+    focusInput();
 
     input.addEventListener('keydown', handleKeydown);
-    screen.addEventListener('click', focus);
+    screen.addEventListener('click', focusInput);
     input.addEventListener('input', scheduleCaret);
     input.addEventListener('click', scheduleCaret);
     input.addEventListener('keyup', scheduleCaret);

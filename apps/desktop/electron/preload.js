@@ -10,6 +10,10 @@ contextBridge.exposeInMainWorld('db', {
     listRecent: (limit = 15)  => ipcRenderer.invoke('entry:listRecent', limit),
     deleteByDate: (date)      => ipcRenderer.invoke('entry:deleteByDate', date),
     delete:   (date)          => ipcRenderer.invoke('entry:deleteByDate', date),
+    saveTemplate: (name, content, schedule) => ipcRenderer.invoke('template:upsert', { name, content, schedule }),
+    getTemplate:  (name)          => ipcRenderer.invoke('template:getByName', name),
+    listTemplates: ()             => ipcRenderer.invoke('template:list'),
+    deleteTemplate: (name)        => ipcRenderer.invoke('template:delete', name),
 });
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -18,4 +22,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getPath: (name) => ipcRenderer.invoke('get-path', name),
     saveText: ({ content, outputPath }) => ipcRenderer.invoke('save-text', { content, outputPath }),
     invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+});
+
+contextBridge.exposeInMainWorld('settings', {
+    get: (key) => ipcRenderer.invoke('settings:get', key),
+    set: (key, value) => ipcRenderer.invoke('settings:set', { key, value }),
 });

@@ -8186,10 +8186,10 @@ handlers.copy = handlers.cut = (view, event) => {
   }
 };
 var isFocusChange = /* @__PURE__ */ Annotation.define();
-function focusChangeTransaction(state2, focus2) {
+function focusChangeTransaction(state2, focus) {
   let effects = [];
   for (let getEffect of state2.facet(focusChangeEffect)) {
-    let effect = getEffect(state2, focus2);
+    let effect = getEffect(state2, focus);
     if (effect)
       effects.push(effect);
   }
@@ -8197,9 +8197,9 @@ function focusChangeTransaction(state2, focus2) {
 }
 function updateForFocusChange(view) {
   setTimeout(() => {
-    let focus2 = view.hasFocus;
-    if (focus2 != view.inputState.notifiedFocused) {
-      let tr = focusChangeTransaction(view.state, focus2);
+    let focus = view.hasFocus;
+    if (focus != view.inputState.notifiedFocused) {
+      let tr = focusChangeTransaction(view.state, focus);
       if (tr)
         view.dispatch(tr);
       else
@@ -10679,13 +10679,13 @@ var EditorView = class _EditorView {
       this.viewState.state = state2;
       return;
     }
-    let focus2 = this.hasFocus, focusFlag = 0, dispatchFocus = null;
+    let focus = this.hasFocus, focusFlag = 0, dispatchFocus = null;
     if (transactions.some((tr) => tr.annotation(isFocusChange))) {
-      this.inputState.notifiedFocused = focus2;
+      this.inputState.notifiedFocused = focus;
       focusFlag = 1;
-    } else if (focus2 != this.inputState.notifiedFocused) {
-      this.inputState.notifiedFocused = focus2;
-      dispatchFocus = focusChangeTransaction(state2, focus2);
+    } else if (focus != this.inputState.notifiedFocused) {
+      this.inputState.notifiedFocused = focus;
+      dispatchFocus = focusChangeTransaction(state2, focus);
       if (!dispatchFocus)
         focusFlag = 1;
     }
@@ -25665,6 +25665,292 @@ var searchExtensions = [
   baseTheme3
 ];
 
+// packages/ui/js/schedule.js
+var ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+var WEEKDAY_MAP = {
+  sun: 0,
+  sunday: 0,
+  "0": 0,
+  mon: 1,
+  monday: 1,
+  "1": 1,
+  tue: 2,
+  tuesday: 2,
+  "2": 2,
+  wed: 3,
+  wednesday: 3,
+  "3": 3,
+  thu: 4,
+  thursday: 4,
+  "4": 4,
+  fri: 5,
+  friday: 5,
+  "5": 5,
+  sat: 6,
+  saturday: 6,
+  "6": 6
+};
+var DAY_MS = 864e5;
+var TEMPLATE_SCHEDULE_WEIGHT = { year: 3, month: 2, week: 1, day: 0 };
+function cloneTemplateSchedule(schedule) {
+  if (!schedule) return null;
+  return JSON.parse(JSON.stringify(schedule));
+}
+function isISODate(value) {
+  return typeof value === "string" && ISO_DATE_RE.test(value);
+}
+function isoToday() {
+  return (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+}
+function toPositiveInt(value) {
+  if (value === "" || value === null || value === void 0) return null;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  const int = Math.floor(num);
+  return int >= 1 ? int : null;
+}
+function normalizeWeekday(value) {
+  if (value === null || value === void 0) return null;
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return (value % 7 + 7) % 7;
+  }
+  const str = String(value).trim().toLowerCase();
+  if (!str) return null;
+  if (WEEKDAY_MAP.hasOwnProperty(str)) return WEEKDAY_MAP[str];
+  if (/^[0-6]$/.test(str)) return Number(str);
+  if (str.length === 1) {
+    if (str === "m") return 1;
+    if (str === "t") return 2;
+    if (str === "w") return 3;
+    if (str === "r") return 4;
+    if (str === "f") return 5;
+    if (str === "s") return 6;
+  }
+  return null;
+}
+function normalizeWeekdayList(values2) {
+  if (values2 === null || values2 === void 0) return [];
+  const arr = Array.isArray(values2) ? values2 : [values2];
+  const out = [];
+  for (const v of arr) {
+    const n = normalizeWeekday(v);
+    if (n !== null) out.push(n);
+  }
+  return Array.from(new Set(out)).sort((a, b) => a - b);
+}
+function isSectionEnabled(section) {
+  if (!section || typeof section !== "object") return false;
+  if (typeof section.enabled === "boolean") return section.enabled;
+  const keys = Object.keys(section);
+  return keys.length > 0;
+}
+function normalizeTemplateSchedule(raw, { defaultAnchorDate } = {}) {
+  if (!raw || typeof raw !== "object") return null;
+  const anchorCandidate = typeof raw.anchorDate === "string" ? raw.anchorDate : typeof raw.anchor === "string" ? raw.anchor : null;
+  const fallbackAnchor = isISODate(defaultAnchorDate) ? defaultAnchorDate : isoToday();
+  const anchorDate = isISODate(anchorCandidate) ? anchorCandidate : fallbackAnchor;
+  const candidate = {};
+  let candidateAnchor = anchorDate;
+  const daySection = raw.day;
+  if (isSectionEnabled(daySection)) {
+    const interval = toPositiveInt(
+      daySection?.interval ?? daySection?.every ?? daySection?.value ?? daySection
+    );
+    if (interval) {
+      candidate.day = { interval };
+    }
+  }
+  const weekSection = raw.week;
+  if (isSectionEnabled(weekSection)) {
+    const interval = toPositiveInt(
+      weekSection?.interval ?? weekSection?.every ?? weekSection?.value
+    );
+    const weekdays = normalizeWeekdayList(weekSection?.weekdays ?? weekSection?.days ?? weekSection?.day);
+    if (interval && weekdays.length) {
+      candidate.week = { interval, weekdays };
+    }
+  }
+  const monthSection = raw.month;
+  if (isSectionEnabled(monthSection)) {
+    const interval = toPositiveInt(
+      monthSection?.interval ?? monthSection?.every ?? monthSection?.value
+    );
+    const modeRaw = String(monthSection?.mode || "").toLowerCase();
+    const mode = modeRaw === "weekday" ? "weekday" : "day";
+    if (interval) {
+      if (mode === "day") {
+        const dayValue = toPositiveInt(monthSection?.day ?? monthSection?.value ?? monthSection?.number);
+        if (dayValue) {
+          candidate.month = {
+            interval,
+            mode: "day",
+            day: Math.min(Math.max(dayValue, 1), 31)
+          };
+        }
+      } else {
+        const rawNth = monthSection?.nth ?? monthSection?.value ?? monthSection?.number;
+        let nthValue = null;
+        if (typeof rawNth === "string") {
+          const trimmed = rawNth.trim().toLowerCase();
+          if (trimmed === "last") {
+            nthValue = "last";
+          } else {
+            const n = toPositiveInt(trimmed);
+            if (n) nthValue = Math.min(Math.max(n, 1), 4);
+          }
+        } else {
+          const n = toPositiveInt(rawNth);
+          if (n) nthValue = Math.min(Math.max(n, 1), 4);
+        }
+        const weekdayValue = normalizeWeekday(monthSection?.weekday ?? monthSection?.day ?? monthSection?.weekdayIndex);
+        if (nthValue && weekdayValue !== null) {
+          candidate.month = {
+            interval,
+            mode: "weekday",
+            weekday: weekdayValue,
+            nth: nthValue
+          };
+        }
+      }
+    }
+  }
+  const yearSection = raw.year;
+  if (isSectionEnabled(yearSection)) {
+    const interval = toPositiveInt(yearSection?.interval ?? yearSection?.every ?? yearSection?.value);
+    const dateValue = typeof yearSection?.date === "string" ? yearSection.date : typeof yearSection?.startDate === "string" ? yearSection.startDate : null;
+    if (interval && isISODate(dateValue)) {
+      candidate.year = {
+        interval,
+        monthDay: dateValue.slice(5),
+        startDate: dateValue
+      };
+      candidateAnchor = dateValue;
+    }
+  }
+  const priorityOrder = ["year", "month", "week", "day"];
+  let chosenLevel = null;
+  for (const level of priorityOrder) {
+    if (candidate[level]) {
+      chosenLevel = level;
+      break;
+    }
+  }
+  if (!chosenLevel) return null;
+  const schedule = {
+    version: 1,
+    anchorDate: candidateAnchor,
+    [chosenLevel]: candidate[chosenLevel]
+  };
+  return schedule;
+}
+function parseTemplateSchedule(raw, options2 = {}) {
+  if (!raw) return null;
+  let parsed = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  return normalizeTemplateSchedule(parsed, options2);
+}
+function parseISODate(dateStr) {
+  if (!isISODate(dateStr)) return null;
+  const dt = /* @__PURE__ */ new Date(dateStr + "T00:00:00Z");
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt;
+}
+function diffDays(start, end) {
+  return Math.floor((end.getTime() - start.getTime()) / DAY_MS);
+}
+function diffMonths(anchor, target) {
+  return (target.getUTCFullYear() - anchor.getUTCFullYear()) * 12 + (target.getUTCMonth() - anchor.getUTCMonth());
+}
+function getDaysInMonth(year, monthIndex) {
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+}
+function getNthWeekdayOfMonth(year, monthIndex, weekday, nth) {
+  const dim = getDaysInMonth(year, monthIndex);
+  if (nth === "last") {
+    const lastOfMonth = new Date(Date.UTC(year, monthIndex, dim));
+    const lastWeekday = lastOfMonth.getUTCDay();
+    const offset = (lastWeekday - weekday + 7) % 7;
+    return dim - offset;
+  }
+  const n = Number(nth);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const firstOfMonth = new Date(Date.UTC(year, monthIndex, 1));
+  const firstWeekday = firstOfMonth.getUTCDay();
+  const delta = (weekday - firstWeekday + 7) % 7;
+  const date = 1 + delta + (n - 1) * 7;
+  if (date > dim) return null;
+  return date;
+}
+function matchesDay(rule, target, anchor) {
+  const days = diffDays(anchor, target);
+  if (days < 0) return false;
+  return days % rule.interval === 0;
+}
+function matchesWeek(rule, target, anchor) {
+  const days = diffDays(anchor, target);
+  if (days < 0) return false;
+  const weeks = Math.floor(days / 7);
+  if (weeks % rule.interval !== 0) return false;
+  const weekday = target.getUTCDay();
+  return rule.weekdays.includes(weekday);
+}
+function matchesMonth(rule, target, anchor) {
+  const months = diffMonths(anchor, target);
+  if (months < 0) return false;
+  if (months % rule.interval !== 0) return false;
+  const year = target.getUTCFullYear();
+  const monthIdx = target.getUTCMonth();
+  if (rule.mode === "day") {
+    const dim = getDaysInMonth(year, monthIdx);
+    const targetDay = target.getUTCDate();
+    const desired = Math.min(rule.day, dim);
+    return targetDay === desired;
+  }
+  const nth = rule.nth;
+  const weekday = rule.weekday;
+  const date = getNthWeekdayOfMonth(year, monthIdx, weekday, nth);
+  if (date === null) return false;
+  return target.getUTCDate() === date;
+}
+function matchesYear(rule, target) {
+  const targetMonthDay = `${String(target.getUTCMonth() + 1).padStart(2, "0")}-${String(target.getUTCDate()).padStart(2, "0")}`;
+  if (targetMonthDay !== rule.monthDay) return false;
+  const baseDate = parseISODate(rule.startDate);
+  if (!baseDate) return false;
+  const years = target.getUTCFullYear() - baseDate.getUTCFullYear();
+  if (years < 0) return false;
+  return years % rule.interval === 0;
+}
+function matchTemplateSchedule(schedule, dateStr) {
+  const normalized = normalizeTemplateSchedule(schedule, {
+    defaultAnchorDate: schedule?.anchorDate
+  });
+  if (!normalized) return null;
+  const target = parseISODate(dateStr);
+  if (!target) return null;
+  const anchor = parseISODate(normalized.anchorDate);
+  if (!anchor) return null;
+  if (normalized.year && matchesYear(normalized.year, target)) {
+    return { level: "year", schedule: normalized };
+  }
+  if (normalized.month && matchesMonth(normalized.month, target, anchor)) {
+    return { level: "month", schedule: normalized };
+  }
+  if (normalized.week && matchesWeek(normalized.week, target, anchor)) {
+    return { level: "week", schedule: normalized };
+  }
+  if (normalized.day && matchesDay(normalized.day, target, anchor)) {
+    return { level: "day", schedule: normalized };
+  }
+  return null;
+}
+
 // packages/ui/js/editor.js
 var todoDecorationPlugin = ViewPlugin.fromClass(class {
   constructor(view) {
@@ -25811,18 +26097,22 @@ var todoPlugin = [
 ];
 function startEditor(shell2, opts = {}) {
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent || "");
+  const mode = opts.mode === "template" ? "template" : "entry";
+  const isTemplate = mode === "template";
+  const rawTemplateName = isTemplate ? String(opts.templateName ?? "").trim() : "";
+  const templateName = isTemplate ? rawTemplateName || "Untitled Template" : null;
+  const initialText = typeof opts.initialContent === "string" ? opts.initialContent : "";
+  const initialSchedule = isTemplate ? cloneTemplateSchedule(opts.templateSchedule) : null;
   const state2 = {
-    title: opts.title || (/* @__PURE__ */ new Date()).toLocaleString(),
-    id: opts.id ?? null,
-    date: typeof opts.date === "string" ? opts.date : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+    title: opts.title || (isTemplate ? templateName : (/* @__PURE__ */ new Date()).toLocaleString()),
+    id: opts.id ?? (isTemplate ? templateName : null),
+    date: isTemplate ? null : typeof opts.date === "string" ? opts.date : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
     // 'YYYY-MM-DD'
-    buffer: (typeof opts.initialContent === "string" ? opts.initialContent : "").split("\n"),
-    dirty: false
+    templateName,
+    buffer: initialText.split("\n"),
+    dirty: false,
+    templateSchedule: initialSchedule
   };
-  if (!opts.initialContent || typeof opts.initialContent === "string" && opts.initialContent.trim() === "") {
-    const banner2 = `# ${fmtBannerDate(state2.date)}`;
-    state2.buffer = [banner2, ""];
-  }
   let cmView = null;
   let domSnapshot = null;
   const outputEl = document.getElementById("output");
@@ -25853,12 +26143,17 @@ function startEditor(shell2, opts = {}) {
     root.style.gap = "8px";
     const header = document.createElement("div");
     header.className = "writer-header soft";
-    header.textContent = `JOURNAL - ${fmtBannerDate(state2.date)}`;
+    header.textContent = isTemplate ? `TEMPLATE - ${state2.templateName ?? templateName}` : `JOURNAL - ${fmtBannerDate(state2.date)}`;
     const help = document.createElement("div");
     help.className = "writer-help muted";
     const saveCombo = isMac ? "CMD + S" : "CTRL + S";
+    const templateCombo = isMac ? "CMD + SHIFT + S" : "CTRL + SHIFT + S";
     const exitCombo = isMac ? "CTRL + X" : "CTRL + Q";
-    help.textContent = `${saveCombo} to save, ${exitCombo} to exit`;
+    if (isTemplate) {
+      help.textContent = `${saveCombo} to save, ${templateCombo} to duplicate, ${exitCombo} to exit`;
+    } else {
+      help.textContent = `${saveCombo} to save, ${templateCombo} to save template, ${exitCombo} to exit`;
+    }
     const pane = document.createElement("div");
     pane.id = "writerPane";
     pane.style.position = "relative";
@@ -25964,7 +26259,7 @@ function startEditor(shell2, opts = {}) {
     "&": { backgroundColor: "var(--editor-bg)", color: "var(--editor-fg)", height: "100%" },
     ".cm-content": {
       caretColor: "var(--editor-caret)",
-      fontFamily: "var(--font-mono)",
+      fontFamily: "var(--font-editor, var(--font-mono))",
       fontSize: "var(--editor-font-size)",
       lineHeight: "var(--editor-line-height)"
     },
@@ -25977,8 +26272,8 @@ function startEditor(shell2, opts = {}) {
     // To restore paragraph-wide highlight instead, uncomment this and remove the overlay plugin in buildExtensions():
     // '.cm-activeLine': { backgroundColor: 'var(--editor-active-line-bg)' },
     ".cm-selectionBackground, ::selection": { backgroundColor: "var(--editor-selection-bg)" },
-    ".cm-lineNumbers": { color: "var(--editor-gutter-fg)" },
-    ".cm-gutters": { backgroundColor: "var(--editor-gutter-bg)", borderRight: "1px solid var(--editor-gutter-border)" },
+    ".cm-lineNumbers": { color: "color-mix(in srgb, var(--text) 55%, transparent)" },
+    ".cm-gutters": { backgroundColor: "var(--editor-gutter-bg)", borderRight: "1px solid var(--border, rgba(255,255,255,0.1))" },
     ".cm-panels": { backgroundColor: "var(--editor-panel-bg)" },
     // --- To-do clickable overlay style ---
     ".todo-click-target": {
@@ -26270,24 +26565,519 @@ function startEditor(shell2, opts = {}) {
     } catch (_) {
     }
   }
-  function save() {
-    if (cmView) {
-      const text = cmView.state.doc.toString();
-      state2.buffer = text.split("\n");
-      try {
-        window.db && typeof window.db.upsert === "function" && window.db.upsert(state2.date, text);
-      } catch {
+  async function save() {
+    if (!cmView) return;
+    if (isTemplate) {
+      promptTemplateSave();
+      return;
+    }
+    const text = cmView.state.doc.toString();
+    state2.buffer = text.split("\n");
+    try {
+      if (window.db && typeof window.db.upsert === "function") {
+        await window.db.upsert(state2.date, text);
       }
+    } catch (err) {
+      const msg = err?.message || String(err);
+      const statusEl = document.getElementById("writerStatus");
+      if (statusEl) {
+        statusEl.textContent = `Save failed: ${msg}`;
+      } else {
+        info(`Save failed: ${msg}`);
+      }
+      return;
     }
     clearUnsaved();
     flashSaveBar();
     state2.dirty = false;
     const status = document.getElementById("writerStatus");
+    const message = `Saved (${summary()})`;
     if (status) {
-      status.textContent = `Saved (${summary()})`;
+      status.textContent = message;
     } else {
-      ok(`Saved (${summary()})`);
+      ok(message);
     }
+  }
+  function showTemplateSavedToast() {
+    try {
+      const prev = document.getElementById("templateToast");
+      if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
+      const toast = document.createElement("div");
+      toast.id = "templateToast";
+      toast.className = "template-toast";
+      toast.textContent = "Template Saved";
+      (document.body || document.documentElement).appendChild(toast);
+      toast.addEventListener("animationend", () => {
+        if (toast && toast.parentElement) toast.parentElement.removeChild(toast);
+      }, { once: true });
+    } catch (_) {
+    }
+  }
+  function showTemplateModal({ onSave, onCancel, initialValue = "", initialSchedule: initialSchedule2 = null } = {}) {
+    const prev = document.getElementById("templateModal");
+    if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
+    const wrap = document.createElement("div");
+    wrap.id = "templateModal";
+    wrap.className = "cj-modal-backdrop";
+    wrap.innerHTML = `
+            <div class="cj-modal" role="dialog" aria-modal="true" aria-labelledby="cjTemplateModalTitle">
+                <div id="cjTemplateModalTitle" class="cj-modal-title">Save Template</div>
+                <div class="cj-modal-body">
+                    <label class="cj-modal-field">
+                        <span>Template name</span>
+                        <input type="text" name="templateName" autocomplete="off" spellcheck="false" />
+                    </label>
+                    <div class="cj-modal-field cj-schedule">
+                        <span class="cj-schedule-title">Repeating schedule</span>
+                        <div class="cj-schedule-intro muted">Optional schedule. More specific rules win (Year &gt; Month &gt; Week &gt; Day).</div>
+                        <div class="cj-schedule-section" data-section="day">
+                            <label class="cj-schedule-row">
+                                <input type="checkbox" class="cj-sched-enable" name="schedDayEnabled" />
+                                <span>Every</span>
+                                <input type="number" min="1" step="1" name="schedDayInterval" />
+                                <span>day(s)</span>
+                            </label>
+                        </div>
+                        <div class="cj-schedule-section" data-section="week">
+                            <label class="cj-schedule-row">
+                                <input type="checkbox" class="cj-sched-enable" name="schedWeekEnabled" />
+                                <span>Repeat every</span>
+                                <input type="number" min="1" step="1" name="schedWeekInterval" />
+                                <span>week(s) on</span>
+                            </label>
+                            <div class="cj-schedule-weekdays">
+                                <label><input type="checkbox" name="schedWeekDay" value="1">Mon</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="2">Tue</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="3">Wed</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="4">Thu</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="5">Fri</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="6">Sat</label>
+                                <label><input type="checkbox" name="schedWeekDay" value="0">Sun</label>
+                            </div>
+                        </div>
+                        <div class="cj-schedule-section" data-section="month">
+                            <label class="cj-schedule-row">
+                                <input type="checkbox" class="cj-sched-enable" name="schedMonthEnabled" />
+                                <span>Repeat every</span>
+                                <input type="number" min="1" step="1" name="schedMonthInterval" />
+                                <span>month(s) on the</span>
+                            </label>
+                            <div class="cj-schedule-month">
+                                <input type="number" min="1" max="31" step="1" name="schedMonthDay" class="cj-month-day" />
+                                <select name="schedMonthNth" class="cj-month-nth" style="display:none;">
+                                    <option value="1">1st</option>
+                                    <option value="2">2nd</option>
+                                    <option value="3">3rd</option>
+                                    <option value="4">4th</option>
+                                    <option value="last">Last</option>
+                                </select>
+                                <select name="schedMonthTarget">
+                                    <option value="day">Day</option>
+                                    <option value="1">Mon</option>
+                                    <option value="2">Tue</option>
+                                    <option value="3">Wed</option>
+                                    <option value="4">Thu</option>
+                                    <option value="5">Fri</option>
+                                    <option value="6">Sat</option>
+                                    <option value="0">Sun</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="cj-schedule-section" data-section="year">
+                            <label class="cj-schedule-row cj-schedule-row-year">
+                                <input type="checkbox" class="cj-sched-enable" name="schedYearEnabled" />
+                                <span>Repeat every</span>
+                                <input type="number" min="1" step="1" name="schedYearInterval" />
+                                <span>year(s) on</span>
+                                <input type="date" name="schedYearDate" />
+                            </label>
+                        </div>
+                    </div>
+                    <div class="cj-modal-error error" style="display:none;"></div>
+                </div>
+                <div class="cj-modal-actions">
+                    <button class="save" autofocus>Save</button>
+                    <button class="cancel">Cancel</button>
+                </div>
+                <div class="cj-modal-hint muted">enter = save \xB7 esc = cancel</div>
+            </div>
+        `;
+    document.body.appendChild(wrap);
+    const input2 = wrap.querySelector('input[name="templateName"]');
+    const btnSave = wrap.querySelector("button.save");
+    const btnCancel = wrap.querySelector("button.cancel");
+    const errorEl = wrap.querySelector(".cj-modal-error");
+    const dayEnable = wrap.querySelector('input[name="schedDayEnabled"]');
+    const dayInterval = wrap.querySelector('input[name="schedDayInterval"]');
+    const weekEnable = wrap.querySelector('input[name="schedWeekEnabled"]');
+    const weekInterval = wrap.querySelector('input[name="schedWeekInterval"]');
+    const weekDayInputs = Array.from(wrap.querySelectorAll('input[name="schedWeekDay"]'));
+    const monthEnable = wrap.querySelector('input[name="schedMonthEnabled"]');
+    const monthInterval = wrap.querySelector('input[name="schedMonthInterval"]');
+    const monthDayInput = wrap.querySelector('input[name="schedMonthDay"]');
+    const monthNthSelect = wrap.querySelector('select[name="schedMonthNth"]');
+    const monthTarget = wrap.querySelector('select[name="schedMonthTarget"]');
+    const yearEnable = wrap.querySelector('input[name="schedYearEnabled"]');
+    const yearInterval = wrap.querySelector('input[name="schedYearInterval"]');
+    const yearDate = wrap.querySelector('input[name="schedYearDate"]');
+    const sectionDescriptors = [
+      { key: "day", checkbox: dayEnable, inputs: [dayInterval] },
+      { key: "week", checkbox: weekEnable, inputs: [weekInterval, ...weekDayInputs] },
+      { key: "month", checkbox: monthEnable, inputs: [monthInterval, monthDayInput, monthNthSelect, monthTarget] },
+      { key: "year", checkbox: yearEnable, inputs: [yearInterval, yearDate] }
+    ];
+    const primaryCheckboxes = sectionDescriptors.map((s) => s.checkbox).filter(Boolean);
+    const scheduleInitial = cloneTemplateSchedule(initialSchedule2);
+    const todayIso = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    let anchorSeed = scheduleInitial && isISODate(scheduleInitial.anchorDate) ? scheduleInitial.anchorDate : todayIso;
+    const setInputsDisabled = (inputs, disabled) => {
+      for (const inputEl of inputs) {
+        if (!inputEl) continue;
+        inputEl.disabled = !!disabled;
+      }
+    };
+    const refreshSectionLocks = () => {
+      const activeDescriptor = sectionDescriptors.find(({ checkbox }) => checkbox && checkbox.checked) || null;
+      sectionDescriptors.forEach(({ checkbox, inputs }) => {
+        if (!checkbox) return;
+        const section = checkbox.closest(".cj-schedule-section");
+        const isActive = checkbox.checked;
+        if (section) {
+          section.dataset.active = isActive ? "1" : "0";
+        }
+        checkbox.disabled = !!activeDescriptor && checkbox !== activeDescriptor.checkbox;
+        setInputsDisabled(inputs, !isActive);
+      });
+      syncMonthMode();
+    };
+    const ensureSectionEnabled = (checkbox) => {
+      if (!checkbox || checkbox.disabled || checkbox.checked) return;
+      checkbox.checked = true;
+      refreshSectionLocks();
+    };
+    primaryCheckboxes.forEach((checkbox) => {
+      if (!checkbox) return;
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          sectionDescriptors.forEach(({ checkbox: sibling }) => {
+            if (sibling && sibling !== checkbox) sibling.checked = false;
+          });
+        }
+        refreshSectionLocks();
+      });
+    });
+    sectionDescriptors.forEach(({ checkbox, inputs }) => {
+      inputs.forEach((ctrl) => {
+        if (!ctrl) return;
+        ctrl.addEventListener("focus", () => ensureSectionEnabled(checkbox), { passive: true });
+      });
+    });
+    refreshSectionLocks();
+    if (input2) {
+      input2.value = initialValue;
+      try {
+        input2.setSelectionRange(0, input2.value.length);
+      } catch {
+      }
+    }
+    const showError = (msg) => {
+      if (!errorEl) return;
+      if (msg) {
+        errorEl.textContent = msg;
+        errorEl.style.display = "block";
+      } else {
+        errorEl.textContent = "";
+        errorEl.style.display = "none";
+      }
+    };
+    function syncMonthMode() {
+      if (!monthTarget) return;
+      const useDay = monthTarget.value === "day";
+      if (monthDayInput) {
+        monthDayInput.style.display = useDay ? "" : "none";
+        monthDayInput.disabled = !useDay || monthEnable && !monthEnable.checked;
+        if (useDay) {
+          monthDayInput.min = "1";
+          monthDayInput.max = "31";
+          if (!monthDayInput.value) monthDayInput.value = "1";
+        }
+      }
+      if (monthNthSelect) {
+        monthNthSelect.style.display = useDay ? "none" : "";
+        monthNthSelect.disabled = useDay || monthEnable && !monthEnable.checked;
+        if (!useDay && !monthNthSelect.value) {
+          monthNthSelect.value = "1";
+        }
+      }
+    }
+    const applyInitialSchedule = () => {
+      if (dayInterval) dayInterval.value = scheduleInitial?.day?.interval ?? "1";
+      if (dayEnable) dayEnable.checked = !!scheduleInitial?.day;
+      if (weekInterval) weekInterval.value = scheduleInitial?.week?.interval ?? "1";
+      if (weekEnable) weekEnable.checked = !!scheduleInitial?.week;
+      if (scheduleInitial?.week?.weekdays && weekDayInputs.length) {
+        const set = new Set(scheduleInitial.week.weekdays.map(Number));
+        weekDayInputs.forEach((cb) => {
+          cb.checked = set.has(Number(cb.value));
+        });
+      } else {
+        weekDayInputs.forEach((cb) => {
+          cb.checked = false;
+        });
+      }
+      if (monthInterval) monthInterval.value = scheduleInitial?.month?.interval ?? "1";
+      if (monthEnable) monthEnable.checked = !!scheduleInitial?.month;
+      if (scheduleInitial?.month?.mode === "weekday" && scheduleInitial.month.weekday !== void 0) {
+        if (monthTarget) monthTarget.value = String(scheduleInitial.month.weekday);
+        if (monthNthSelect) monthNthSelect.value = String(scheduleInitial.month.nth === "last" ? "last" : scheduleInitial.month.nth ?? "1");
+        if (monthDayInput && !monthDayInput.value) monthDayInput.value = "1";
+      } else {
+        if (monthTarget) monthTarget.value = "day";
+        if (monthDayInput) monthDayInput.value = scheduleInitial?.month?.day ?? "1";
+        if (monthNthSelect && !monthNthSelect.value) monthNthSelect.value = "1";
+      }
+      if (yearInterval) yearInterval.value = scheduleInitial?.year?.interval ?? "1";
+      if (yearEnable) yearEnable.checked = !!scheduleInitial?.year;
+      const yearDefault = scheduleInitial?.year?.startDate && isISODate(scheduleInitial.year.startDate) ? scheduleInitial.year.startDate : anchorSeed;
+      if (yearDate) yearDate.value = yearDefault;
+      refreshSectionLocks();
+    };
+    const collectRawSchedule = () => {
+      const yearDateVal = yearDate && yearDate.value ? yearDate.value : "";
+      const yearDateValid = isISODate(yearDateVal);
+      const anchorDate = yearEnable && yearEnable.checked && yearDateValid ? yearDateVal : anchorSeed;
+      return {
+        anchorDate,
+        day: {
+          enabled: !!(dayEnable && dayEnable.checked),
+          interval: dayInterval ? dayInterval.value : ""
+        },
+        week: {
+          enabled: !!(weekEnable && weekEnable.checked),
+          interval: weekInterval ? weekInterval.value : "",
+          weekdays: weekDayInputs.map((cb) => cb.checked ? Number(cb.value) : null).filter((v) => v !== null)
+        },
+        month: {
+          enabled: !!(monthEnable && monthEnable.checked),
+          interval: monthInterval ? monthInterval.value : "",
+          mode: monthTarget && monthTarget.value !== "day" ? "weekday" : "day",
+          value: monthTarget && monthTarget.value !== "day" ? monthNthSelect ? monthNthSelect.value : "" : monthDayInput ? monthDayInput.value : "",
+          weekday: monthTarget && monthTarget.value !== "day" ? Number(monthTarget.value) : null
+        },
+        year: {
+          enabled: !!(yearEnable && yearEnable.checked),
+          interval: yearInterval ? yearInterval.value : "",
+          date: yearDateValid ? yearDateVal : ""
+        }
+      };
+    };
+    const focusElement = (el) => {
+      if (!el) return;
+      try {
+        el.focus({ preventScroll: true });
+      } catch {
+        el.focus();
+      }
+    };
+    let submitting = false;
+    const cleanup = () => {
+      window.removeEventListener("keydown", onKey, true);
+      if (wrap && wrap.parentElement) wrap.parentElement.removeChild(wrap);
+    };
+    const reject = () => {
+      if (submitting) return;
+      cleanup();
+      try {
+        onCancel && onCancel();
+      } catch {
+      }
+    };
+    const accept = async () => {
+      if (submitting) return;
+      const value = (input2 && input2.value || "").trim();
+      if (!value) {
+        showError("Template name is required.");
+        if (input2) {
+          focusElement(input2);
+          try {
+            input2.select();
+          } catch {
+          }
+        }
+        return;
+      }
+      const rawSchedule = collectRawSchedule();
+      const normalized = normalizeTemplateSchedule(rawSchedule, { defaultAnchorDate: rawSchedule.anchorDate });
+      if (rawSchedule.day.enabled && (!normalized || !normalized.day)) {
+        showError("Daily schedule interval must be at least 1.");
+        focusElement(dayInterval);
+        return;
+      }
+      if (rawSchedule.week.enabled) {
+        if (!rawSchedule.week.weekdays.length) {
+          showError("Select at least one weekday for the weekly schedule.");
+          focusElement(weekDayInputs[0]);
+          return;
+        }
+        if (!normalized || !normalized.week) {
+          showError("Weekly schedule interval must be at least 1.");
+          focusElement(weekInterval);
+          return;
+        }
+      }
+      if (rawSchedule.month.enabled) {
+        if (rawSchedule.month.mode === "day") {
+          const dayVal = Number(rawSchedule.month.value);
+          if (!Number.isFinite(dayVal) || dayVal < 1 || dayVal > 31) {
+            showError("Choose a day between 1 and 31 for the monthly schedule.");
+            focusElement(monthDayInput);
+            return;
+          }
+          if (!normalized || !normalized.month || normalized.month.mode !== "day") {
+            showError("Monthly schedule interval must be at least 1.");
+            focusElement(monthInterval);
+            return;
+          }
+        } else {
+          if (rawSchedule.month.weekday === null) {
+            showError("Choose a weekday for the monthly schedule.");
+            focusElement(monthTarget);
+            return;
+          }
+          if (!normalized || !normalized.month || normalized.month.mode !== "weekday") {
+            showError("Monthly schedule interval must be at least 1.");
+            focusElement(monthInterval);
+            return;
+          }
+          if (normalized.month.nth !== "last") {
+            const nthVal = Number(rawSchedule.month.value);
+            if (!Number.isFinite(nthVal) || nthVal < 1 || nthVal > 4) {
+              showError("Choose 1st, 2nd, 3rd, 4th, or Last for the monthly schedule.");
+              focusElement(monthNthSelect);
+              return;
+            }
+          }
+        }
+      }
+      if (rawSchedule.year.enabled) {
+        if (!isISODate(rawSchedule.year.date)) {
+          showError("Pick a valid date for the yearly schedule.");
+          focusElement(yearDate);
+          return;
+        }
+        if (!normalized || !normalized.year) {
+          showError("Yearly schedule interval must be at least 1.");
+          focusElement(yearInterval);
+          return;
+        }
+      }
+      const schedulePayload = normalized ? cloneTemplateSchedule(normalized) : null;
+      if (normalized && normalized.anchorDate) {
+        anchorSeed = normalized.anchorDate;
+      }
+      showError("");
+      submitting = true;
+      try {
+        if (typeof onSave === "function") {
+          await onSave(value, schedulePayload);
+        }
+        cleanup();
+      } catch (err) {
+        submitting = false;
+        const message = err?.message || String(err);
+        showError(message);
+        if (input2) {
+          focusElement(input2);
+          try {
+            input2.select();
+          } catch {
+          }
+        }
+      }
+    };
+    const onKey = (e) => {
+      const k = (e.key || "").toLowerCase();
+      if (k === "escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        reject();
+        return;
+      }
+      if (k === "enter" && !e.shiftKey) {
+        if (wrap.contains(document.activeElement)) {
+          e.preventDefault();
+          e.stopPropagation();
+          accept();
+          return;
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    applyInitialSchedule();
+    if (monthTarget) monthTarget.addEventListener("change", () => {
+      syncMonthMode();
+      refreshSectionLocks();
+    });
+    if (yearDate) yearDate.addEventListener("change", () => {
+      if (yearEnable && yearEnable.checked && yearDate && isISODate(yearDate.value)) {
+        anchorSeed = yearDate.value;
+      }
+    });
+    if (btnSave) btnSave.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      accept();
+    });
+    if (btnCancel) btnCancel.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      reject();
+    });
+    if (input2) input2.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        accept();
+      }
+    });
+    setTimeout(() => {
+      if (input2) {
+        focusElement(input2);
+      }
+    }, 0);
+  }
+  function promptTemplateSave() {
+    if (!cmView) return;
+    if (!window.db || typeof window.db.saveTemplate !== "function") {
+      info("Template storage is not available.");
+      return;
+    }
+    const text = cmView.state.doc.toString();
+    state2.buffer = text.split("\n");
+    showTemplateModal({
+      onSave: async (name2, schedule) => {
+        const saved = await window.db.saveTemplate(name2, text, schedule);
+        const nextSchedule = saved && saved.schedule ? cloneTemplateSchedule(saved.schedule) : cloneTemplateSchedule(schedule);
+        state2.templateSchedule = nextSchedule;
+        state2.templateName = name2;
+        state2.id = name2;
+        state2.title = `Template: ${name2}`;
+        const headerEl = document.querySelector(".writer-header");
+        if (headerEl) headerEl.textContent = `TEMPLATE - ${name2}`;
+        clearUnsaved();
+        flashSaveBar();
+        state2.dirty = false;
+        const status = document.getElementById("writerStatus");
+        if (status) {
+          status.textContent = `Template "${name2}" saved (${summary()})`;
+        } else {
+          ok(`Template "${name2}" saved (${summary()})`);
+        }
+        showTemplateSavedToast();
+      },
+      initialValue: isTemplate ? state2.templateName ?? templateName ?? "" : "",
+      initialSchedule: state2.templateSchedule
+    });
   }
   function showConfirmModal(message, onYes, onNo) {
     const prev = document.getElementById("confirmModal");
@@ -26405,6 +27195,13 @@ function startEditor(shell2, opts = {}) {
   }
   function onHotkey(e) {
     {
+      if ((isMac && e.metaKey || !isMac && e.ctrlKey) && e.shiftKey && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        e.stopPropagation();
+        promptTemplateSave();
+        return;
+      }
       if ((isMac && e.metaKey || !isMac && e.ctrlKey) && (e.key === "s" || e.key === "S")) {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -26422,7 +27219,7 @@ function startEditor(shell2, opts = {}) {
     }
   }
   if (titleEl) titleEl.style.display = "none";
-  shell2.setPrompt("journal>");
+  shell2.setPrompt(isTemplate ? "template>" : "journal>");
   mountEditorDom();
   const paneEl = document.getElementById("writerPane");
   const startDoc = state2.buffer.join("\n");
@@ -26439,6 +27236,907 @@ function startEditor(shell2, opts = {}) {
     }
   };
   shell2.enter(program);
+  return program;
+}
+
+// packages/ui/js/theme.js
+var THEME_STORAGE_KEY = "theme:active";
+var THEME_VERSION = 1;
+var THEME_VAR_WHITELIST = [
+  "--bg",
+  "--panel",
+  "--text",
+  "--muted",
+  "--error",
+  "--warn",
+  "--info",
+  "--soft",
+  "--accent",
+  "--app-bg",
+  "--app-fg",
+  "--console-bg",
+  "--console-fg",
+  "--editor-bg",
+  "--editor-fg",
+  "--editor-caret",
+  "--editor-selection-bg",
+  "--editor-gutter-bg",
+  "--border",
+  "--font-ui",
+  "--font-mono",
+  "--font-editor",
+  "--base-font-size",
+  "--editor-font-size",
+  "--editor-line-height",
+  "--caret-offset-y",
+  "--editor-max-width"
+];
+var COLOR_ALPHA = {
+  "--editor-selection-bg": 0.25,
+  "--border": 0.15
+};
+var COLOR_FALLBACKS = {
+  "--app-bg": "--bg",
+  "--app-fg": "--text",
+  "--accent": "--text",
+  "--soft": "--text",
+  "--console-bg": "--bg",
+  "--console-fg": "--text",
+  "--editor-bg": "--bg",
+  "--editor-fg": "--text",
+  "--editor-caret": "--text",
+  "--editor-selection-bg": "--text",
+  "--editor-gutter-bg": "--bg",
+  "--border": "--text"
+};
+var COLOR_VARS = THEME_VAR_WHITELIST.filter(
+  (v) => !v.startsWith("--font") && !v.endsWith("-size") && !v.endsWith("-line-height") && v !== "--caret-offset-y" && v !== "--editor-max-width"
+);
+var GOOGLE_FONT_CATALOG = {
+  "inter": { family: "Inter", weights: [400, 600] },
+  "ibm plex sans": { family: "IBM Plex Sans", weights: [400, 600] },
+  "rubik": { family: "Rubik", weights: [400, 500] },
+  "roboto": { family: "Roboto", weights: [400, 500, 700] },
+  "open sans": { family: "Open Sans", weights: [400, 600] },
+  "merriweather": { family: "Merriweather", weights: [400, 700] },
+  "lora": { family: "Lora", weights: [400, 600] },
+  "jetbrains mono": { family: "JetBrains Mono", weights: [400, 500] },
+  "fira code": { family: "Fira Code", weights: [400, 500] },
+  "ibm plex mono": { family: "IBM Plex Mono", weights: [400, 500] },
+  "source code pro": { family: "Source Code Pro", weights: [400, 500] }
+};
+var STYLE_ID = "themeStyle";
+function cloneDeep(obj) {
+  return obj ? JSON.parse(JSON.stringify(obj)) : obj;
+}
+function ensureStyleElement() {
+  let el = document.getElementById(STYLE_ID);
+  if (!el) {
+    el = document.createElement("style");
+    el.id = STYLE_ID;
+    document.head.appendChild(el);
+  }
+  return el;
+}
+function normalizeHex(value) {
+  if (typeof value !== "string") return null;
+  let v = value.trim();
+  if (/^#[0-9a-f]{3}$/i.test(v)) {
+    v = "#" + v.slice(1).split("").map((ch) => ch + ch).join("");
+  }
+  if (/^#[0-9a-f]{6}$/i.test(v)) {
+    return v.toLowerCase();
+  }
+  return null;
+}
+function rgbaToHex(value) {
+  const match = value.match(/rgba?\(([^)]+)\)/i);
+  if (!match) return null;
+  const parts = match[1].split(",").map((p) => p.trim());
+  if (parts.length < 3) return null;
+  const [r, g, b] = parts.map((n, idx) => idx < 3 ? Math.max(0, Math.min(255, Math.round(Number(n)))) : 0);
+  return "#" + [r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("");
+}
+function extractAlpha(value) {
+  const match = value.match(/rgba?\(([^)]+)\)/i);
+  if (!match) return null;
+  const parts = match[1].split(",").map((p) => p.trim());
+  if (parts.length === 4) {
+    const a = Number(parts[3]);
+    return Number.isFinite(a) ? Math.min(1, Math.max(0, a)) : null;
+  }
+  return null;
+}
+function buildColorValue(hex, alpha = null) {
+  if (!hex) return null;
+  const norm = normalizeHex(hex);
+  if (!norm) return null;
+  if (alpha == null || Number.isNaN(alpha)) {
+    return norm;
+  }
+  const r = parseInt(norm.slice(1, 3), 16);
+  const g = parseInt(norm.slice(3, 5), 16);
+  const b = parseInt(norm.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+var VAR_REF_RE = /^var\(\s*(--[^\s,)]+)\s*\)/;
+function resolveVarValue(value, vars, seen = /* @__PURE__ */ new Set()) {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  const match = trimmed.match(VAR_REF_RE);
+  if (match) {
+    const ref = match[1];
+    if (!vars || seen.has(ref)) return null;
+    seen.add(ref);
+    return resolveVarValue(vars[ref], vars, seen);
+  }
+  return trimmed;
+}
+function sanitizeThemeVars(vars = {}) {
+  const out = {};
+  for (const key of THEME_VAR_WHITELIST) {
+    if (!(key in vars)) continue;
+    let value = vars[key];
+    if (typeof value !== "string") continue;
+    let trimmed = value.trim();
+    if (COLOR_VARS.includes(key)) {
+      if (trimmed.startsWith("var(")) {
+        out[key] = trimmed;
+        continue;
+      }
+      const alpha = key in COLOR_ALPHA ? COLOR_ALPHA[key] : extractAlpha(trimmed);
+      const hex = normalizeHex(trimmed) || rgbaToHex(trimmed);
+      if (hex) {
+        trimmed = buildColorValue(hex, key in COLOR_ALPHA ? COLOR_ALPHA[key] : alpha);
+      } else {
+        continue;
+      }
+    }
+    out[key] = trimmed;
+  }
+  return out;
+}
+function extractPrimaryFont(value) {
+  if (typeof value !== "string") return null;
+  const primary = value.split(",")[0] || "";
+  const cleaned = primary.replace(/["']/g, "").trim().toLowerCase();
+  if (cleaned.startsWith("var(")) return null;
+  return cleaned;
+}
+function buildFamiliesFromVars(vars) {
+  const families = [];
+  const uiFont = extractPrimaryFont(vars["--font-ui"]);
+  const monoFont = extractPrimaryFont(vars["--font-mono"]);
+  const editorFont = extractPrimaryFont(vars["--font-editor"]);
+  if (uiFont && GOOGLE_FONT_CATALOG[uiFont]) {
+    families.push(GOOGLE_FONT_CATALOG[uiFont]);
+  }
+  if (monoFont && GOOGLE_FONT_CATALOG[monoFont]) {
+    if (!families.some((f) => f.family === GOOGLE_FONT_CATALOG[monoFont].family)) {
+      families.push(GOOGLE_FONT_CATALOG[monoFont]);
+    }
+  }
+  if (editorFont && GOOGLE_FONT_CATALOG[editorFont]) {
+    if (!families.some((f) => f.family === GOOGLE_FONT_CATALOG[editorFont].family)) {
+      families.push(GOOGLE_FONT_CATALOG[editorFont]);
+    }
+  }
+  return families;
+}
+function validateTheme(theme2) {
+  if (!theme2 || typeof theme2 !== "object") return false;
+  if (typeof theme2.name !== "string") return false;
+  if (!theme2.vars || typeof theme2.vars !== "object") return false;
+  if (!theme2.meta || typeof theme2.meta !== "object") return false;
+  if (theme2.meta.version !== THEME_VERSION) return false;
+  return true;
+}
+function applyTheme(theme2) {
+  if (!validateTheme(theme2)) return;
+  const vars = sanitizeThemeVars(theme2.vars);
+  const lines = Object.entries(vars).map(([k, v]) => `    ${k}: ${v};`);
+  const style = ensureStyleElement();
+  style.textContent = `:root {
+${lines.join("\n")}
+}`;
+  fontLinkManager.update(buildFamiliesFromVars(vars));
+}
+function parseDefaultsFromCSS(text) {
+  if (typeof text !== "string") return {};
+  const match = text.match(/:root\s*{([^}]+)}/s);
+  if (!match) return {};
+  const body = match[1];
+  const vars = {};
+  const regex = /(--[\w-]+)\s*:\s*([^;]+);/g;
+  let m;
+  while (m = regex.exec(body)) {
+    const key = m[1];
+    if (!THEME_VAR_WHITELIST.includes(key)) continue;
+    vars[key] = m[2].trim();
+  }
+  return vars;
+}
+var defaultThemeCache = null;
+async function getDefaultTheme() {
+  if (defaultThemeCache) return cloneDeep(defaultThemeCache);
+  try {
+    const url = new URL("css/theme.css", window.location.href).href;
+    const resp = await fetch(url, { cache: "no-cache" });
+    if (!resp.ok) throw new Error(`Failed to fetch theme.css (${resp.status})`);
+    const text = await resp.text();
+    const vars = parseDefaultsFromCSS(text);
+    defaultThemeCache = {
+      name: "Default",
+      vars,
+      meta: { version: THEME_VERSION, source: "defaults" }
+    };
+    return cloneDeep(defaultThemeCache);
+  } catch (err) {
+    console.error("getDefaultTheme failed", err);
+    return {
+      name: "Default",
+      vars: {},
+      meta: { version: THEME_VERSION, source: "defaults", error: err?.message || String(err) }
+    };
+  }
+}
+function safeParse(json) {
+  try {
+    const parsed = JSON.parse(json);
+    return validateTheme(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+async function storageGet(key) {
+  if (window.settings && typeof window.settings.get === "function") {
+    return await window.settings.get(key);
+  }
+  if (typeof localStorage !== "undefined") {
+    return localStorage.getItem(key);
+  }
+  return null;
+}
+async function storageSet(key, value) {
+  if (window.settings && typeof window.settings.set === "function") {
+    await window.settings.set(key, value);
+    return;
+  }
+  if (typeof localStorage !== "undefined") {
+    localStorage.setItem(key, value);
+  }
+}
+async function loadActiveTheme() {
+  const raw = await storageGet(THEME_STORAGE_KEY);
+  if (!raw) return null;
+  return safeParse(raw);
+}
+async function saveActiveTheme(theme2) {
+  if (!validateTheme(theme2)) throw new Error("Invalid theme");
+  const payload = {
+    name: theme2.name,
+    vars: sanitizeThemeVars(theme2.vars),
+    meta: { ...theme2.meta, version: THEME_VERSION, saved_at: (/* @__PURE__ */ new Date()).toISOString() }
+  };
+  await storageSet(THEME_STORAGE_KEY, JSON.stringify(payload));
+  return payload;
+}
+async function ensureActiveTheme() {
+  let theme2 = await loadActiveTheme();
+  if (!theme2) {
+    theme2 = await getDefaultTheme();
+    theme2.meta = { version: THEME_VERSION, source: "defaults", seeded_at: (/* @__PURE__ */ new Date()).toISOString() };
+    await saveActiveTheme(theme2);
+  }
+  applyTheme(theme2);
+  return theme2;
+}
+function buildFontQuery(family) {
+  if (!family || typeof family.family !== "string") return null;
+  const weights = Array.isArray(family.weights) && family.weights.length ? family.weights : [400];
+  const escaped = family.family.replace(/ /g, "+");
+  const weightStr = weights.slice().sort((a, b) => a - b).join(";");
+  return `family=${escaped}:wght@${weightStr}`;
+}
+function ensureFontLink() {
+  let link2 = document.getElementById("themeFonts");
+  if (!link2) {
+    link2 = document.createElement("link");
+    link2.id = "themeFonts";
+    link2.rel = "stylesheet";
+    link2.type = "text/css";
+    link2.crossOrigin = "anonymous";
+    document.head.appendChild(link2);
+  }
+  return link2;
+}
+function removeFontLink() {
+  const link2 = document.getElementById("themeFonts");
+  if (link2 && link2.parentElement) link2.parentElement.removeChild(link2);
+}
+var fontLinkManager = /* @__PURE__ */ (() => {
+  let timer = null;
+  let lastHref = "";
+  function applyHref(href) {
+    if (!href) {
+      removeFontLink();
+      lastHref = "";
+      return;
+    }
+    const link2 = ensureFontLink();
+    if (lastHref !== href) {
+      link2.href = href;
+      lastHref = href;
+    }
+  }
+  return {
+    update(families = []) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        const parts = families.map(buildFontQuery).filter(Boolean);
+        if (!parts.length) {
+          applyHref("");
+          return;
+        }
+        const href = `https://fonts.googleapis.com/css2?${parts.join("&")}&display=swap`;
+        applyHref(href);
+      }, 200);
+    },
+    clear() {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      applyHref("");
+    }
+  };
+})();
+function extractHexForInput(value, key, vars = {}) {
+  const resolved = resolveVarValue(value, vars);
+  const trim = typeof resolved === "string" ? resolved.trim() : "";
+  const hex = normalizeHex(trim) || rgbaToHex(trim);
+  if (hex) return hex;
+  const fallbackKey = COLOR_FALLBACKS[key];
+  if (fallbackKey && fallbackKey !== key) {
+    const fallbackValue = vars[fallbackKey];
+    if (fallbackValue != null) {
+      const fbHex = extractHexForInput(fallbackValue, fallbackKey, vars);
+      if (fbHex) return fbHex;
+    }
+  }
+  return COLOR_ALPHA[key] != null ? "#ffffff" : "#000000";
+}
+function buildValueFromInput(hex, key) {
+  const alpha = COLOR_ALPHA[key];
+  return buildColorValue(hex, alpha ?? null);
+}
+function createThemeDraft(baseTheme4) {
+  const theme2 = validateTheme(baseTheme4) ? cloneDeep(baseTheme4) : {
+    name: "Draft",
+    vars: {},
+    meta: { version: THEME_VERSION, source: "draft" }
+  };
+  theme2.vars = sanitizeThemeVars(theme2.vars);
+  theme2.meta = theme2.meta || {};
+  theme2.meta.version = THEME_VERSION;
+  return theme2;
+}
+
+// packages/ui/js/themeApp.js
+var VAR_GROUPS = [
+  {
+    title: "COLORS",
+    vars: ["--bg", "--panel", "--text", "--muted", "--info", "--warn", "--error", "--soft", "--accent", "--border"]
+  }
+];
+var FONT_OPTIONS_UI = [
+  {
+    id: "system-ui",
+    label: "System Default",
+    css: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"',
+    google: null
+  },
+  {
+    id: "roboto",
+    label: "Roboto",
+    css: '"Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif',
+    google: { family: "Roboto", weights: [400, 500, 700] }
+  },
+  {
+    id: "open-sans",
+    label: "Open Sans",
+    css: '"Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif',
+    google: { family: "Open Sans", weights: [400, 600] }
+  }
+];
+var FONT_OPTIONS_EDITOR = [
+  {
+    id: "system-editor",
+    label: "System Default",
+    css: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"',
+    google: null
+  },
+  {
+    id: "roboto-editor",
+    label: "Roboto (Sans)",
+    css: '"Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif',
+    google: { family: "Roboto", weights: [400, 500, 700] }
+  },
+  {
+    id: "open-sans-editor",
+    label: "Open Sans (Sans)",
+    css: '"Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif',
+    google: { family: "Open Sans", weights: [400, 600] }
+  },
+  {
+    id: "merriweather-editor",
+    label: "Merriweather (Serif)",
+    css: '"Merriweather", Georgia, "Times New Roman", serif',
+    google: { family: "Merriweather", weights: [400, 700] }
+  },
+  {
+    id: "lora-editor",
+    label: "Lora (Serif)",
+    css: '"Lora", Georgia, "Times New Roman", serif',
+    google: { family: "Lora", weights: [400, 600] }
+  },
+  {
+    id: "jetbrains-editor",
+    label: "JetBrains Mono",
+    css: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", "Courier New", monospace',
+    google: { family: "JetBrains Mono", weights: [400, 500] }
+  },
+  {
+    id: "source-code-editor",
+    label: "Source Code Pro",
+    css: '"Source Code Pro", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", "Courier New", monospace',
+    google: { family: "Source Code Pro", weights: [400, 500] }
+  }
+];
+var FONT_OPTIONS_MONO = [
+  {
+    id: "system-mono",
+    label: "System Mono",
+    css: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    google: null
+  },
+  {
+    id: "jetbrains-mono",
+    label: "JetBrains Mono",
+    css: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", "Courier New", monospace',
+    google: { family: "JetBrains Mono", weights: [400, 500] }
+  },
+  {
+    id: "source-code-pro",
+    label: "Source Code Pro",
+    css: '"Source Code Pro", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", "Courier New", monospace',
+    google: { family: "Source Code Pro", weights: [400, 500] }
+  }
+];
+function detectFontOption(value, options2) {
+  if (!value) return options2[0];
+  const normal = value.replace(/\s+/g, " ").trim().toLowerCase();
+  const exact = options2.find((opt) => opt.css.replace(/\s+/g, " ").trim().toLowerCase() === normal);
+  if (exact) return exact;
+  const primary = value.split(",")[0].replace(/["']/g, "").trim().toLowerCase();
+  const fuzzy = options2.find((opt) => opt.css.split(",")[0].replace(/["']/g, "").trim().toLowerCase() === primary);
+  return fuzzy || options2[0];
+}
+function scheduleMeasure() {
+  requestAnimationFrame(() => {
+    try {
+      window.dispatchEvent(new Event("resize"));
+    } catch {
+    }
+  });
+}
+function setStatus(text) {
+  const el = document.getElementById("themeStatus");
+  if (el) el.textContent = text || "";
+}
+function showThemeToast(message) {
+  try {
+    const prev = document.getElementById("themeToast");
+    if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
+    const toast = document.createElement("div");
+    toast.id = "themeToast";
+    toast.className = "template-toast";
+    toast.textContent = message;
+    (document.body || document.documentElement).appendChild(toast);
+    toast.addEventListener("animationend", () => {
+      if (toast && toast.parentElement) toast.parentElement.removeChild(toast);
+    }, { once: true });
+  } catch (_) {
+  }
+}
+function createColorRow(name2, value) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "theme-color";
+  const label = document.createElement("div");
+  label.className = "theme-color-label";
+  label.textContent = name2.replace(/^--/, "");
+  const swatch = document.createElement("button");
+  swatch.className = "theme-color-swatch";
+  const colorInput = document.createElement("input");
+  colorInput.type = "color";
+  colorInput.value = value;
+  swatch.style.setProperty("--swatch-color", value);
+  swatch.addEventListener("click", () => colorInput.click());
+  colorInput.className = "theme-color-input";
+  wrapper.appendChild(label);
+  wrapper.appendChild(swatch);
+  wrapper.appendChild(colorInput);
+  return { wrapper, swatch, input: colorInput };
+}
+function extractMaxWidth(value) {
+  if (typeof value !== "string") return 81;
+  const match = value.match(/([0-9]+(?:\.[0-9]+)?)/);
+  if (!match) return 81;
+  const num = Number(match[1]);
+  if (!Number.isFinite(num)) return 81;
+  return Math.min(140, Math.max(40, Math.round(num)));
+}
+async function startThemeApp(shell2) {
+  const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent || "");
+  let activeTheme = await loadActiveTheme();
+  if (!validateTheme(activeTheme)) {
+    activeTheme = await getDefaultTheme();
+  }
+  let draft = createThemeDraft(activeTheme);
+  draft.meta = { ...draft.meta, version: 1, source: "draft" };
+  const originalTheme = createThemeDraft(activeTheme);
+  const outputEl = document.getElementById("output");
+  const inputWrapEl = document.getElementById("inputWrap");
+  const caretEl = document.querySelector(".caret");
+  const screenEl = document.getElementById("screen");
+  const titleEl = document.querySelector(".title");
+  const titlebar = document.querySelector(".titlebar");
+  const snapshot = {
+    outputHTML: outputEl ? outputEl.innerHTML : "",
+    inputDisplay: inputWrapEl ? inputWrapEl.style.display : "",
+    caretDisplay: caretEl ? caretEl.style.display : "",
+    screenPadding: screenEl ? screenEl.style.padding : "",
+    titleDisplay: titleEl ? titleEl.style.display : ""
+  };
+  if (inputWrapEl) inputWrapEl.style.display = "none";
+  if (caretEl) caretEl.style.display = "none";
+  if (outputEl) outputEl.innerHTML = "";
+  const root = document.createElement("div");
+  root.id = "themeRoot";
+  root.className = "theme-root";
+  const bars = document.createElement("div");
+  bars.id = "themeBars";
+  bars.className = "theme-bars";
+  const header = document.createElement("div");
+  header.className = "theme-header soft";
+  header.textContent = "THEME DESIGNER";
+  const help = document.createElement("div");
+  help.className = "theme-help muted";
+  const saveCombo = isMac ? "CMD + S" : "CTRL + S";
+  help.textContent = `${saveCombo} to save \xB7 Reset to default \xB7 ESC to cancel`;
+  bars.appendChild(header);
+  bars.appendChild(help);
+  const panels = document.createElement("div");
+  panels.className = "theme-panels";
+  const fontsPanel = document.createElement("section");
+  fontsPanel.className = "theme-panel";
+  const fontsTitle = document.createElement("h2");
+  fontsTitle.textContent = "Fonts";
+  fontsPanel.appendChild(fontsTitle);
+  const monoLabel = document.createElement("label");
+  monoLabel.className = "theme-font-label";
+  monoLabel.textContent = "Mono Font";
+  const monoSelect = document.createElement("select");
+  monoSelect.className = "theme-font-select";
+  FONT_OPTIONS_MONO.forEach((opt) => {
+    const option = document.createElement("option");
+    option.value = opt.id;
+    option.textContent = opt.label;
+    monoSelect.appendChild(option);
+  });
+  monoLabel.appendChild(monoSelect);
+  fontsPanel.appendChild(monoLabel);
+  const monoPreview = document.createElement("pre");
+  monoPreview.className = "theme-font-preview mono";
+  monoPreview.textContent = `for (const note of journal) {
+    console.log(note.title);
+}`;
+  fontsPanel.appendChild(monoPreview);
+  const editorLabel = document.createElement("label");
+  editorLabel.className = "theme-font-label";
+  editorLabel.textContent = "Editor Font";
+  const editorSelect = document.createElement("select");
+  editorSelect.className = "theme-font-select";
+  FONT_OPTIONS_EDITOR.forEach((opt) => {
+    const option = document.createElement("option");
+    option.value = opt.id;
+    option.textContent = opt.label;
+    editorSelect.appendChild(option);
+  });
+  editorLabel.appendChild(editorSelect);
+  fontsPanel.appendChild(editorLabel);
+  const editorPreview = document.createElement("div");
+  editorPreview.className = "theme-font-preview editor";
+  editorPreview.innerHTML = `
+        <div class="preview-heading">Journal Preview</div>
+        <p>The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.</p>
+    `;
+  fontsPanel.appendChild(editorPreview);
+  const uiLabel = document.createElement("label");
+  uiLabel.className = "theme-font-label";
+  uiLabel.textContent = "UI Font";
+  const uiSelect = document.createElement("select");
+  uiSelect.className = "theme-font-select";
+  FONT_OPTIONS_UI.forEach((opt) => {
+    const option = document.createElement("option");
+    option.value = opt.id;
+    option.textContent = opt.label;
+    uiSelect.appendChild(option);
+  });
+  uiLabel.appendChild(uiSelect);
+  fontsPanel.appendChild(uiLabel);
+  const uiPreview = document.createElement("div");
+  uiPreview.className = "theme-font-preview ui";
+  uiPreview.innerHTML = `
+        <div class="preview-heading">Heading Preview</div>
+        <div class="preview-body">The quick brown fox jumps over the lazy dog.</div>
+    `;
+  fontsPanel.appendChild(uiPreview);
+  panels.appendChild(fontsPanel);
+  const colorPanels = document.createElement("div");
+  colorPanels.className = "theme-color-panels";
+  panels.appendChild(colorPanels);
+  const colorInputs = /* @__PURE__ */ new Map();
+  for (const group of VAR_GROUPS) {
+    const section = document.createElement("section");
+    section.className = "theme-panel";
+    const h2 = document.createElement("h2");
+    h2.textContent = group.title;
+    section.appendChild(h2);
+    const grid = document.createElement("div");
+    grid.className = "theme-color-grid";
+    for (const v of group.vars) {
+      const current = draft.vars[v] ?? "";
+      const hex = extractHexForInput(current, v, draft.vars);
+      const { wrapper, swatch, input: input2 } = createColorRow(v, hex);
+      input2.addEventListener("input", () => {
+        const newValue = buildValueFromInput(input2.value, v);
+        draft.vars[v] = newValue;
+        swatch.style.setProperty("--swatch-color", input2.value);
+        dirty = true;
+        updateStatus();
+        updatePreview();
+      });
+      grid.appendChild(wrapper);
+      colorInputs.set(v, { input: input2, swatch });
+    }
+    section.appendChild(grid);
+    colorPanels.appendChild(section);
+  }
+  const layoutPanel = document.createElement("section");
+  layoutPanel.className = "theme-panel";
+  const layoutTitle = document.createElement("h2");
+  layoutTitle.textContent = "Layout";
+  layoutPanel.appendChild(layoutTitle);
+  const maxLabel = document.createElement("label");
+  maxLabel.className = "theme-number-label";
+  maxLabel.textContent = "Editor Width (characters)";
+  const maxWidthInput = document.createElement("input");
+  maxWidthInput.type = "number";
+  maxWidthInput.className = "theme-number-input";
+  maxWidthInput.min = "40";
+  maxWidthInput.max = "140";
+  maxWidthInput.step = "1";
+  maxWidthInput.value = String(extractMaxWidth(draft.vars["--editor-max-width"] ?? "81"));
+  maxWidthInput.addEventListener("input", () => {
+    const width = extractMaxWidth(maxWidthInput.value + "");
+    maxWidthInput.value = String(width);
+    draft.vars["--editor-max-width"] = `${width}ch`;
+    dirty = true;
+    updateStatus();
+    updatePreview();
+  });
+  maxLabel.appendChild(maxWidthInput);
+  layoutPanel.appendChild(maxLabel);
+  panels.appendChild(layoutPanel);
+  const actions = document.createElement("div");
+  actions.className = "theme-actions";
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "primary";
+  saveBtn.textContent = "Save & Close";
+  const resetBtn = document.createElement("button");
+  resetBtn.className = "warn";
+  resetBtn.textContent = "Reset";
+  const cancelBtn = document.createElement("button");
+  cancelBtn.textContent = "Cancel";
+  actions.appendChild(saveBtn);
+  actions.appendChild(resetBtn);
+  actions.appendChild(cancelBtn);
+  const status = document.createElement("div");
+  status.id = "themeStatus";
+  status.className = "theme-status muted";
+  root.appendChild(header);
+  root.appendChild(help);
+  root.appendChild(panels);
+  root.appendChild(status);
+  root.appendChild(actions);
+  if (titlebar) {
+    titlebar.appendChild(bars);
+  } else if (screenEl) {
+    screenEl.prepend(bars);
+  }
+  if (outputEl && outputEl.parentElement) {
+    outputEl.parentElement.appendChild(root);
+  } else if (screenEl) {
+    screenEl.appendChild(root);
+  } else {
+    (document.body || document.documentElement).appendChild(root);
+  }
+  if (titleEl) {
+    titleEl.style.display = "none";
+  }
+  shell2.setPrompt("theme>");
+  function currentFontOptions() {
+    const uiOpt = detectFontOption(draft.vars["--font-ui"], FONT_OPTIONS_UI);
+    const editorOpt = detectFontOption(draft.vars["--font-editor"], FONT_OPTIONS_EDITOR);
+    const monoOpt = detectFontOption(draft.vars["--font-mono"], FONT_OPTIONS_MONO);
+    return { uiOpt, editorOpt, monoOpt };
+  }
+  function updateFontPreviews() {
+    const { uiOpt, editorOpt, monoOpt } = currentFontOptions();
+    uiSelect.value = uiOpt.id;
+    editorSelect.value = editorOpt.id;
+    monoSelect.value = monoOpt.id;
+    uiPreview.style.fontFamily = uiOpt.css;
+    editorPreview.style.fontFamily = editorOpt.css;
+    monoPreview.style.fontFamily = monoOpt.css;
+  }
+  function updateColorsUI() {
+    colorInputs.forEach((widgets, key) => {
+      const hex = extractHexForInput(draft.vars[key] ?? "", key, draft.vars);
+      widgets.input.value = hex;
+      widgets.swatch.style.setProperty("--swatch-color", hex);
+    });
+  }
+  function updateLayoutUI() {
+    maxWidthInput.value = String(extractMaxWidth(draft.vars["--editor-max-width"] ?? "81"));
+  }
+  function updatePreview() {
+    const { uiOpt, editorOpt, monoOpt } = currentFontOptions();
+    draft.vars["--font-ui"] = uiOpt.css;
+    draft.vars["--font-editor"] = editorOpt.css;
+    draft.vars["--font-mono"] = monoOpt.css;
+    applyTheme(draft);
+    updateFontPreviews();
+    updateLayoutUI();
+    scheduleMeasure();
+  }
+  function updateStatus(message) {
+    if (message) {
+      setStatus(message);
+      return;
+    }
+    setStatus(dirty ? "Unsaved changes" : "");
+  }
+  let dirty = false;
+  uiSelect.addEventListener("change", () => {
+    const opt = FONT_OPTIONS_UI.find((o) => o.id === uiSelect.value) || FONT_OPTIONS_UI[0];
+    draft.vars["--font-ui"] = opt.css;
+    dirty = true;
+    updateStatus();
+    updatePreview();
+  });
+  editorSelect.addEventListener("change", () => {
+    const opt = FONT_OPTIONS_EDITOR.find((o) => o.id === editorSelect.value) || FONT_OPTIONS_EDITOR[0];
+    draft.vars["--font-editor"] = opt.css;
+    dirty = true;
+    updateStatus();
+    updatePreview();
+  });
+  monoSelect.addEventListener("change", () => {
+    const opt = FONT_OPTIONS_MONO.find((o) => o.id === monoSelect.value) || FONT_OPTIONS_MONO[0];
+    draft.vars["--font-mono"] = opt.css;
+    dirty = true;
+    updateStatus();
+    updatePreview();
+  });
+  async function handleSave(closeAfter = false) {
+    try {
+      const saved = await saveActiveTheme({
+        name: draft.name || "Active Theme",
+        vars: draft.vars,
+        meta: { version: 1, source: "user", saved_at: (/* @__PURE__ */ new Date()).toISOString() }
+      });
+      activeTheme = saved;
+      draft = createThemeDraft(saved);
+      dirty = false;
+      updateStatus("Theme saved");
+      updatePreview();
+      updateColorsUI();
+      showThemeToast("Theme saved");
+      if (closeAfter) {
+        shell2.exit();
+      }
+    } catch (err) {
+      const msg = err?.message || String(err);
+      updateStatus(`Save failed: ${msg}`);
+    }
+  }
+  async function handleReset() {
+    const confirmReset = window.confirm("Reset theme to factory defaults?");
+    if (!confirmReset) return;
+    try {
+      const defaults = await getDefaultTheme();
+      defaults.name = "Default";
+      defaults.meta = { version: 1, source: "defaults", reset_at: (/* @__PURE__ */ new Date()).toISOString() };
+      await saveActiveTheme(defaults);
+      activeTheme = defaults;
+      draft = createThemeDraft(defaults);
+      dirty = false;
+      updatePreview();
+      updateColorsUI();
+      updateStatus("Theme reset to defaults");
+      showThemeToast("Theme reset");
+    } catch (err) {
+      const msg = err?.message || String(err);
+      updateStatus(`Reset failed: ${msg}`);
+    }
+  }
+  function handleCancel() {
+    const themeToRestore = activeTheme ? activeTheme : originalTheme;
+    draft = createThemeDraft(themeToRestore);
+    applyTheme(themeToRestore);
+    dirty = false;
+    shell2.exit();
+  }
+  saveBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    handleSave(true);
+  });
+  resetBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    handleReset();
+  });
+  cancelBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    handleCancel();
+  });
+  function onHotkey(e) {
+    if ((isMac && e.metaKey || !isMac && e.ctrlKey) && (e.key === "s" || e.key === "S")) {
+      e.preventDefault();
+      handleSave(false);
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      handleCancel();
+    }
+  }
+  window.addEventListener("keydown", onHotkey, true);
+  function cleanup() {
+    window.removeEventListener("keydown", onHotkey, true);
+    if (bars && bars.parentElement) bars.parentElement.removeChild(bars);
+    if (root && root.parentElement) root.parentElement.removeChild(root);
+    if (outputEl) outputEl.innerHTML = snapshot.outputHTML;
+    if (inputWrapEl) inputWrapEl.style.display = snapshot.inputDisplay;
+    if (caretEl) caretEl.style.display = snapshot.caretDisplay;
+    if (screenEl) screenEl.style.padding = snapshot.screenPadding;
+    if (titleEl) titleEl.style.display = snapshot.titleDisplay ?? "";
+    setStatus("");
+  }
+  const program = {
+    consume: async () => {
+      dirty = true;
+      updateStatus();
+    },
+    destroy: cleanup
+  };
+  shell2.enter(program);
+  updatePreview();
+  updateColorsUI();
+  updateLayoutUI();
+  updateStatus("");
   return program;
 }
 
@@ -28473,7 +30171,7 @@ function shiftISO(days = 0, tz = Intl.DateTimeFormat().resolvedOptions().timeZon
   const shifted = new Date(base2.getTime() + days * 864e5);
   return fmt.format(shifted);
 }
-function isISODate(s) {
+function isISODate2(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 function isMonthDay(s) {
@@ -28510,6 +30208,34 @@ function resolveMonthDayPast(mmdd, tz = Intl.DateTimeFormat().resolvedOptions().
   }
   return today;
 }
+function pickTemplateForDate(templates, dateStr) {
+  if (!Array.isArray(templates) || !templates.length) return null;
+  const matches = [];
+  for (const tpl of templates) {
+    const schedule = parseTemplateSchedule(tpl.schedule);
+    if (!schedule) continue;
+    const result = matchTemplateSchedule(schedule, dateStr);
+    if (!result) continue;
+    const weight = TEMPLATE_SCHEDULE_WEIGHT[result.level] ?? -1;
+    matches.push({
+      template: tpl,
+      schedule: result.schedule || schedule,
+      level: result.level,
+      weight
+    });
+  }
+  if (!matches.length) return null;
+  matches.sort((a, b) => {
+    if (a.weight !== b.weight) return b.weight - a.weight;
+    const updatedA = a.template.updated_at || a.template.updatedAt || "";
+    const updatedB = b.template.updated_at || b.template.updatedAt || "";
+    if (updatedA !== updatedB) return updatedA > updatedB ? -1 : 1;
+    const nameA = (a.template.name || "").toLowerCase();
+    const nameB = (b.template.name || "").toLowerCase();
+    return nameA.localeCompare(nameB);
+  });
+  return matches[0];
+}
 var input = document.querySelector("#cmdInput");
 var output = document.querySelector("#output");
 var screen = document.querySelector("#screen");
@@ -28517,8 +30243,10 @@ var db = window.db;
 if (!db) {
   if (!window.electronAPI) {
     const DB_NAME = "console-journal";
-    const DB_VERSION = 1;
+    const DB_VERSION = 3;
     const STORE = "entries";
+    const TEMPLATE_STORE = "templates";
+    const SETTINGS_STORE = "settings";
     const openDB = () => new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
@@ -28528,15 +30256,22 @@ if (!db) {
           s.createIndex("ym", "ym", { unique: false });
           s.createIndex("updated_at", "updated_at", { unique: false });
         }
+        if (!db2.objectStoreNames.contains(TEMPLATE_STORE)) {
+          const t2 = db2.createObjectStore(TEMPLATE_STORE, { keyPath: "name" });
+          t2.createIndex("updated_at", "updated_at", { unique: false });
+        }
+        if (!db2.objectStoreNames.contains(SETTINGS_STORE)) {
+          db2.createObjectStore(SETTINGS_STORE, { keyPath: "key" });
+        }
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
-    const txRun = async (mode, fn) => {
+    const txRunStore = async (storeName, mode, fn) => {
       const dbi = await openDB();
       return new Promise((resolve, reject) => {
-        const tx = dbi.transaction(STORE, mode);
-        const store = tx.objectStore(STORE);
+        const tx = dbi.transaction(storeName, mode);
+        const store = tx.objectStore(storeName);
         let result;
         try {
           result = fn(store, tx);
@@ -28548,6 +30283,7 @@ if (!db) {
         tx.onerror = () => reject(tx.error);
       });
     };
+    const txRun = (mode, fn) => txRunStore(STORE, mode, fn);
     db = {
       async get(date) {
         return txRun("readonly", (store) => {
@@ -28617,9 +30353,123 @@ if (!db) {
             req.onerror = () => reject(req.error);
           });
         });
+      },
+      async saveTemplate(name2, content2 = "", schedule = null) {
+        const trimmed = String(name2 ?? "").trim();
+        if (!trimmed) throw new Error("Template name required");
+        const now = (/* @__PURE__ */ new Date()).toISOString();
+        const normalizedSchedule = schedule ? normalizeTemplateSchedule(schedule, { defaultAnchorDate: schedule.anchorDate }) : null;
+        return txRunStore(TEMPLATE_STORE, "readwrite", (store) => {
+          return new Promise((resolve, reject) => {
+            const getReq = store.get(trimmed);
+            getReq.onsuccess = () => {
+              const existing = getReq.result;
+              const row = {
+                name: trimmed,
+                content: String(content2 ?? ""),
+                created_at: existing?.created_at ?? now,
+                updated_at: now,
+                schedule: normalizedSchedule ? cloneTemplateSchedule(normalizedSchedule) : null
+              };
+              const putReq = store.put(row);
+              putReq.onsuccess = () => resolve(row);
+              putReq.onerror = () => reject(putReq.error);
+            };
+            getReq.onerror = () => reject(getReq.error);
+          });
+        });
+      },
+      async getTemplate(name2) {
+        const trimmed = String(name2 ?? "").trim();
+        if (!trimmed) throw new Error("Template name required");
+        return txRunStore(TEMPLATE_STORE, "readonly", (store) => {
+          return new Promise((resolve, reject) => {
+            const req = store.get(trimmed);
+            req.onsuccess = () => {
+              const row = req.result || null;
+              if (!row) return resolve(null);
+              const schedule = parseTemplateSchedule(row.schedule);
+              resolve({ ...row, schedule });
+            };
+            req.onerror = () => reject(req.error);
+          });
+        });
+      },
+      async listTemplates(limit = 200) {
+        const max = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 500) : 200;
+        return txRunStore(TEMPLATE_STORE, "readonly", (store) => {
+          return new Promise((resolve, reject) => {
+            const idx = store.index("updated_at");
+            const out = [];
+            const cursorReq = idx.openCursor(null, "prev");
+            cursorReq.onsuccess = () => {
+              const cur = cursorReq.result;
+              if (cur && out.length < max) {
+                const value = cur.value || {};
+                const schedule = parseTemplateSchedule(value.schedule);
+                out.push({
+                  ...value,
+                  schedule,
+                  preview: (value.content || "").slice(0, 200)
+                });
+                cur.continue();
+              } else {
+                resolve(out);
+              }
+            };
+            cursorReq.onerror = () => reject(cursorReq.error);
+          });
+        });
+      },
+      async deleteTemplate(name2) {
+        const trimmed = String(name2 ?? "").trim();
+        if (!trimmed) throw new Error("Template name required");
+        return txRunStore(TEMPLATE_STORE, "readwrite", (store) => {
+          return new Promise((resolve, reject) => {
+            const getReq = store.get(trimmed);
+            getReq.onsuccess = () => {
+              const exists = !!getReq.result;
+              if (!exists) {
+                resolve({ deleted: 0 });
+                return;
+              }
+              const delReq = store.delete(trimmed);
+              delReq.onsuccess = () => resolve({ deleted: 1 });
+              delReq.onerror = () => reject(delReq.error);
+            };
+            getReq.onerror = () => reject(getReq.error);
+          });
+        });
       }
     };
     window.db = db;
+    if (!window.settings) {
+      window.settings = {
+        async get(key) {
+          const trimmed = String(key ?? "").trim();
+          if (!trimmed) return null;
+          return txRunStore(SETTINGS_STORE, "readonly", (store) => {
+            return new Promise((resolve, reject) => {
+              const req = store.get(trimmed);
+              req.onsuccess = () => resolve(req.result ? String(req.result.value ?? "") : null);
+              req.onerror = () => reject(req.error);
+            });
+          });
+        },
+        async set(key, value) {
+          const trimmed = String(key ?? "").trim();
+          if (!trimmed) throw new Error("Settings key required");
+          const strValue = String(value ?? "");
+          return txRunStore(SETTINGS_STORE, "readwrite", (store) => {
+            return new Promise((resolve, reject) => {
+              const req = store.put({ key: trimmed, value: strValue });
+              req.onsuccess = () => resolve({ ok: true });
+              req.onerror = () => reject(req.error);
+            });
+          });
+        }
+      };
+    }
   } else {
     const invoke = (ch, ...args) => window.electronAPI && typeof window.electronAPI.invoke === "function" ? window.electronAPI.invoke(ch, ...args) : Promise.reject(new Error("electronAPI.invoke not available"));
     db = {
@@ -28630,11 +30480,33 @@ if (!db) {
       search: (q) => invoke("entry:search", q),
       delete: async (date) => {
         const res = await invoke("entry:deleteByDate", date);
-        return !!(res && (res.deleted > 0 || res.ok === true));
-      }
+        return !!(res && res.deleted);
+      },
+      saveTemplate: async (name2, content2 = "", schedule = null) => {
+        const normalized = schedule ? normalizeTemplateSchedule(schedule, { defaultAnchorDate: schedule.anchorDate }) : null;
+        const res = await invoke("template:upsert", { name: name2, content: content2, schedule: normalized });
+        if (!res) return res;
+        return { ...res, schedule: parseTemplateSchedule(res.schedule) };
+      },
+      getTemplate: async (name2) => {
+        const res = await invoke("template:getByName", name2);
+        if (!res) return null;
+        return { ...res, schedule: parseTemplateSchedule(res.schedule) };
+      },
+      listTemplates: async () => {
+        const rows = await invoke("template:list");
+        if (!Array.isArray(rows)) return [];
+        return rows.map((row) => ({
+          ...row,
+          schedule: parseTemplateSchedule(row.schedule)
+        }));
+      },
+      deleteTemplate: (name2) => invoke("template:delete", name2)
     };
   }
 }
+var bootTheme = await ensureActiveTheme();
+applyTheme(bootTheme);
 var activeProgram = null;
 var state = {
   prompt: "user:~$",
@@ -28668,7 +30540,7 @@ var shell = {
     }
     activeProgram = null;
     this.resetPrompt();
-    focus();
+    focusInput();
   },
   suspend() {
     if (activeProgram && typeof activeProgram.disable === "function") {
@@ -28679,7 +30551,7 @@ var shell = {
     }
     activeProgram = null;
     this.resetPrompt();
-    focus();
+    focusInput();
   }
 };
 function esc(s) {
@@ -28719,7 +30591,7 @@ function newline4() {
 }
 function banner() {
   print(`<div class="soft">console-journal <span class="muted">v1.0</span> \u2014 <span class="stamp">${todayISO()}</span></div>`);
-  print(`<div class="muted">Type <span class="kbd">help</span> to list commands.</div>`);
+  print(`<div class="muted">Type <span class="kbd">tutorial</span> for help.</div>`);
 }
 var native = {
   log: console.log,
@@ -28844,7 +30716,7 @@ var handleKeydown = async (e) => {
     }
   }
 };
-var focus = () => {
+var focusInput = () => {
   input.focus();
   updateCaret();
 };
@@ -28888,8 +30760,35 @@ var scheduleCaret = () => {
   if (caretRAF) cancelAnimationFrame(caretRAF);
   caretRAF = requestAnimationFrame(updateCaret);
 };
-function createListUI(title, items) {
+function createListUI(title, items, opts = {}) {
   let idx = 0;
+  const {
+    getKey = (item) => String(item.date),
+    getStamp = (item) => String(item.date),
+    getPreview = (item) => {
+      const text = (item.preview ?? item.content ?? "").replace(/\n/g, " ");
+      return text.slice(0, 120);
+    },
+    onOpen = async (item) => {
+      const key = getKey(item);
+      const row = await db.get(key);
+      startEditor(shell, {
+        id: row?.id ?? key,
+        date: key,
+        initialContent: row?.content ?? ""
+      });
+    },
+    onDelete = async (item) => {
+      const key = getKey(item);
+      const res = await db.delete(key);
+      if (typeof res === "object" && res) {
+        if (typeof res.deleted === "number") return res.deleted > 0;
+        if ("ok" in res) return !!res.ok;
+      }
+      return !!res;
+    },
+    emptyMessage = '<div class="muted">No entries left.</div>'
+  } = opts;
   const container = document.createElement("div");
   container.className = "listui";
   const head = document.createElement("div");
@@ -28898,16 +30797,20 @@ function createListUI(title, items) {
   const ul = document.createElement("ul");
   ul.className = "menu";
   let confirmPending = false;
-  let pendingDate = null;
+  let pendingItem = null;
   let confirmDiv = null;
   function render() {
     ul.innerHTML = "";
     items.forEach((it, i) => {
       const li = document.createElement("li");
       if (i === idx) li.classList.add("active");
-      const date = esc(it.date);
-      const prev = esc((it.preview || it.content || "").replace(/\n/g, " ").slice(0, 120));
-      li.innerHTML = `<span class="stamp">${date} - </span>${prev}`;
+      const stampText = esc(String(getStamp(it)));
+      let preview = getPreview(it);
+      if (typeof preview !== "string") preview = "";
+      const trimmed = preview.trim();
+      const previewHtml = trimmed ? esc(trimmed) : "";
+      const sep = previewHtml ? " - " : "";
+      li.innerHTML = `<span class="stamp">${stampText}</span>${sep}${previewHtml}`;
       li.addEventListener("click", () => {
         idx = i;
         render();
@@ -28940,30 +30843,30 @@ function createListUI(title, items) {
               confirmDiv.innerHTML = `Cancelled.`;
             }
             confirmPending = false;
-            pendingDate = null;
+            pendingItem = null;
             return;
           }
           (async () => {
             try {
-              const res = await db.delete(pendingDate);
-              const ok = typeof res === "object" ? res.deleted > 0 : !!res;
+              const ok = await onDelete(pendingItem);
+              const stamp = pendingItem ? esc(String(getStamp(pendingItem))) : "";
               if (confirmDiv) {
                 confirmDiv.className = ok ? "ok" : "error";
-                confirmDiv.innerHTML = ok ? `Deleted <span class="stamp">${esc(pendingDate)}</span>.` : `Nothing deleted for <span class="stamp">${esc(pendingDate)}</span>.`;
+                confirmDiv.innerHTML = ok ? `Deleted <span class="stamp">${stamp}</span>.` : `Nothing deleted for <span class="stamp">${stamp}</span>.`;
               }
               if (ok) {
-                const idxToRemove = items.findIndex((it) => String(it.date) === String(pendingDate));
+                const keyToRemove = pendingItem ? getKey(pendingItem) : null;
+                const idxToRemove = items.findIndex((it) => getKey(it) === keyToRemove);
                 if (idxToRemove !== -1) {
                   items.splice(idxToRemove, 1);
                   idx = Math.min(idx, Math.max(0, items.length - 1));
                   if (items.length) {
                     render();
                   } else {
-                    print('<div class="muted">No entries left.</div>');
+                    print(emptyMessage);
                     shell.exit();
                   }
                 }
-              } else {
               }
             } catch (err) {
               const msg = err?.message || String(err);
@@ -28973,7 +30876,7 @@ function createListUI(title, items) {
               }
             } finally {
               confirmPending = false;
-              pendingDate = null;
+              pendingItem = null;
             }
           })();
           return;
@@ -29017,10 +30920,10 @@ function createListUI(title, items) {
           return;
         }
         confirmPending = true;
-        pendingDate = chosen.date;
+        pendingItem = chosen;
         confirmDiv = document.createElement("div");
         confirmDiv.className = "warn";
-        confirmDiv.innerHTML = `Delete <span class="stamp">${esc(pendingDate)}</span>? <span class="warn">y/n</span>`;
+        confirmDiv.innerHTML = `Delete <span class="stamp">${esc(String(getStamp(chosen)))}</span>? <span class="warn">y/n</span>`;
         output.appendChild(confirmDiv);
         scrollToBottom();
         e.preventDefault();
@@ -29030,12 +30933,12 @@ function createListUI(title, items) {
         if (!chosen) return;
         shell.suspend();
         (async () => {
-          const row = await db.get(chosen.date);
-          startEditor(shell, {
-            id: row?.id ?? chosen.date,
-            date: chosen.date,
-            initialContent: row?.content ?? ""
-          });
+          try {
+            await onOpen(chosen);
+          } catch (err) {
+            const msg = err?.message || String(err);
+            print(`<div class="error">${esc(msg)}</div>`);
+          }
         })();
         e.preventDefault();
       }
@@ -29074,6 +30977,40 @@ register("help", () => {
         <div class="muted help">${rowsHtml}</div>
     `);
 }, "List available commands");
+register("tutorial", () => {
+  print(`
+    <div class="soft">journal quickstart</div>
+    <div class="muted help">
+        <div><span class="kbd">journal</span> \u2014 open today's entry; add a date afterwards for a specific day</div>
+        <div><span class="kbd">journal -tmp "Template"</span> \u2014 spin up a fresh entry pre-filled from a template</div>
+        <div><span class="kbd">view</span> \u2014 browse the latest entries; use \u2191/\u2193 then Enter to reopen one</div>
+        <div><span class="kbd">view templates</span> \u2014 review, edit, or delete saved templates</div>
+        <div><span class="kbd">search "coffee"</span> \u2014 find entries containing your keywords</div>
+        <div><span class="kbd">export -a</span> \u2014 create a full PDF export when you need a snapshot</div>
+    </div>`);
+}, "Quick journaling workflow overview");
+register("theme", async (argv = []) => {
+  const arg = (argv[0] || "").trim().toLowerCase();
+  if (!arg) {
+    await startThemeApp(shell);
+    return;
+  }
+  if (arg === "reset") {
+    try {
+      const defaults = await getDefaultTheme();
+      defaults.name = "Default";
+      defaults.meta = { version: 1, source: "defaults", reset_at: (/* @__PURE__ */ new Date()).toISOString() };
+      await saveActiveTheme(defaults);
+      applyTheme(defaults);
+      print('<div class="ok">Theme reset to defaults.</div>');
+    } catch (err) {
+      const msg = err?.message || String(err);
+      print(`<div class="error">Theme reset failed: ${esc(msg)}</div>`);
+    }
+    return;
+  }
+  print('<div class="error">Usage: <span class="kbd">theme</span> or <span class="kbd">theme reset</span></div>');
+}, "Customize fonts and colors");
 register("clear", () => {
   output.innerHTML = "";
   banner();
@@ -29108,6 +31045,7 @@ function printJournalHelp() {
         <div><span class="kbd">journal MM-DD</span> \u2014 open the most recent past occurrence of that month/day</div>
         <div><span class="kbd">journal -y</span> \u2014 open yesterday</div>
         <div><span class="kbd">journal -t</span> \u2014 open tomorrow</div>
+        <div><span class="kbd">journal -tmp "Template"</span> \u2014 create a new entry from a template (append date to target another day)</div>
         <div><span class="kbd">journal -help</span> \u2014 show this help</div>
     </div>`);
 }
@@ -29118,6 +31056,7 @@ function printViewHelp() {
         <div><span class="kbd">view</span> \u2014 list latest 15 entries</div>
         <div><span class="kbd">view MM</span> \u2014 list entries for month <em>MM</em> in the most recent past year</div>
         <div><span class="kbd">view YYYY-MM</span> \u2014 list entries for that month and year</div>
+        <div><span class="kbd">view templates</span> \u2014 manage saved templates</div>
         <div><span class="kbd">view -help</span> \u2014 show this help</div>
     </div>`);
 }
@@ -29163,30 +31102,117 @@ register("quit", async () => {
   }
 }, "Close the application");
 register("journal", async (argv = []) => {
-  let date;
-  if (!argv.length) {
-    date = todayISO();
-  } else {
-    const arg = String(argv[0]).trim();
+  const args = argv.map((a) => String(a).trim()).filter((a) => a.length > 0);
+  let templateName = null;
+  let dateToken = null;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
     if (arg === "-help") {
       printJournalHelp();
       return;
-    } else if (arg === "-y") date = shiftISO(-1);
-    else if (arg === "-t") date = shiftISO(1);
-    else if (isISODate(arg)) date = arg;
-    else if (isMonthDay(arg)) date = resolveMonthDayPast(arg);
-    else {
-      print(`<div class="error">Invalid argument for journal: ${esc(arg)}<br>Use YYYY-MM-DD, MM-DD (most recent past), -y for yesterday, -t for tomorrow, or -help for usage.</div>`);
+    }
+    if (arg === "-tmp") {
+      if (templateName !== null) {
+        print('<div class="error">Duplicate -tmp arguments. Specify the template name once.</div>');
+        return;
+      }
+      const next = args[++i];
+      if (typeof next !== "string") {
+        print('<div class="error">Missing template name after -tmp.</div>');
+        return;
+      }
+      const name2 = next.trim();
+      if (!name2) {
+        print('<div class="error">Template name cannot be empty.</div>');
+        return;
+      }
+      templateName = name2;
+      continue;
+    }
+    if (dateToken === null) {
+      dateToken = arg;
+      continue;
+    }
+    print('<div class="error">Too many arguments for journal. Use -help for usage.</div>');
+    return;
+  }
+  let date;
+  if (!dateToken) {
+    date = todayISO();
+  } else if (dateToken === "-y") {
+    date = shiftISO(-1);
+  } else if (dateToken === "-t") {
+    date = shiftISO(1);
+  } else if (isISODate2(dateToken)) {
+    date = dateToken;
+  } else if (isMonthDay(dateToken)) {
+    date = resolveMonthDayPast(dateToken);
+  } else {
+    print(`<div class="error">Invalid argument for journal: ${esc(dateToken)}<br>Use YYYY-MM-DD, MM-DD (most recent past), -y for yesterday, -t for tomorrow, or -help for usage.</div>`);
+    return;
+  }
+  try {
+    if (templateName !== null) {
+      if (!db || typeof db.getTemplate !== "function" || typeof db.upsert !== "function") {
+        print('<div class="error">Templates are not available in this environment.</div>');
+        return;
+      }
+      let template;
+      try {
+        template = await db.getTemplate(templateName);
+      } catch (err) {
+        const msg = err?.message || String(err);
+        print(`<div class="error">Unable to load template: ${esc(msg)}</div>`);
+        return;
+      }
+      if (!template || typeof template.content !== "string") {
+        print(`<div class="error">Template "${esc(templateName)}" not found.</div>`);
+        return;
+      }
+      const existing = await db.get(date);
+      if (existing) {
+        print(`<div class="error">An entry already exists for ${esc(date)}. Remove it before using -tmp.</div>`);
+        return;
+      }
+      const inserted = await db.upsert(date, template.content ?? "");
+      const row2 = inserted || { date, content: template.content ?? "" };
+      startEditor(shell, {
+        id: row2.id ?? date,
+        date: row2.date ?? date,
+        initialContent: row2.content ?? (template.content ?? "")
+      });
       return;
     }
+    let row = await db.get(date);
+    if (!row) {
+      let seededContent = "";
+      let usedTemplateName = null;
+      if (db && typeof db.listTemplates === "function") {
+        try {
+          const templates = await db.listTemplates();
+          const match = pickTemplateForDate(templates, date);
+          if (match && match.template) {
+            seededContent = match.template.content ?? "";
+            usedTemplateName = match.template.name ?? null;
+          }
+        } catch (err) {
+          console.warn("Repeating template selection failed:", err);
+        }
+      }
+      row = await db.upsert(date, seededContent);
+      if (usedTemplateName) {
+        print(`<div class="muted">Initialized with template "${esc(usedTemplateName)}".</div>`);
+      }
+    }
+    startEditor(shell, {
+      id: row.id ?? date,
+      date: row.date ?? date,
+      initialContent: row.content ?? ""
+    });
+  } catch (err) {
+    const msg = err?.message || String(err);
+    print(`<div class="error">${esc(msg)}</div>`);
   }
-  let row = await db.get(date);
-  if (!row) row = await db.upsert(date, "");
-  startEditor(shell, {
-    id: row.id ?? date,
-    date: row.date ?? date,
-    initialContent: row.content ?? ""
-  });
 }, "Open journal (YYYY-MM-DD | MM-DD | -y | -t | -help)");
 register("view", async (argv = []) => {
   let items = [];
@@ -29201,8 +31227,67 @@ register("view", async (argv = []) => {
     return;
   }
   const a0 = String(argv[0]).trim();
+  const a0Lower = a0.toLowerCase();
   if (a0 === "-help") {
     printViewHelp();
+    return;
+  }
+  if (a0Lower === "templates") {
+    if (!db || typeof db.listTemplates !== "function") {
+      print('<div class="error">Templates are not available in this environment.</div>');
+      return;
+    }
+    let templates = [];
+    try {
+      templates = await db.listTemplates();
+    } catch (err) {
+      const msg = err?.message || String(err);
+      print(`<div class="error">Unable to list templates: ${esc(msg)}</div>`);
+      return;
+    }
+    if (!templates || !templates.length) {
+      print('<div class="muted">No templates saved yet.</div>');
+      return;
+    }
+    shell.setPrompt("templates>");
+    shell.enter(createListUI("TEMPLATES", templates, {
+      getKey: (item) => String(item.name),
+      getStamp: (item) => item.name,
+      getPreview: (item) => {
+        const src = item.preview ?? item.content ?? "";
+        return src.replace(/\n/g, " ").slice(0, 120);
+      },
+      onOpen: async (item) => {
+        if (!db || typeof db.getTemplate !== "function") {
+          throw new Error("Template retrieval is not available.");
+        }
+        const tpl = await db.getTemplate(item.name);
+        const record = tpl && typeof tpl.content === "string" ? tpl : item;
+        if (!record || typeof record.content !== "string") {
+          throw new Error(`Template "${item.name}" not found.`);
+        }
+        startEditor(shell, {
+          mode: "template",
+          templateName: item.name,
+          id: item.name,
+          initialContent: record.content ?? "",
+          templateSchedule: record.schedule ?? null,
+          title: `Template: ${item.name}`
+        });
+      },
+      onDelete: async (item) => {
+        if (!db || typeof db.deleteTemplate !== "function") {
+          throw new Error("Template deletion is not available.");
+        }
+        const res = await db.deleteTemplate(item.name);
+        if (typeof res === "object" && res) {
+          if (typeof res.deleted === "number") return res.deleted > 0;
+          if ("ok" in res) return !!res.ok;
+        }
+        return !!res;
+      },
+      emptyMessage: '<div class="muted">No templates left.</div>'
+    }));
     return;
   }
   if (isYearMonth(a0)) {
@@ -29250,7 +31335,7 @@ register("search", async (argv = []) => {
 register("delete", async (argv = []) => {
   const arg = String(argv[0] || "").trim();
   const date = arg === "-t" || arg === "--today" ? todayISO() : arg;
-  if (!isISODate(date)) {
+  if (!isISODate2(date)) {
     print('<div class="error">Usage: <span class="kbd">delete YYYY-MM-DD</span> or <span class="kbd">delete -t</span></div>');
     return;
   }
@@ -29557,12 +31642,10 @@ register("switch", async (argv = []) => {
   print(`<div class="error">Invalid mode: ${esc(arg)}<br>Available modes: web, desktop</div>`);
 }, "Switch between web and desktop modes");
 (() => {
-  window.onload = () => {
-    banner();
-    focus();
-  };
+  banner();
+  focusInput();
   input.addEventListener("keydown", handleKeydown);
-  screen.addEventListener("click", focus);
+  screen.addEventListener("click", focusInput);
   input.addEventListener("input", scheduleCaret);
   input.addEventListener("click", scheduleCaret);
   input.addEventListener("keyup", scheduleCaret);

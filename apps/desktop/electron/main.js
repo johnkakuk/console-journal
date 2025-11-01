@@ -77,6 +77,18 @@ function initDB() {
             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE(date)
         );
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            content TEXT NOT NULL,
+            schedule TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
         -- Optional FTS (enable if your SQLite has FTS5):
         -- CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(content, content='entries', content_rowid='id');
         -- CREATE TRIGGER IF NOT EXISTS entries_ai AFTER INSERT ON entries BEGIN
@@ -90,6 +102,11 @@ function initDB() {
         --     INSERT INTO entries_fts(entries_fts, rowid, content) VALUES('delete', old.id, old.content);
         -- END;
     `);
+
+    const templateColumns = db.prepare(`PRAGMA table_info(templates)`).all();
+    if (!templateColumns.some(col => col.name === 'schedule')) {
+        db.exec(`ALTER TABLE templates ADD COLUMN schedule TEXT`);
+    }
 
     // Prepared statements
     db._upsertEntry = db.prepare(`
@@ -125,6 +142,34 @@ function initDB() {
         FROM entries
         WHERE substr(date, 1, 7) = ?
         ORDER BY date ASC
+    `);
+    db._upsertTemplate = db.prepare(`
+        INSERT INTO templates (name, content, schedule)
+        VALUES (@name, @content, @schedule)
+        ON CONFLICT(name) DO UPDATE SET
+            content = excluded.content,
+            schedule = excluded.schedule,
+            updated_at = datetime('now')
+        RETURNING id, name, content, schedule, created_at, updated_at
+    `);
+    db._getTemplateByName = db.prepare(`SELECT * FROM templates WHERE name = ?`);
+    db._deleteTemplate = db.prepare(`DELETE FROM templates WHERE name = ?`);
+    db._listTemplates = db.prepare(`
+        SELECT name,
+               substr(content, 1, 200) AS preview,
+               content,
+               schedule,
+               created_at,
+               updated_at
+        FROM templates
+        ORDER BY updated_at DESC, name ASC
+    `);
+    db._getSetting = db.prepare(`SELECT value FROM settings WHERE key = ?`);
+    db._setSetting = db.prepare(`
+        INSERT INTO settings (key, value)
+        VALUES (@key, @value)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        RETURNING key, value
     `);
 }
 
@@ -208,6 +253,64 @@ ipcMain.handle('entry:listRecent', (evt, limit) => {
 ipcMain.handle('entry:listByYearMonth', (evt, ym) => {
     if (typeof ym !== 'string' || !/^\d{4}-\d{2}$/.test(ym)) throw new Error('Bad month');
     return db._listByMonth.all(ym);
+});
+
+ipcMain.handle('template:upsert', (_evt, { name, content, schedule }) => {
+    if (typeof name !== 'string' || !name.trim()) throw new Error('Bad template name');
+    if (typeof content !== 'string') throw new Error('Bad template content');
+
+    let schedulePayload = null;
+    if (schedule !== null && schedule !== undefined) {
+        if (typeof schedule === 'string') {
+            try {
+                schedulePayload = JSON.parse(schedule);
+            } catch (err) {
+                throw new Error('Bad template schedule');
+            }
+        } else if (typeof schedule === 'object' && !Array.isArray(schedule)) {
+            schedulePayload = schedule;
+        } else {
+            throw new Error('Bad template schedule');
+        }
+    }
+
+    let scheduleJson = null;
+    if (schedulePayload) {
+        try {
+            scheduleJson = JSON.stringify(schedulePayload);
+        } catch (err) {
+            throw new Error('Unable to serialize schedule');
+        }
+    }
+
+    return db._upsertTemplate.get({ name: name.trim(), content, schedule: scheduleJson });
+});
+
+ipcMain.handle('template:getByName', (_evt, name) => {
+    if (typeof name !== 'string' || !name.trim()) throw new Error('Bad template name');
+    return db._getTemplateByName.get(name.trim()) || null;
+});
+
+ipcMain.handle('template:list', () => {
+    return db._listTemplates.all();
+});
+
+ipcMain.handle('template:delete', (_evt, name) => {
+    if (typeof name !== 'string' || !name.trim()) throw new Error('Bad template name');
+    return { deleted: db._deleteTemplate.run(name.trim()).changes };
+});
+
+ipcMain.handle('settings:get', (_evt, key) => {
+    if (typeof key !== 'string' || !key.trim()) throw new Error('Bad settings key');
+    const row = db._getSetting.get(key.trim());
+    return row ? row.value : null;
+});
+
+ipcMain.handle('settings:set', (_evt, { key, value }) => {
+    if (typeof key !== 'string' || !key.trim()) throw new Error('Bad settings key');
+    if (typeof value !== 'string') throw new Error('Settings value must be string');
+    db._setSetting.get({ key: key.trim(), value });
+    return { ok: true };
 });
 
 ipcMain.handle('app:quit', () => {
