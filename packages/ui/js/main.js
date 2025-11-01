@@ -4,6 +4,8 @@
  * 
 /* ==== main.js — Shell Router & UI ================================================== */
 import { startEditor } from './editor.js';
+import { startThemeApp } from './themeApp.js';
+import { ensureActiveTheme, applyTheme, getDefaultTheme, saveActiveTheme } from './theme.js';
 import { marked } from 'marked';
 
 // === date helpers ===
@@ -84,9 +86,10 @@ if (!db) {
     if (!window.electronAPI) {
         // ===== Minimal IndexedDB adapter for PWA =====
         const DB_NAME = 'console-journal';
-        const DB_VERSION = 2;
+        const DB_VERSION = 3;
         const STORE = 'entries';
         const TEMPLATE_STORE = 'templates';
+        const SETTINGS_STORE = 'settings';
 
         const openDB = () => new Promise((resolve, reject) => {
             const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -100,6 +103,9 @@ if (!db) {
                 if (!db.objectStoreNames.contains(TEMPLATE_STORE)) {
                     const t = db.createObjectStore(TEMPLATE_STORE, { keyPath: 'name' });
                     t.createIndex('updated_at', 'updated_at', { unique: false });
+                }
+                if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
+                    db.createObjectStore(SETTINGS_STORE, { keyPath: 'key' });
                 }
             };
             req.onsuccess = () => resolve(req.result);
@@ -267,6 +273,33 @@ if (!db) {
             }
         };
         window.db = db;
+        if (!window.settings) {
+            window.settings = {
+                async get(key) {
+                    const trimmed = String(key ?? '').trim();
+                    if (!trimmed) return null;
+                    return txRunStore(SETTINGS_STORE, 'readonly', store => {
+                        return new Promise((resolve, reject) => {
+                            const req = store.get(trimmed);
+                            req.onsuccess = () => resolve(req.result ? String(req.result.value ?? '') : null);
+                            req.onerror = () => reject(req.error);
+                        });
+                    });
+                },
+                async set(key, value) {
+                    const trimmed = String(key ?? '').trim();
+                    if (!trimmed) throw new Error('Settings key required');
+                    const strValue = String(value ?? '');
+                    return txRunStore(SETTINGS_STORE, 'readwrite', store => {
+                        return new Promise((resolve, reject) => {
+                            const req = store.put({ key: trimmed, value: strValue });
+                            req.onsuccess = () => resolve({ ok: true });
+                            req.onerror = () => reject(req.error);
+                        });
+                    });
+                }
+            };
+        }
     } else {
         // Electron: use preload IPC bridges via a generic invoke fallback
         const invoke = (ch, ...args) =>
@@ -291,6 +324,9 @@ if (!db) {
         };
     }
 }
+
+const bootTheme = await ensureActiveTheme();
+applyTheme(bootTheme);
 
 // Whether a subprogram (team.js) is currently consuming input
 let inputState = false;
@@ -805,14 +841,37 @@ register('tutorial', () => {
     print(`
     <div class="soft">journal quickstart</div>
     <div class="muted help">
-        <div><span class="kbd">journal</span> — open today's entry</div>
+        <div><span class="kbd">journal</span> — open today's entry; add a date afterwards for a specific day</div>
+        <div><span class="kbd">journal -tmp "Template"</span> — spin up a fresh entry pre-filled from a template</div>
         <div><span class="kbd">view</span> — browse the latest entries; use ↑/↓ then Enter to reopen one</div>
+        <div><span class="kbd">view templates</span> — review, edit, or delete saved templates</div>
         <div><span class="kbd">search "coffee"</span> — find entries containing your keywords</div>
-        <div><span class="kbd">export -pdf</span> — create a PDF export of the last week when you need a snapshot</div>
-        <div><span class="kbd">help</span> — view all commands</div>
-        <div><span class="kbd">-help</span> — add this flag to most commands for more information</div>
+        <div><span class="kbd">export -a</span> — create a full PDF export when you need a snapshot</div>
     </div>`);
 }, 'Quick journaling workflow overview');
+
+register('theme', async (argv = []) => {
+    const arg = (argv[0] || '').trim().toLowerCase();
+    if (!arg) {
+        await startThemeApp(shell);
+        return;
+    }
+    if (arg === 'reset') {
+        try {
+            const defaults = await getDefaultTheme();
+            defaults.name = 'Default';
+            defaults.meta = { version: 1, source: 'defaults', reset_at: new Date().toISOString() };
+            await saveActiveTheme(defaults);
+            applyTheme(defaults);
+            print('<div class="ok">Theme reset to defaults.</div>');
+        } catch (err) {
+            const msg = err?.message || String(err);
+            print(`<div class="error">Theme reset failed: ${esc(msg)}</div>`);
+        }
+        return;
+    }
+    print('<div class="error">Usage: <span class="kbd">theme</span> or <span class="kbd">theme reset</span></div>');
+}, 'Customize fonts and colors');
 
 register('clear', () => {
     output.innerHTML = '';

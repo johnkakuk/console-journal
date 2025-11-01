@@ -67,7 +67,7 @@ body {
 }
 
 .prompt {
-    color: var(--console-accent);
+    color: var(--accent);
 }
 
 .caret {
@@ -436,6 +436,210 @@ body {
     font-size: 12px;
     opacity: .8;
     text-align: right;
+}
+
+.theme-root {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px 20px;
+    width: 100%;
+    height: 100%;
+    flex: 1;
+    min-height: 0;
+    box-sizing: border-box;
+    font-family: var(--font-ui, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial);
+    color: var(--console-fg, #cfcfcf);
+    overflow: auto;
+}
+
+.theme-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 16px;
+}
+
+.theme-header {
+    font-size: 1.5rem;
+    letter-spacing: 0.08em;
+}
+
+.theme-help {
+    font-size: 0.85rem;
+}
+
+.theme-panels {
+    display: grid;
+    gap: 16px;
+}
+
+@media (min-width: 960px) {
+    .theme-panels {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+.theme-panel {
+    background: color-mix(in srgb, var(--panel, #111) 75%, transparent);
+    border: 1px solid var(--border, rgba(255,255,255,0.1));
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.35);
+}
+
+.theme-panel h2 {
+    margin: 0;
+    font-size: 1.1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--soft, #9cff9f);
+}
+
+.theme-font-label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.theme-font-select {
+    appearance: none;
+    background: color-mix(in srgb, var(--console-bg, #090909) 80%, transparent);
+    border: 1px solid var(--border, rgba(255,255,255,0.12));
+    border-radius: 6px;
+    padding: 6px 8px;
+    color: inherit;
+    font-family: inherit;
+}
+
+.theme-font-preview {
+    background: color-mix(in srgb, var(--console-bg, #090909) 65%, transparent);
+    border: 1px solid var(--border, rgba(255,255,255,0.1));
+    border-radius: 6px;
+    padding: 12px;
+    line-height: 1.4;
+}
+
+.theme-font-preview.ui {
+    font-family: var(--font-ui, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial);
+}
+
+.theme-font-preview.editor {
+    font-family: var(--font-editor, var(--font-ui, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial));
+    line-height: var(--editor-line-height, 1.5);
+}
+
+.theme-font-preview.mono {
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
+    font-size: 0.9rem;
+    overflow-x: auto;
+}
+
+.theme-color-panels {
+    display: grid;
+    gap: 16px;
+}
+
+.theme-color-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.theme-color {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: color-mix(in srgb, var(--console-bg, #090909) 60%, transparent);
+    border: 1px solid var(--border, rgba(255,255,255,0.1));
+    border-radius: 6px;
+    padding: 8px 10px;
+    position: relative;
+}
+
+.theme-color-label {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    flex: 1;
+}
+
+.theme-color-swatch {
+    width: 36px;
+    height: 24px;
+    border-radius: 4px;
+    border: 1px solid rgba(0,0,0,0.35);
+    background: var(--swatch-color, #ffffff);
+    cursor: pointer;
+    padding: 0;
+}
+
+.theme-color-input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    width: 0;
+    height: 0;
+}
+
+.theme-number-label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.theme-number-input {
+    appearance: none;
+    background: color-mix(in srgb, var(--console-bg, #090909) 80%, transparent);
+    border: 1px solid var(--border, rgba(255,255,255,0.12));
+    border-radius: 6px;
+    padding: 6px 8px;
+    color: inherit;
+    font-family: inherit;
+    max-width: 120px;
+}
+
+.theme-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+.theme-actions button {
+    padding: 8px 18px;
+    border-radius: 6px;
+    border: 1px solid var(--border, rgba(255,255,255,0.1));
+    background: color-mix(in srgb, var(--console-bg, #090909) 75%, transparent);
+    color: inherit;
+    font-family: inherit;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+}
+
+.theme-actions button.primary {
+    border-color: color-mix(in srgb, var(--accent, #73ff7a) 80%, transparent);
+    background: color-mix(in srgb, var(--accent, #73ff7a) 20%, transparent);
+}
+
+.theme-actions button.warn {
+    border-color: color-mix(in srgb, var(--warn, #ffe27a) 60%, transparent);
+    background: color-mix(in srgb, var(--warn, #ffe27a) 15%, transparent);
+}
+
+.theme-status {
+    min-height: 18px;
+    font-size: 0.8rem;
+    letter-spacing: 0.05em;
 }
 /* Buttons and modal actions */
 .cj-modal button:focus {

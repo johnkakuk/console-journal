@@ -23,3 +23,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveText: ({ content, outputPath }) => ipcRenderer.invoke('save-text', { content, outputPath }),
     invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
 });
+
+contextBridge.exposeInMainWorld('settings', {
+    get: (key) => ipcRenderer.invoke('settings:get', key),
+    set: (key, value) => ipcRenderer.invoke('settings:set', { key, value }),
+});

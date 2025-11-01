@@ -77,6 +77,10 @@ function initDB() {
             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE(date)
         );
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS templates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
@@ -151,6 +155,13 @@ function initDB() {
                updated_at
         FROM templates
         ORDER BY updated_at DESC, name ASC
+    `);
+    db._getSetting = db.prepare(`SELECT value FROM settings WHERE key = ?`);
+    db._setSetting = db.prepare(`
+        INSERT INTO settings (key, value)
+        VALUES (@key, @value)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        RETURNING key, value
     `);
 }
 
@@ -254,6 +265,19 @@ ipcMain.handle('template:list', () => {
 ipcMain.handle('template:delete', (_evt, name) => {
     if (typeof name !== 'string' || !name.trim()) throw new Error('Bad template name');
     return { deleted: db._deleteTemplate.run(name.trim()).changes };
+});
+
+ipcMain.handle('settings:get', (_evt, key) => {
+    if (typeof key !== 'string' || !key.trim()) throw new Error('Bad settings key');
+    const row = db._getSetting.get(key.trim());
+    return row ? row.value : null;
+});
+
+ipcMain.handle('settings:set', (_evt, { key, value }) => {
+    if (typeof key !== 'string' || !key.trim()) throw new Error('Bad settings key');
+    if (typeof value !== 'string') throw new Error('Settings value must be string');
+    db._setSetting.get({ key: key.trim(), value });
+    return { ok: true };
 });
 
 ipcMain.handle('app:quit', () => {

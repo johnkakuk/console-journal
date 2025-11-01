@@ -25977,7 +25977,7 @@ function startEditor(shell2, opts = {}) {
     "&": { backgroundColor: "var(--editor-bg)", color: "var(--editor-fg)", height: "100%" },
     ".cm-content": {
       caretColor: "var(--editor-caret)",
-      fontFamily: "var(--font-mono)",
+      fontFamily: "var(--font-editor, var(--font-mono))",
       fontSize: "var(--editor-font-size)",
       lineHeight: "var(--editor-line-height)"
     },
@@ -25990,8 +25990,8 @@ function startEditor(shell2, opts = {}) {
     // To restore paragraph-wide highlight instead, uncomment this and remove the overlay plugin in buildExtensions():
     // '.cm-activeLine': { backgroundColor: 'var(--editor-active-line-bg)' },
     ".cm-selectionBackground, ::selection": { backgroundColor: "var(--editor-selection-bg)" },
-    ".cm-lineNumbers": { color: "var(--editor-gutter-fg)" },
-    ".cm-gutters": { backgroundColor: "var(--editor-gutter-bg)", borderRight: "1px solid var(--editor-gutter-border)" },
+    ".cm-lineNumbers": { color: "color-mix(in srgb, var(--text) 55%, transparent)" },
+    ".cm-gutters": { backgroundColor: "var(--editor-gutter-bg)", borderRight: "1px solid var(--border, rgba(255,255,255,0.1))" },
     ".cm-panels": { backgroundColor: "var(--editor-panel-bg)" },
     // --- To-do clickable overlay style ---
     ".todo-click-target": {
@@ -26658,6 +26658,904 @@ function startEditor(shell2, opts = {}) {
     }
   };
   shell2.enter(program);
+  return program;
+}
+
+// packages/ui/js/theme.js
+var THEME_STORAGE_KEY = "theme:active";
+var THEME_VERSION = 1;
+var THEME_VAR_WHITELIST = [
+  "--bg",
+  "--panel",
+  "--text",
+  "--muted",
+  "--error",
+  "--warn",
+  "--info",
+  "--soft",
+  "--accent",
+  "--app-bg",
+  "--app-fg",
+  "--console-bg",
+  "--console-fg",
+  "--editor-bg",
+  "--editor-fg",
+  "--editor-caret",
+  "--editor-selection-bg",
+  "--editor-gutter-bg",
+  "--border",
+  "--font-ui",
+  "--font-mono",
+  "--font-editor",
+  "--base-font-size",
+  "--editor-font-size",
+  "--editor-line-height",
+  "--caret-offset-y"
+];
+var COLOR_ALPHA = {
+  "--editor-selection-bg": 0.25,
+  "--border": 0.15
+};
+var COLOR_FALLBACKS = {
+  "--app-bg": "--bg",
+  "--app-fg": "--text",
+  "--accent": "--text",
+  "--soft": "--text",
+  "--console-bg": "--bg",
+  "--console-fg": "--text",
+  "--editor-bg": "--bg",
+  "--editor-fg": "--text",
+  "--editor-caret": "--text",
+  "--editor-selection-bg": "--text",
+  "--editor-gutter-bg": "--bg",
+  "--border": "--text"
+};
+var COLOR_VARS = THEME_VAR_WHITELIST.filter((v) => !v.startsWith("--font") && !v.endsWith("-size") && !v.endsWith("-line-height") && v !== "--caret-offset-y");
+var GOOGLE_FONT_CATALOG = {
+  "inter": { family: "Inter", weights: [400, 600] },
+  "ibm plex sans": { family: "IBM Plex Sans", weights: [400, 600] },
+  "rubik": { family: "Rubik", weights: [400, 500] },
+  "roboto": { family: "Roboto", weights: [400, 500, 700] },
+  "open sans": { family: "Open Sans", weights: [400, 600] },
+  "merriweather": { family: "Merriweather", weights: [400, 700] },
+  "lora": { family: "Lora", weights: [400, 600] },
+  "jetbrains mono": { family: "JetBrains Mono", weights: [400, 500] },
+  "fira code": { family: "Fira Code", weights: [400, 500] },
+  "ibm plex mono": { family: "IBM Plex Mono", weights: [400, 500] },
+  "source code pro": { family: "Source Code Pro", weights: [400, 500] }
+};
+var STYLE_ID = "themeStyle";
+function cloneDeep(obj) {
+  return obj ? JSON.parse(JSON.stringify(obj)) : obj;
+}
+function ensureStyleElement() {
+  let el = document.getElementById(STYLE_ID);
+  if (!el) {
+    el = document.createElement("style");
+    el.id = STYLE_ID;
+    document.head.appendChild(el);
+  }
+  return el;
+}
+function normalizeHex(value) {
+  if (typeof value !== "string") return null;
+  let v = value.trim();
+  if (/^#[0-9a-f]{3}$/i.test(v)) {
+    v = "#" + v.slice(1).split("").map((ch) => ch + ch).join("");
+  }
+  if (/^#[0-9a-f]{6}$/i.test(v)) {
+    return v.toLowerCase();
+  }
+  return null;
+}
+function rgbaToHex(value) {
+  const match = value.match(/rgba?\(([^)]+)\)/i);
+  if (!match) return null;
+  const parts = match[1].split(",").map((p) => p.trim());
+  if (parts.length < 3) return null;
+  const [r, g, b] = parts.map((n, idx) => idx < 3 ? Math.max(0, Math.min(255, Math.round(Number(n)))) : 0);
+  return "#" + [r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("");
+}
+function extractAlpha(value) {
+  const match = value.match(/rgba?\(([^)]+)\)/i);
+  if (!match) return null;
+  const parts = match[1].split(",").map((p) => p.trim());
+  if (parts.length === 4) {
+    const a = Number(parts[3]);
+    return Number.isFinite(a) ? Math.min(1, Math.max(0, a)) : null;
+  }
+  return null;
+}
+function buildColorValue(hex, alpha = null) {
+  if (!hex) return null;
+  const norm = normalizeHex(hex);
+  if (!norm) return null;
+  if (alpha == null || Number.isNaN(alpha)) {
+    return norm;
+  }
+  const r = parseInt(norm.slice(1, 3), 16);
+  const g = parseInt(norm.slice(3, 5), 16);
+  const b = parseInt(norm.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+var VAR_REF_RE = /^var\(\s*(--[^\s,)]+)\s*\)/;
+function resolveVarValue(value, vars, seen = /* @__PURE__ */ new Set()) {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  const match = trimmed.match(VAR_REF_RE);
+  if (match) {
+    const ref = match[1];
+    if (!vars || seen.has(ref)) return null;
+    seen.add(ref);
+    return resolveVarValue(vars[ref], vars, seen);
+  }
+  return trimmed;
+}
+function sanitizeThemeVars(vars = {}) {
+  const out = {};
+  for (const key of THEME_VAR_WHITELIST) {
+    if (!(key in vars)) continue;
+    let value = vars[key];
+    if (typeof value !== "string") continue;
+    let trimmed = value.trim();
+    if (COLOR_VARS.includes(key)) {
+      if (trimmed.startsWith("var(")) {
+        out[key] = trimmed;
+        continue;
+      }
+      const alpha = key in COLOR_ALPHA ? COLOR_ALPHA[key] : extractAlpha(trimmed);
+      const hex = normalizeHex(trimmed) || rgbaToHex(trimmed);
+      if (hex) {
+        trimmed = buildColorValue(hex, key in COLOR_ALPHA ? COLOR_ALPHA[key] : alpha);
+      } else {
+        continue;
+      }
+    }
+    out[key] = trimmed;
+  }
+  return out;
+}
+function extractPrimaryFont(value) {
+  if (typeof value !== "string") return null;
+  const primary = value.split(",")[0] || "";
+  const cleaned = primary.replace(/["']/g, "").trim().toLowerCase();
+  if (cleaned.startsWith("var(")) return null;
+  return cleaned;
+}
+function buildFamiliesFromVars(vars) {
+  const families = [];
+  const uiFont = extractPrimaryFont(vars["--font-ui"]);
+  const monoFont = extractPrimaryFont(vars["--font-mono"]);
+  const editorFont = extractPrimaryFont(vars["--font-editor"]);
+  if (uiFont && GOOGLE_FONT_CATALOG[uiFont]) {
+    families.push(GOOGLE_FONT_CATALOG[uiFont]);
+  }
+  if (monoFont && GOOGLE_FONT_CATALOG[monoFont]) {
+    if (!families.some((f) => f.family === GOOGLE_FONT_CATALOG[monoFont].family)) {
+      families.push(GOOGLE_FONT_CATALOG[monoFont]);
+    }
+  }
+  if (editorFont && GOOGLE_FONT_CATALOG[editorFont]) {
+    if (!families.some((f) => f.family === GOOGLE_FONT_CATALOG[editorFont].family)) {
+      families.push(GOOGLE_FONT_CATALOG[editorFont]);
+    }
+  }
+  return families;
+}
+function validateTheme(theme2) {
+  if (!theme2 || typeof theme2 !== "object") return false;
+  if (typeof theme2.name !== "string") return false;
+  if (!theme2.vars || typeof theme2.vars !== "object") return false;
+  if (!theme2.meta || typeof theme2.meta !== "object") return false;
+  if (theme2.meta.version !== THEME_VERSION) return false;
+  return true;
+}
+function applyTheme(theme2) {
+  if (!validateTheme(theme2)) return;
+  const vars = sanitizeThemeVars(theme2.vars);
+  const lines = Object.entries(vars).map(([k, v]) => `    ${k}: ${v};`);
+  const style = ensureStyleElement();
+  style.textContent = `:root {
+${lines.join("\n")}
+}`;
+  fontLinkManager.update(buildFamiliesFromVars(vars));
+}
+function parseDefaultsFromCSS(text) {
+  if (typeof text !== "string") return {};
+  const match = text.match(/:root\s*{([^}]+)}/s);
+  if (!match) return {};
+  const body = match[1];
+  const vars = {};
+  const regex = /(--[\w-]+)\s*:\s*([^;]+);/g;
+  let m;
+  while (m = regex.exec(body)) {
+    const key = m[1];
+    if (!THEME_VAR_WHITELIST.includes(key)) continue;
+    vars[key] = m[2].trim();
+  }
+  return vars;
+}
+var defaultThemeCache = null;
+async function getDefaultTheme() {
+  if (defaultThemeCache) return cloneDeep(defaultThemeCache);
+  try {
+    const url = new URL("css/theme.css", window.location.href).href;
+    const resp = await fetch(url, { cache: "no-cache" });
+    if (!resp.ok) throw new Error(`Failed to fetch theme.css (${resp.status})`);
+    const text = await resp.text();
+    const vars = parseDefaultsFromCSS(text);
+    defaultThemeCache = {
+      name: "Default",
+      vars,
+      meta: { version: THEME_VERSION, source: "defaults" }
+    };
+    return cloneDeep(defaultThemeCache);
+  } catch (err) {
+    console.error("getDefaultTheme failed", err);
+    return {
+      name: "Default",
+      vars: {},
+      meta: { version: THEME_VERSION, source: "defaults", error: err?.message || String(err) }
+    };
+  }
+}
+function safeParse(json) {
+  try {
+    const parsed = JSON.parse(json);
+    return validateTheme(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+async function storageGet(key) {
+  if (window.settings && typeof window.settings.get === "function") {
+    return await window.settings.get(key);
+  }
+  if (typeof localStorage !== "undefined") {
+    return localStorage.getItem(key);
+  }
+  return null;
+}
+async function storageSet(key, value) {
+  if (window.settings && typeof window.settings.set === "function") {
+    await window.settings.set(key, value);
+    return;
+  }
+  if (typeof localStorage !== "undefined") {
+    localStorage.setItem(key, value);
+  }
+}
+async function loadActiveTheme() {
+  const raw = await storageGet(THEME_STORAGE_KEY);
+  if (!raw) return null;
+  return safeParse(raw);
+}
+async function saveActiveTheme(theme2) {
+  if (!validateTheme(theme2)) throw new Error("Invalid theme");
+  const payload = {
+    name: theme2.name,
+    vars: sanitizeThemeVars(theme2.vars),
+    meta: { ...theme2.meta, version: THEME_VERSION, saved_at: (/* @__PURE__ */ new Date()).toISOString() }
+  };
+  await storageSet(THEME_STORAGE_KEY, JSON.stringify(payload));
+  return payload;
+}
+async function ensureActiveTheme() {
+  let theme2 = await loadActiveTheme();
+  if (!theme2) {
+    theme2 = await getDefaultTheme();
+    theme2.meta = { version: THEME_VERSION, source: "defaults", seeded_at: (/* @__PURE__ */ new Date()).toISOString() };
+    await saveActiveTheme(theme2);
+  }
+  applyTheme(theme2);
+  return theme2;
+}
+function buildFontQuery(family) {
+  if (!family || typeof family.family !== "string") return null;
+  const weights = Array.isArray(family.weights) && family.weights.length ? family.weights : [400];
+  const escaped = family.family.replace(/ /g, "+");
+  const weightStr = weights.slice().sort((a, b) => a - b).join(";");
+  return `family=${escaped}:wght@${weightStr}`;
+}
+function ensureFontLink() {
+  let link2 = document.getElementById("themeFonts");
+  if (!link2) {
+    link2 = document.createElement("link");
+    link2.id = "themeFonts";
+    link2.rel = "stylesheet";
+    link2.type = "text/css";
+    link2.crossOrigin = "anonymous";
+    document.head.appendChild(link2);
+  }
+  return link2;
+}
+function removeFontLink() {
+  const link2 = document.getElementById("themeFonts");
+  if (link2 && link2.parentElement) link2.parentElement.removeChild(link2);
+}
+var fontLinkManager = /* @__PURE__ */ (() => {
+  let timer = null;
+  let lastHref = "";
+  function applyHref(href) {
+    if (!href) {
+      removeFontLink();
+      lastHref = "";
+      return;
+    }
+    const link2 = ensureFontLink();
+    if (lastHref !== href) {
+      link2.href = href;
+      lastHref = href;
+    }
+  }
+  return {
+    update(families = []) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        const parts = families.map(buildFontQuery).filter(Boolean);
+        if (!parts.length) {
+          applyHref("");
+          return;
+        }
+        const href = `https://fonts.googleapis.com/css2?${parts.join("&")}&display=swap`;
+        applyHref(href);
+      }, 200);
+    },
+    clear() {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      applyHref("");
+    }
+  };
+})();
+function extractHexForInput(value, key, vars = {}) {
+  const resolved = resolveVarValue(value, vars);
+  const trim = typeof resolved === "string" ? resolved.trim() : "";
+  const hex = normalizeHex(trim) || rgbaToHex(trim);
+  if (hex) return hex;
+  const fallbackKey = COLOR_FALLBACKS[key];
+  if (fallbackKey && fallbackKey !== key) {
+    const fallbackValue = vars[fallbackKey];
+    if (fallbackValue != null) {
+      const fbHex = extractHexForInput(fallbackValue, fallbackKey, vars);
+      if (fbHex) return fbHex;
+    }
+  }
+  return COLOR_ALPHA[key] != null ? "#ffffff" : "#000000";
+}
+function buildValueFromInput(hex, key) {
+  const alpha = COLOR_ALPHA[key];
+  return buildColorValue(hex, alpha ?? null);
+}
+function createThemeDraft(baseTheme4) {
+  const theme2 = validateTheme(baseTheme4) ? cloneDeep(baseTheme4) : {
+    name: "Draft",
+    vars: {},
+    meta: { version: THEME_VERSION, source: "draft" }
+  };
+  theme2.vars = sanitizeThemeVars(theme2.vars);
+  theme2.meta = theme2.meta || {};
+  theme2.meta.version = THEME_VERSION;
+  return theme2;
+}
+
+// packages/ui/js/themeApp.js
+var VAR_GROUPS = [
+  {
+    title: "COLORS",
+    vars: ["--bg", "--panel", "--text", "--muted", "--info", "--warn", "--error", "--soft", "--accent", "--border"]
+  }
+];
+var FONT_OPTIONS_UI = [
+  {
+    id: "system-ui",
+    label: "System Default",
+    css: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"',
+    google: null
+  },
+  {
+    id: "roboto",
+    label: "Roboto",
+    css: '"Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif',
+    google: { family: "Roboto", weights: [400, 500, 700] }
+  },
+  {
+    id: "open-sans",
+    label: "Open Sans",
+    css: '"Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif',
+    google: { family: "Open Sans", weights: [400, 600] }
+  }
+];
+var FONT_OPTIONS_EDITOR = [
+  {
+    id: "system-editor",
+    label: "System Default",
+    css: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"',
+    google: null
+  },
+  {
+    id: "roboto-editor",
+    label: "Roboto (Sans)",
+    css: '"Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif',
+    google: { family: "Roboto", weights: [400, 500, 700] }
+  },
+  {
+    id: "open-sans-editor",
+    label: "Open Sans (Sans)",
+    css: '"Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif',
+    google: { family: "Open Sans", weights: [400, 600] }
+  },
+  {
+    id: "merriweather-editor",
+    label: "Merriweather (Serif)",
+    css: '"Merriweather", Georgia, "Times New Roman", serif',
+    google: { family: "Merriweather", weights: [400, 700] }
+  },
+  {
+    id: "lora-editor",
+    label: "Lora (Serif)",
+    css: '"Lora", Georgia, "Times New Roman", serif',
+    google: { family: "Lora", weights: [400, 600] }
+  },
+  {
+    id: "jetbrains-editor",
+    label: "JetBrains Mono",
+    css: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", "Courier New", monospace',
+    google: { family: "JetBrains Mono", weights: [400, 500] }
+  },
+  {
+    id: "source-code-editor",
+    label: "Source Code Pro",
+    css: '"Source Code Pro", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", "Courier New", monospace',
+    google: { family: "Source Code Pro", weights: [400, 500] }
+  }
+];
+var FONT_OPTIONS_MONO = [
+  {
+    id: "system-mono",
+    label: "System Mono",
+    css: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    google: null
+  },
+  {
+    id: "jetbrains-mono",
+    label: "JetBrains Mono",
+    css: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", "Courier New", monospace',
+    google: { family: "JetBrains Mono", weights: [400, 500] }
+  },
+  {
+    id: "source-code-pro",
+    label: "Source Code Pro",
+    css: '"Source Code Pro", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", "Courier New", monospace',
+    google: { family: "Source Code Pro", weights: [400, 500] }
+  }
+];
+function detectFontOption(value, options2) {
+  if (!value) return options2[0];
+  const normal = value.replace(/\s+/g, " ").trim().toLowerCase();
+  const exact = options2.find((opt) => opt.css.replace(/\s+/g, " ").trim().toLowerCase() === normal);
+  if (exact) return exact;
+  const primary = value.split(",")[0].replace(/["']/g, "").trim().toLowerCase();
+  const fuzzy = options2.find((opt) => opt.css.split(",")[0].replace(/["']/g, "").trim().toLowerCase() === primary);
+  return fuzzy || options2[0];
+}
+function scheduleMeasure() {
+  requestAnimationFrame(() => {
+    try {
+      window.dispatchEvent(new Event("resize"));
+    } catch {
+    }
+  });
+}
+function setStatus(text) {
+  const el = document.getElementById("themeStatus");
+  if (el) el.textContent = text || "";
+}
+function showThemeToast(message) {
+  try {
+    const prev = document.getElementById("themeToast");
+    if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
+    const toast = document.createElement("div");
+    toast.id = "themeToast";
+    toast.className = "template-toast";
+    toast.textContent = message;
+    (document.body || document.documentElement).appendChild(toast);
+    toast.addEventListener("animationend", () => {
+      if (toast && toast.parentElement) toast.parentElement.removeChild(toast);
+    }, { once: true });
+  } catch (_) {
+  }
+}
+function createColorRow(name2, value) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "theme-color";
+  const label = document.createElement("div");
+  label.className = "theme-color-label";
+  label.textContent = name2.replace(/^--/, "");
+  const swatch = document.createElement("button");
+  swatch.className = "theme-color-swatch";
+  const colorInput = document.createElement("input");
+  colorInput.type = "color";
+  colorInput.value = value;
+  swatch.style.setProperty("--swatch-color", value);
+  swatch.addEventListener("click", () => colorInput.click());
+  colorInput.className = "theme-color-input";
+  wrapper.appendChild(label);
+  wrapper.appendChild(swatch);
+  wrapper.appendChild(colorInput);
+  return { wrapper, swatch, input: colorInput };
+}
+function extractMaxWidth(value) {
+  if (typeof value !== "string") return 81;
+  const match = value.match(/([0-9]+(?:\.[0-9]+)?)/);
+  if (!match) return 81;
+  const num = Number(match[1]);
+  if (!Number.isFinite(num)) return 81;
+  return Math.min(140, Math.max(40, Math.round(num)));
+}
+async function startThemeApp(shell2) {
+  const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent || "");
+  let activeTheme = await loadActiveTheme();
+  if (!validateTheme(activeTheme)) {
+    activeTheme = await getDefaultTheme();
+  }
+  let draft = createThemeDraft(activeTheme);
+  draft.meta = { ...draft.meta, version: 1, source: "draft" };
+  const originalTheme = createThemeDraft(activeTheme);
+  const outputEl = document.getElementById("output");
+  const inputWrapEl = document.getElementById("inputWrap");
+  const caretEl = document.querySelector(".caret");
+  const screenEl = document.getElementById("screen");
+  const titleEl = document.querySelector(".title");
+  const titlebar = document.querySelector(".titlebar");
+  const snapshot = {
+    outputHTML: outputEl ? outputEl.innerHTML : "",
+    inputDisplay: inputWrapEl ? inputWrapEl.style.display : "",
+    caretDisplay: caretEl ? caretEl.style.display : "",
+    screenPadding: screenEl ? screenEl.style.padding : "",
+    titleDisplay: titleEl ? titleEl.style.display : ""
+  };
+  if (inputWrapEl) inputWrapEl.style.display = "none";
+  if (caretEl) caretEl.style.display = "none";
+  if (outputEl) outputEl.innerHTML = "";
+  const root = document.createElement("div");
+  root.id = "themeRoot";
+  root.className = "theme-root";
+  const bars = document.createElement("div");
+  bars.id = "themeBars";
+  bars.className = "theme-bars";
+  const header = document.createElement("div");
+  header.className = "theme-header soft";
+  header.textContent = "THEME DESIGNER";
+  const help = document.createElement("div");
+  help.className = "theme-help muted";
+  const saveCombo = isMac ? "CMD + S" : "CTRL + S";
+  help.textContent = `${saveCombo} to save \xB7 Reset to default \xB7 ESC to cancel`;
+  bars.appendChild(header);
+  bars.appendChild(help);
+  const panels = document.createElement("div");
+  panels.className = "theme-panels";
+  const fontsPanel = document.createElement("section");
+  fontsPanel.className = "theme-panel";
+  const fontsTitle = document.createElement("h2");
+  fontsTitle.textContent = "Fonts";
+  fontsPanel.appendChild(fontsTitle);
+  const monoLabel = document.createElement("label");
+  monoLabel.className = "theme-font-label";
+  monoLabel.textContent = "Mono Font";
+  const monoSelect = document.createElement("select");
+  monoSelect.className = "theme-font-select";
+  FONT_OPTIONS_MONO.forEach((opt) => {
+    const option = document.createElement("option");
+    option.value = opt.id;
+    option.textContent = opt.label;
+    monoSelect.appendChild(option);
+  });
+  monoLabel.appendChild(monoSelect);
+  fontsPanel.appendChild(monoLabel);
+  const monoPreview = document.createElement("pre");
+  monoPreview.className = "theme-font-preview mono";
+  monoPreview.textContent = `for (const note of journal) {
+    console.log(note.title);
+}`;
+  fontsPanel.appendChild(monoPreview);
+  const editorLabel = document.createElement("label");
+  editorLabel.className = "theme-font-label";
+  editorLabel.textContent = "Editor Font";
+  const editorSelect = document.createElement("select");
+  editorSelect.className = "theme-font-select";
+  FONT_OPTIONS_EDITOR.forEach((opt) => {
+    const option = document.createElement("option");
+    option.value = opt.id;
+    option.textContent = opt.label;
+    editorSelect.appendChild(option);
+  });
+  editorLabel.appendChild(editorSelect);
+  fontsPanel.appendChild(editorLabel);
+  const editorPreview = document.createElement("div");
+  editorPreview.className = "theme-font-preview editor";
+  editorPreview.innerHTML = `
+        <div class="preview-heading">Journal Preview</div>
+        <p>The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.</p>
+    `;
+  fontsPanel.appendChild(editorPreview);
+  const uiLabel = document.createElement("label");
+  uiLabel.className = "theme-font-label";
+  uiLabel.textContent = "UI Font";
+  const uiSelect = document.createElement("select");
+  uiSelect.className = "theme-font-select";
+  FONT_OPTIONS_UI.forEach((opt) => {
+    const option = document.createElement("option");
+    option.value = opt.id;
+    option.textContent = opt.label;
+    uiSelect.appendChild(option);
+  });
+  uiLabel.appendChild(uiSelect);
+  fontsPanel.appendChild(uiLabel);
+  const uiPreview = document.createElement("div");
+  uiPreview.className = "theme-font-preview ui";
+  uiPreview.innerHTML = `
+        <div class="preview-heading">Heading Preview</div>
+        <div class="preview-body">The quick brown fox jumps over the lazy dog.</div>
+    `;
+  fontsPanel.appendChild(uiPreview);
+  panels.appendChild(fontsPanel);
+  const colorPanels = document.createElement("div");
+  colorPanels.className = "theme-color-panels";
+  panels.appendChild(colorPanels);
+  const colorInputs = /* @__PURE__ */ new Map();
+  for (const group of VAR_GROUPS) {
+    const section = document.createElement("section");
+    section.className = "theme-panel";
+    const h2 = document.createElement("h2");
+    h2.textContent = group.title;
+    section.appendChild(h2);
+    const grid = document.createElement("div");
+    grid.className = "theme-color-grid";
+    for (const v of group.vars) {
+      const current = draft.vars[v] ?? "";
+      const hex = extractHexForInput(current, v, draft.vars);
+      const { wrapper, swatch, input: input2 } = createColorRow(v, hex);
+      input2.addEventListener("input", () => {
+        const newValue = buildValueFromInput(input2.value, v);
+        draft.vars[v] = newValue;
+        swatch.style.setProperty("--swatch-color", input2.value);
+        dirty = true;
+        updateStatus();
+        updatePreview();
+      });
+      grid.appendChild(wrapper);
+      colorInputs.set(v, { input: input2, swatch });
+    }
+    section.appendChild(grid);
+    colorPanels.appendChild(section);
+  }
+  const layoutPanel = document.createElement("section");
+  layoutPanel.className = "theme-panel";
+  const layoutTitle = document.createElement("h2");
+  layoutTitle.textContent = "Layout";
+  layoutPanel.appendChild(layoutTitle);
+  const maxLabel = document.createElement("label");
+  maxLabel.className = "theme-number-label";
+  maxLabel.textContent = "Editor Width (characters)";
+  const maxWidthInput = document.createElement("input");
+  maxWidthInput.type = "number";
+  maxWidthInput.className = "theme-number-input";
+  maxWidthInput.min = "40";
+  maxWidthInput.max = "140";
+  maxWidthInput.step = "1";
+  maxWidthInput.value = String(extractMaxWidth(draft.vars["--editor-max-width"] ?? "81"));
+  maxWidthInput.addEventListener("input", () => {
+    const width = extractMaxWidth(maxWidthInput.value + "");
+    maxWidthInput.value = String(width);
+    draft.vars["--editor-max-width"] = `${width}ch`;
+    dirty = true;
+    updateStatus();
+    updatePreview();
+  });
+  maxLabel.appendChild(maxWidthInput);
+  layoutPanel.appendChild(maxLabel);
+  panels.appendChild(layoutPanel);
+  const actions = document.createElement("div");
+  actions.className = "theme-actions";
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "primary";
+  saveBtn.textContent = "Save & Close";
+  const resetBtn = document.createElement("button");
+  resetBtn.className = "warn";
+  resetBtn.textContent = "Reset";
+  const cancelBtn = document.createElement("button");
+  cancelBtn.textContent = "Cancel";
+  actions.appendChild(saveBtn);
+  actions.appendChild(resetBtn);
+  actions.appendChild(cancelBtn);
+  const status = document.createElement("div");
+  status.id = "themeStatus";
+  status.className = "theme-status muted";
+  root.appendChild(header);
+  root.appendChild(help);
+  root.appendChild(panels);
+  root.appendChild(status);
+  root.appendChild(actions);
+  if (titlebar) {
+    titlebar.appendChild(bars);
+  } else if (screenEl) {
+    screenEl.prepend(bars);
+  }
+  if (outputEl && outputEl.parentElement) {
+    outputEl.parentElement.appendChild(root);
+  } else if (screenEl) {
+    screenEl.appendChild(root);
+  } else {
+    (document.body || document.documentElement).appendChild(root);
+  }
+  if (titleEl) {
+    titleEl.style.display = "none";
+  }
+  shell2.setPrompt("theme>");
+  function currentFontOptions() {
+    const uiOpt = detectFontOption(draft.vars["--font-ui"], FONT_OPTIONS_UI);
+    const editorOpt = detectFontOption(draft.vars["--font-editor"], FONT_OPTIONS_EDITOR);
+    const monoOpt = detectFontOption(draft.vars["--font-mono"], FONT_OPTIONS_MONO);
+    return { uiOpt, editorOpt, monoOpt };
+  }
+  function updateFontPreviews() {
+    const { uiOpt, editorOpt, monoOpt } = currentFontOptions();
+    uiSelect.value = uiOpt.id;
+    editorSelect.value = editorOpt.id;
+    monoSelect.value = monoOpt.id;
+    uiPreview.style.fontFamily = uiOpt.css;
+    editorPreview.style.fontFamily = editorOpt.css;
+    monoPreview.style.fontFamily = monoOpt.css;
+  }
+  function updateColorsUI() {
+    colorInputs.forEach((widgets, key) => {
+      const hex = extractHexForInput(draft.vars[key] ?? "", key, draft.vars);
+      widgets.input.value = hex;
+      widgets.swatch.style.setProperty("--swatch-color", hex);
+    });
+  }
+  function updateLayoutUI() {
+    maxWidthInput.value = String(extractMaxWidth(draft.vars["--editor-max-width"] ?? "81"));
+  }
+  function updatePreview() {
+    const { uiOpt, editorOpt, monoOpt } = currentFontOptions();
+    draft.vars["--font-ui"] = uiOpt.css;
+    draft.vars["--font-editor"] = editorOpt.css;
+    draft.vars["--font-mono"] = monoOpt.css;
+    applyTheme(draft);
+    updateFontPreviews();
+    updateLayoutUI();
+    scheduleMeasure();
+  }
+  function updateStatus(message) {
+    if (message) {
+      setStatus(message);
+      return;
+    }
+    setStatus(dirty ? "Unsaved changes" : "");
+  }
+  let dirty = false;
+  uiSelect.addEventListener("change", () => {
+    const opt = FONT_OPTIONS_UI.find((o) => o.id === uiSelect.value) || FONT_OPTIONS_UI[0];
+    draft.vars["--font-ui"] = opt.css;
+    dirty = true;
+    updateStatus();
+    updatePreview();
+  });
+  editorSelect.addEventListener("change", () => {
+    const opt = FONT_OPTIONS_EDITOR.find((o) => o.id === editorSelect.value) || FONT_OPTIONS_EDITOR[0];
+    draft.vars["--font-editor"] = opt.css;
+    dirty = true;
+    updateStatus();
+    updatePreview();
+  });
+  monoSelect.addEventListener("change", () => {
+    const opt = FONT_OPTIONS_MONO.find((o) => o.id === monoSelect.value) || FONT_OPTIONS_MONO[0];
+    draft.vars["--font-mono"] = opt.css;
+    dirty = true;
+    updateStatus();
+    updatePreview();
+  });
+  async function handleSave(closeAfter = false) {
+    try {
+      const saved = await saveActiveTheme({
+        name: draft.name || "Active Theme",
+        vars: draft.vars,
+        meta: { version: 1, source: "user", saved_at: (/* @__PURE__ */ new Date()).toISOString() }
+      });
+      activeTheme = saved;
+      draft = createThemeDraft(saved);
+      dirty = false;
+      updateStatus("Theme saved");
+      updatePreview();
+      updateColorsUI();
+      showThemeToast("Theme saved");
+      if (closeAfter) {
+        shell2.exit();
+      }
+    } catch (err) {
+      const msg = err?.message || String(err);
+      updateStatus(`Save failed: ${msg}`);
+    }
+  }
+  async function handleReset() {
+    const confirmReset = window.confirm("Reset theme to factory defaults?");
+    if (!confirmReset) return;
+    try {
+      const defaults = await getDefaultTheme();
+      defaults.name = "Default";
+      defaults.meta = { version: 1, source: "defaults", reset_at: (/* @__PURE__ */ new Date()).toISOString() };
+      await saveActiveTheme(defaults);
+      activeTheme = defaults;
+      draft = createThemeDraft(defaults);
+      dirty = false;
+      updatePreview();
+      updateColorsUI();
+      updateStatus("Theme reset to defaults");
+      showThemeToast("Theme reset");
+    } catch (err) {
+      const msg = err?.message || String(err);
+      updateStatus(`Reset failed: ${msg}`);
+    }
+  }
+  function handleCancel() {
+    const themeToRestore = activeTheme ? activeTheme : originalTheme;
+    draft = createThemeDraft(themeToRestore);
+    applyTheme(themeToRestore);
+    dirty = false;
+    shell2.exit();
+  }
+  saveBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    handleSave(true);
+  });
+  resetBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    handleReset();
+  });
+  cancelBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    handleCancel();
+  });
+  function onHotkey(e) {
+    if ((isMac && e.metaKey || !isMac && e.ctrlKey) && (e.key === "s" || e.key === "S")) {
+      e.preventDefault();
+      handleSave(false);
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      handleCancel();
+    }
+  }
+  window.addEventListener("keydown", onHotkey, true);
+  function cleanup() {
+    window.removeEventListener("keydown", onHotkey, true);
+    if (bars && bars.parentElement) bars.parentElement.removeChild(bars);
+    if (root && root.parentElement) root.parentElement.removeChild(root);
+    if (outputEl) outputEl.innerHTML = snapshot.outputHTML;
+    if (inputWrapEl) inputWrapEl.style.display = snapshot.inputDisplay;
+    if (caretEl) caretEl.style.display = snapshot.caretDisplay;
+    if (screenEl) screenEl.style.padding = snapshot.screenPadding;
+    if (titleEl) titleEl.style.display = snapshot.titleDisplay ?? "";
+    setStatus("");
+  }
+  const program = {
+    consume: async () => {
+      dirty = true;
+      updateStatus();
+    },
+    destroy: cleanup
+  };
+  shell2.enter(program);
+  updatePreview();
+  updateColorsUI();
+  updateLayoutUI();
+  updateStatus("");
   return program;
 }
 
@@ -28736,9 +29634,10 @@ var db = window.db;
 if (!db) {
   if (!window.electronAPI) {
     const DB_NAME = "console-journal";
-    const DB_VERSION = 2;
+    const DB_VERSION = 3;
     const STORE = "entries";
     const TEMPLATE_STORE = "templates";
+    const SETTINGS_STORE = "settings";
     const openDB = () => new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
@@ -28751,6 +29650,9 @@ if (!db) {
         if (!db2.objectStoreNames.contains(TEMPLATE_STORE)) {
           const t2 = db2.createObjectStore(TEMPLATE_STORE, { keyPath: "name" });
           t2.createIndex("updated_at", "updated_at", { unique: false });
+        }
+        if (!db2.objectStoreNames.contains(SETTINGS_STORE)) {
+          db2.createObjectStore(SETTINGS_STORE, { keyPath: "key" });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -28923,6 +29825,33 @@ if (!db) {
       }
     };
     window.db = db;
+    if (!window.settings) {
+      window.settings = {
+        async get(key) {
+          const trimmed = String(key ?? "").trim();
+          if (!trimmed) return null;
+          return txRunStore(SETTINGS_STORE, "readonly", (store) => {
+            return new Promise((resolve, reject) => {
+              const req = store.get(trimmed);
+              req.onsuccess = () => resolve(req.result ? String(req.result.value ?? "") : null);
+              req.onerror = () => reject(req.error);
+            });
+          });
+        },
+        async set(key, value) {
+          const trimmed = String(key ?? "").trim();
+          if (!trimmed) throw new Error("Settings key required");
+          const strValue = String(value ?? "");
+          return txRunStore(SETTINGS_STORE, "readwrite", (store) => {
+            return new Promise((resolve, reject) => {
+              const req = store.put({ key: trimmed, value: strValue });
+              req.onsuccess = () => resolve({ ok: true });
+              req.onerror = () => reject(req.error);
+            });
+          });
+        }
+      };
+    }
   } else {
     const invoke = (ch, ...args) => window.electronAPI && typeof window.electronAPI.invoke === "function" ? window.electronAPI.invoke(ch, ...args) : Promise.reject(new Error("electronAPI.invoke not available"));
     db = {
@@ -28942,6 +29871,8 @@ if (!db) {
     };
   }
 }
+var bootTheme = await ensureActiveTheme();
+applyTheme(bootTheme);
 var activeProgram = null;
 var state = {
   prompt: "user:~$",
@@ -29416,14 +30347,36 @@ register("tutorial", () => {
   print(`
     <div class="soft">journal quickstart</div>
     <div class="muted help">
-        <div><span class="kbd">journal</span> \u2014 open today's entry</div>
+        <div><span class="kbd">journal</span> \u2014 open today's entry; add a date afterwards for a specific day</div>
+        <div><span class="kbd">journal -tmp "Template"</span> \u2014 spin up a fresh entry pre-filled from a template</div>
         <div><span class="kbd">view</span> \u2014 browse the latest entries; use \u2191/\u2193 then Enter to reopen one</div>
+        <div><span class="kbd">view templates</span> \u2014 review, edit, or delete saved templates</div>
         <div><span class="kbd">search "coffee"</span> \u2014 find entries containing your keywords</div>
-        <div><span class="kbd">export -pdf</span> \u2014 create a PDF export of the last week when you need a snapshot</div>
-        <div><span class="kbd">help</span> \u2014 view all commands</div>
-        <div><span class="kbd">-help</span> \u2014 add this flag to most commands for more information</div>
+        <div><span class="kbd">export -a</span> \u2014 create a full PDF export when you need a snapshot</div>
     </div>`);
 }, "Quick journaling workflow overview");
+register("theme", async (argv = []) => {
+  const arg = (argv[0] || "").trim().toLowerCase();
+  if (!arg) {
+    await startThemeApp(shell);
+    return;
+  }
+  if (arg === "reset") {
+    try {
+      const defaults = await getDefaultTheme();
+      defaults.name = "Default";
+      defaults.meta = { version: 1, source: "defaults", reset_at: (/* @__PURE__ */ new Date()).toISOString() };
+      await saveActiveTheme(defaults);
+      applyTheme(defaults);
+      print('<div class="ok">Theme reset to defaults.</div>');
+    } catch (err) {
+      const msg = err?.message || String(err);
+      print(`<div class="error">Theme reset failed: ${esc(msg)}</div>`);
+    }
+    return;
+  }
+  print('<div class="error">Usage: <span class="kbd">theme</span> or <span class="kbd">theme reset</span></div>');
+}, "Customize fonts and colors");
 register("clear", () => {
   output.innerHTML = "";
   banner();

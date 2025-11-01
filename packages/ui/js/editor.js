@@ -402,7 +402,7 @@ export function startEditor(shell, opts = {}) {
         '&': { backgroundColor: 'var(--editor-bg)', color: 'var(--editor-fg)', height: '100%' },
         '.cm-content': {
             caretColor: 'var(--editor-caret)',
-            fontFamily: 'var(--font-mono)',
+            fontFamily: 'var(--font-editor, var(--font-mono))',
             fontSize: 'var(--editor-font-size)',
             lineHeight: 'var(--editor-line-height)'
         },
@@ -414,8 +414,8 @@ export function startEditor(shell, opts = {}) {
         // To restore paragraph-wide highlight instead, uncomment this and remove the overlay plugin in buildExtensions():
         // '.cm-activeLine': { backgroundColor: 'var(--editor-active-line-bg)' },
         '.cm-selectionBackground, ::selection': { backgroundColor: 'var(--editor-selection-bg)' },
-        '.cm-lineNumbers': { color: 'var(--editor-gutter-fg)' },
-        '.cm-gutters': { backgroundColor: 'var(--editor-gutter-bg)', borderRight: '1px solid var(--editor-gutter-border)' },
+        '.cm-lineNumbers': { color: 'color-mix(in srgb, var(--text) 55%, transparent)' },
+        '.cm-gutters': { backgroundColor: 'var(--editor-gutter-bg)', borderRight: '1px solid var(--border, rgba(255,255,255,0.1))' },
         '.cm-panels': { backgroundColor: 'var(--editor-panel-bg)' },
         // --- To-do clickable overlay style ---
         '.todo-click-target': {
