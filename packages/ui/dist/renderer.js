@@ -30982,12 +30982,12 @@ register("tutorial", () => {
   print(`
     <div class="soft">journal quickstart</div>
     <div class="muted help">
-        <div><span class="kbd">journal</span> \u2014 open today's entry; add a date afterwards for a specific day</div>
-        <div><span class="kbd">journal -tmp "Template"</span> \u2014 spin up a fresh entry pre-filled from a template</div>
-        <div><span class="kbd">view</span> \u2014 browse the latest entries; use \u2191/\u2193 then Enter to reopen one</div>
-        <div><span class="kbd">view templates</span> \u2014 review, edit, or delete saved templates</div>
+        <div><span class="kbd">journal</span>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp \u2014 open today's entry; or specify a date afterwards (YYYY-MM-DD)</div>
+        <div><span class="kbd">view</span>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp \u2014 browse the latest entries; use \u2191/\u2193 then Enter to open</div>
         <div><span class="kbd">search "coffee"</span> \u2014 find entries containing your keywords</div>
-        <div><span class="kbd">export -a</span> \u2014 create a full PDF export when you need a snapshot</div>
+        <div><span class="kbd">export -pdf</span>&nbsp&nbsp&nbsp&nbsp \u2014 create a PDF export of the last week of entries</div>
+        <div><span class="kbd">help</span>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp \u2014 view all commands</div>
+        <div><span class="kbd">... -help</span>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp \u2014 or add the -help flag to most commands for more info</div>
     </div>`);
 }, "Quick journaling workflow overview");
 register("theme", async (argv = []) => {
