@@ -38,6 +38,7 @@
     --editor-gutter-border: rgba(var(--text-rgb), 0.1);
     --editor-panel-bg: transparent;
     --editor-todo-hover-bg: rgba(var(--text-rgb), 0.08);
+    --editor-max-width: 81ch;
 
     --base-font-size: 14px;
     --editor-font-size: var(--base-font-size);
