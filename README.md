@@ -83,7 +83,7 @@ Type, reflect, and organize your thoughts in a glowing green terminal that feels
 
 ### 1. Clone the repo
 ```cs
-git clone https://github.com/yourusername/console-journal.git`
+git clone https://github.com/yourusername/console-journal.git
 cd console-journal
 ```
 
