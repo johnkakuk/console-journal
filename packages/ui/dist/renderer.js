@@ -27627,7 +27627,8 @@ function createThemeDraft(baseTheme4) {
 var VAR_GROUPS = [
   {
     title: "COLORS",
-    vars: ["--bg", "--panel", "--text", "--muted", "--info", "--warn", "--error", "--soft", "--accent", "--border"]
+    // vars: ['--bg', '--panel', '--text', '--muted', '--info', '--warn', '--error', '--soft', '--accent', '--border']
+    vars: ["--bg", "--panel", "--text", "--muted", "--soft", "--accent", "--border"]
   }
 ];
 var FONT_OPTIONS_UI = [

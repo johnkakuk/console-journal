@@ -12,7 +12,8 @@ import {
 const VAR_GROUPS = [
     {
         title: 'COLORS',
-        vars: ['--bg', '--panel', '--text', '--muted', '--info', '--warn', '--error', '--soft', '--accent', '--border']
+        // vars: ['--bg', '--panel', '--text', '--muted', '--info', '--warn', '--error', '--soft', '--accent', '--border']
+        vars: ['--bg', '--panel', '--text', '--muted', '--soft', '--accent', '--border']
     }
 ];
 
