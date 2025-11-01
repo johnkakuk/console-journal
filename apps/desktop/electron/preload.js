@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('db', {
     listRecent: (limit = 15)  => ipcRenderer.invoke('entry:listRecent', limit),
     deleteByDate: (date)      => ipcRenderer.invoke('entry:deleteByDate', date),
     delete:   (date)          => ipcRenderer.invoke('entry:deleteByDate', date),
+    saveTemplate: (name, content) => ipcRenderer.invoke('template:upsert', { name, content }),
+    getTemplate:  (name)          => ipcRenderer.invoke('template:getByName', name),
 });
 
 contextBridge.exposeInMainWorld('electronAPI', {

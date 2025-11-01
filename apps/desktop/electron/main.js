@@ -77,6 +77,13 @@ function initDB() {
             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE(date)
         );
+        CREATE TABLE IF NOT EXISTS templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
         -- Optional FTS (enable if your SQLite has FTS5):
         -- CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(content, content='entries', content_rowid='id');
         -- CREATE TRIGGER IF NOT EXISTS entries_ai AFTER INSERT ON entries BEGIN
@@ -126,6 +133,15 @@ function initDB() {
         WHERE substr(date, 1, 7) = ?
         ORDER BY date ASC
     `);
+    db._upsertTemplate = db.prepare(`
+        INSERT INTO templates (name, content)
+        VALUES (@name, @content)
+        ON CONFLICT(name) DO UPDATE SET
+            content = excluded.content,
+            updated_at = datetime('now')
+        RETURNING id, name, content, created_at, updated_at
+    `);
+    db._getTemplateByName = db.prepare(`SELECT * FROM templates WHERE name = ?`);
 }
 
 function createWindow() {
@@ -208,6 +224,17 @@ ipcMain.handle('entry:listRecent', (evt, limit) => {
 ipcMain.handle('entry:listByYearMonth', (evt, ym) => {
     if (typeof ym !== 'string' || !/^\d{4}-\d{2}$/.test(ym)) throw new Error('Bad month');
     return db._listByMonth.all(ym);
+});
+
+ipcMain.handle('template:upsert', (_evt, { name, content }) => {
+    if (typeof name !== 'string' || !name.trim()) throw new Error('Bad template name');
+    if (typeof content !== 'string') throw new Error('Bad template content');
+    return db._upsertTemplate.get({ name: name.trim(), content });
+});
+
+ipcMain.handle('template:getByName', (_evt, name) => {
+    if (typeof name !== 'string' || !name.trim()) throw new Error('Bad template name');
+    return db._getTemplateByName.get(name.trim()) || null;
 });
 
 ipcMain.handle('app:quit', () => {

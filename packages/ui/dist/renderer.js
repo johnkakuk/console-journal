@@ -25857,8 +25857,9 @@ function startEditor(shell2, opts = {}) {
     const help = document.createElement("div");
     help.className = "writer-help muted";
     const saveCombo = isMac ? "CMD + S" : "CTRL + S";
+    const templateCombo = isMac ? "CMD + SHIFT + S" : "CTRL + SHIFT + S";
     const exitCombo = isMac ? "CTRL + X" : "CTRL + Q";
-    help.textContent = `${saveCombo} to save, ${exitCombo} to exit`;
+    help.textContent = `${saveCombo} to save, ${templateCombo} to save template, ${exitCombo} to exit`;
     const pane = document.createElement("div");
     pane.id = "writerPane";
     pane.style.position = "relative";
@@ -26289,6 +26290,170 @@ function startEditor(shell2, opts = {}) {
       ok(`Saved (${summary()})`);
     }
   }
+  function showTemplateModal({ onSave, onCancel, initialValue = "" } = {}) {
+    const prev = document.getElementById("templateModal");
+    if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
+    const wrap = document.createElement("div");
+    wrap.id = "templateModal";
+    wrap.className = "cj-modal-backdrop";
+    wrap.innerHTML = `
+            <div class="cj-modal" role="dialog" aria-modal="true" aria-labelledby="cjTemplateModalTitle">
+                <div id="cjTemplateModalTitle" class="cj-modal-title">Save Template</div>
+                <div class="cj-modal-body">
+                    <label class="cj-modal-field">
+                        <span>Template name</span>
+                        <input type="text" name="templateName" autocomplete="off" spellcheck="false" />
+                    </label>
+                    <div class="cj-modal-error error" style="display:none;"></div>
+                </div>
+                <div class="cj-modal-actions">
+                    <button class="save" autofocus>Save</button>
+                    <button class="cancel">Cancel</button>
+                </div>
+                <div class="cj-modal-hint muted">enter = save \xB7 esc = cancel</div>
+            </div>
+        `;
+    document.body.appendChild(wrap);
+    const input2 = wrap.querySelector('input[name="templateName"]');
+    const btnSave = wrap.querySelector("button.save");
+    const btnCancel = wrap.querySelector("button.cancel");
+    const errorEl = wrap.querySelector(".cj-modal-error");
+    if (input2) {
+      input2.value = initialValue;
+      try {
+        input2.setSelectionRange(0, input2.value.length);
+      } catch {
+      }
+    }
+    const showError = (msg) => {
+      if (!errorEl) return;
+      if (msg) {
+        errorEl.textContent = msg;
+        errorEl.style.display = "block";
+      } else {
+        errorEl.textContent = "";
+        errorEl.style.display = "none";
+      }
+    };
+    let submitting = false;
+    const cleanup = () => {
+      window.removeEventListener("keydown", onKey, true);
+      if (wrap && wrap.parentElement) wrap.parentElement.removeChild(wrap);
+    };
+    const reject = () => {
+      if (submitting) return;
+      cleanup();
+      try {
+        onCancel && onCancel();
+      } catch {
+      }
+    };
+    const accept = async () => {
+      if (submitting) return;
+      const value = (input2 && input2.value || "").trim();
+      if (!value) {
+        showError("Template name is required.");
+        if (input2) {
+          try {
+            input2.focus({ preventScroll: true });
+          } catch {
+            input2.focus();
+          }
+          try {
+            input2.select();
+          } catch {
+          }
+        }
+        return;
+      }
+      showError("");
+      submitting = true;
+      try {
+        if (typeof onSave === "function") {
+          await onSave(value);
+        }
+        cleanup();
+      } catch (err) {
+        submitting = false;
+        const message = err?.message || String(err);
+        showError(message);
+        if (input2) {
+          try {
+            input2.focus({ preventScroll: true });
+          } catch {
+            input2.focus();
+          }
+          try {
+            input2.select();
+          } catch {
+          }
+        }
+      }
+    };
+    const onKey = (e) => {
+      const k = (e.key || "").toLowerCase();
+      if (k === "escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        reject();
+        return;
+      }
+      if (k === "enter") {
+        if (document.activeElement === input2 || document.activeElement === btnSave) {
+          e.preventDefault();
+          e.stopPropagation();
+          accept();
+          return;
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    if (btnSave) btnSave.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      accept();
+    });
+    if (btnCancel) btnCancel.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      reject();
+    });
+    if (input2) input2.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        accept();
+      }
+    });
+    setTimeout(() => {
+      if (input2) {
+        try {
+          input2.focus({ preventScroll: true });
+        } catch (_) {
+          input2.focus();
+        }
+      }
+    }, 0);
+  }
+  function promptTemplateSave() {
+    if (!cmView) return;
+    if (!window.db || typeof window.db.saveTemplate !== "function") {
+      info("Template storage is not available.");
+      return;
+    }
+    const text = cmView.state.doc.toString();
+    showTemplateModal({
+      onSave: async (name2) => {
+        await window.db.saveTemplate(name2, text);
+        const status = document.getElementById("writerStatus");
+        if (status) {
+          status.textContent = `Template "${name2}" saved.`;
+        } else {
+          ok(`Template "${name2}" saved.`);
+        }
+      }
+    });
+  }
   function showConfirmModal(message, onYes, onNo) {
     const prev = document.getElementById("confirmModal");
     if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
@@ -26405,6 +26570,13 @@ function startEditor(shell2, opts = {}) {
   }
   function onHotkey(e) {
     {
+      if ((isMac && e.metaKey || !isMac && e.ctrlKey) && e.shiftKey && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        e.stopPropagation();
+        promptTemplateSave();
+        return;
+      }
       if ((isMac && e.metaKey || !isMac && e.ctrlKey) && (e.key === "s" || e.key === "S")) {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -28517,8 +28689,9 @@ var db = window.db;
 if (!db) {
   if (!window.electronAPI) {
     const DB_NAME = "console-journal";
-    const DB_VERSION = 1;
+    const DB_VERSION = 2;
     const STORE = "entries";
+    const TEMPLATE_STORE = "templates";
     const openDB = () => new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
@@ -28528,15 +28701,19 @@ if (!db) {
           s.createIndex("ym", "ym", { unique: false });
           s.createIndex("updated_at", "updated_at", { unique: false });
         }
+        if (!db2.objectStoreNames.contains(TEMPLATE_STORE)) {
+          const t2 = db2.createObjectStore(TEMPLATE_STORE, { keyPath: "name" });
+          t2.createIndex("updated_at", "updated_at", { unique: false });
+        }
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
-    const txRun = async (mode, fn) => {
+    const txRunStore = async (storeName, mode, fn) => {
       const dbi = await openDB();
       return new Promise((resolve, reject) => {
-        const tx = dbi.transaction(STORE, mode);
-        const store = tx.objectStore(STORE);
+        const tx = dbi.transaction(storeName, mode);
+        const store = tx.objectStore(storeName);
         let result;
         try {
           result = fn(store, tx);
@@ -28548,6 +28725,7 @@ if (!db) {
         tx.onerror = () => reject(tx.error);
       });
     };
+    const txRun = (mode, fn) => txRunStore(STORE, mode, fn);
     db = {
       async get(date) {
         return txRun("readonly", (store) => {
@@ -28617,6 +28795,40 @@ if (!db) {
             req.onerror = () => reject(req.error);
           });
         });
+      },
+      async saveTemplate(name2, content2 = "") {
+        const trimmed = String(name2 ?? "").trim();
+        if (!trimmed) throw new Error("Template name required");
+        const now = (/* @__PURE__ */ new Date()).toISOString();
+        return txRunStore(TEMPLATE_STORE, "readwrite", (store) => {
+          return new Promise((resolve, reject) => {
+            const getReq = store.get(trimmed);
+            getReq.onsuccess = () => {
+              const existing = getReq.result;
+              const row = {
+                name: trimmed,
+                content: String(content2 ?? ""),
+                created_at: existing?.created_at ?? now,
+                updated_at: now
+              };
+              const putReq = store.put(row);
+              putReq.onsuccess = () => resolve(row);
+              putReq.onerror = () => reject(putReq.error);
+            };
+            getReq.onerror = () => reject(getReq.error);
+          });
+        });
+      },
+      async getTemplate(name2) {
+        const trimmed = String(name2 ?? "").trim();
+        if (!trimmed) throw new Error("Template name required");
+        return txRunStore(TEMPLATE_STORE, "readonly", (store) => {
+          return new Promise((resolve, reject) => {
+            const req = store.get(trimmed);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => reject(req.error);
+          });
+        });
       }
     };
     window.db = db;
@@ -28630,8 +28842,10 @@ if (!db) {
       search: (q) => invoke("entry:search", q),
       delete: async (date) => {
         const res = await invoke("entry:deleteByDate", date);
-        return !!(res && (res.deleted > 0 || res.ok === true));
-      }
+        return !!(res && res.deleted);
+      },
+      saveTemplate: (name2, content2 = "") => invoke("template:upsert", { name: name2, content: content2 }),
+      getTemplate: (name2) => invoke("template:getByName", name2)
     };
   }
 }
@@ -29108,6 +29322,7 @@ function printJournalHelp() {
         <div><span class="kbd">journal MM-DD</span> \u2014 open the most recent past occurrence of that month/day</div>
         <div><span class="kbd">journal -y</span> \u2014 open yesterday</div>
         <div><span class="kbd">journal -t</span> \u2014 open tomorrow</div>
+        <div><span class="kbd">journal -tmp "Template"</span> \u2014 create a new entry from a template (append date to target another day)</div>
         <div><span class="kbd">journal -help</span> \u2014 show this help</div>
     </div>`);
 }
@@ -29163,30 +29378,98 @@ register("quit", async () => {
   }
 }, "Close the application");
 register("journal", async (argv = []) => {
-  let date;
-  if (!argv.length) {
-    date = todayISO();
-  } else {
-    const arg = String(argv[0]).trim();
+  const args = argv.map((a) => String(a).trim()).filter((a) => a.length > 0);
+  let templateName = null;
+  let dateToken = null;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
     if (arg === "-help") {
       printJournalHelp();
       return;
-    } else if (arg === "-y") date = shiftISO(-1);
-    else if (arg === "-t") date = shiftISO(1);
-    else if (isISODate(arg)) date = arg;
-    else if (isMonthDay(arg)) date = resolveMonthDayPast(arg);
-    else {
-      print(`<div class="error">Invalid argument for journal: ${esc(arg)}<br>Use YYYY-MM-DD, MM-DD (most recent past), -y for yesterday, -t for tomorrow, or -help for usage.</div>`);
+    }
+    if (arg === "-tmp") {
+      if (templateName !== null) {
+        print('<div class="error">Duplicate -tmp arguments. Specify the template name once.</div>');
+        return;
+      }
+      const next = args[++i];
+      if (typeof next !== "string") {
+        print('<div class="error">Missing template name after -tmp.</div>');
+        return;
+      }
+      const name2 = next.trim();
+      if (!name2) {
+        print('<div class="error">Template name cannot be empty.</div>');
+        return;
+      }
+      templateName = name2;
+      continue;
+    }
+    if (dateToken === null) {
+      dateToken = arg;
+      continue;
+    }
+    print('<div class="error">Too many arguments for journal. Use -help for usage.</div>');
+    return;
+  }
+  let date;
+  if (!dateToken) {
+    date = todayISO();
+  } else if (dateToken === "-y") {
+    date = shiftISO(-1);
+  } else if (dateToken === "-t") {
+    date = shiftISO(1);
+  } else if (isISODate(dateToken)) {
+    date = dateToken;
+  } else if (isMonthDay(dateToken)) {
+    date = resolveMonthDayPast(dateToken);
+  } else {
+    print(`<div class="error">Invalid argument for journal: ${esc(dateToken)}<br>Use YYYY-MM-DD, MM-DD (most recent past), -y for yesterday, -t for tomorrow, or -help for usage.</div>`);
+    return;
+  }
+  try {
+    if (templateName !== null) {
+      if (!db || typeof db.getTemplate !== "function" || typeof db.upsert !== "function") {
+        print('<div class="error">Templates are not available in this environment.</div>');
+        return;
+      }
+      let template;
+      try {
+        template = await db.getTemplate(templateName);
+      } catch (err) {
+        const msg = err?.message || String(err);
+        print(`<div class="error">Unable to load template: ${esc(msg)}</div>`);
+        return;
+      }
+      if (!template || typeof template.content !== "string") {
+        print(`<div class="error">Template "${esc(templateName)}" not found.</div>`);
+        return;
+      }
+      const existing = await db.get(date);
+      if (existing) {
+        print(`<div class="error">An entry already exists for ${esc(date)}. Remove it before using -tmp.</div>`);
+        return;
+      }
+      const inserted = await db.upsert(date, template.content ?? "");
+      const row2 = inserted || { date, content: template.content ?? "" };
+      startEditor(shell, {
+        id: row2.id ?? date,
+        date: row2.date ?? date,
+        initialContent: row2.content ?? (template.content ?? "")
+      });
       return;
     }
+    let row = await db.get(date);
+    if (!row) row = await db.upsert(date, "");
+    startEditor(shell, {
+      id: row.id ?? date,
+      date: row.date ?? date,
+      initialContent: row.content ?? ""
+    });
+  } catch (err) {
+    const msg = err?.message || String(err);
+    print(`<div class="error">${esc(msg)}</div>`);
   }
-  let row = await db.get(date);
-  if (!row) row = await db.upsert(date, "");
-  startEditor(shell, {
-    id: row.id ?? date,
-    date: row.date ?? date,
-    initialContent: row.content ?? ""
-  });
 }, "Open journal (YYYY-MM-DD | MM-DD | -y | -t | -help)");
 register("view", async (argv = []) => {
   let items = [];

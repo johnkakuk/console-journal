@@ -84,8 +84,9 @@ if (!db) {
     if (!window.electronAPI) {
         // ===== Minimal IndexedDB adapter for PWA =====
         const DB_NAME = 'console-journal';
-        const DB_VERSION = 1;
+        const DB_VERSION = 2;
         const STORE = 'entries';
+        const TEMPLATE_STORE = 'templates';
 
         const openDB = () => new Promise((resolve, reject) => {
             const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -96,22 +97,27 @@ if (!db) {
                     s.createIndex('ym', 'ym', { unique: false });
                     s.createIndex('updated_at', 'updated_at', { unique: false });
                 }
+                if (!db.objectStoreNames.contains(TEMPLATE_STORE)) {
+                    const t = db.createObjectStore(TEMPLATE_STORE, { keyPath: 'name' });
+                    t.createIndex('updated_at', 'updated_at', { unique: false });
+                }
             };
             req.onsuccess = () => resolve(req.result);
             req.onerror = () => reject(req.error);
         });
 
-        const txRun = async (mode, fn) => {
+        const txRunStore = async (storeName, mode, fn) => {
             const dbi = await openDB();
             return new Promise((resolve, reject) => {
-                const tx = dbi.transaction(STORE, mode);
-                const store = tx.objectStore(STORE);
+                const tx = dbi.transaction(storeName, mode);
+                const store = tx.objectStore(storeName);
                 let result;
                 try { result = fn(store, tx); } catch (e) { reject(e); return; }
                 tx.oncomplete = () => resolve(result);
                 tx.onerror = () => reject(tx.error);
             });
         };
+        const txRun = (mode, fn) => txRunStore(STORE, mode, fn);
 
         db = {
             async get(date) {
@@ -180,6 +186,40 @@ if (!db) {
                         req.onerror = () => reject(req.error);
                     });
                 });
+            },
+            async saveTemplate(name, content = '') {
+                const trimmed = String(name ?? '').trim();
+                if (!trimmed) throw new Error('Template name required');
+                const now = new Date().toISOString();
+                return txRunStore(TEMPLATE_STORE, 'readwrite', store => {
+                    return new Promise((resolve, reject) => {
+                        const getReq = store.get(trimmed);
+                        getReq.onsuccess = () => {
+                            const existing = getReq.result;
+                            const row = {
+                                name: trimmed,
+                                content: String(content ?? ''),
+                                created_at: existing?.created_at ?? now,
+                                updated_at: now
+                            };
+                            const putReq = store.put(row);
+                            putReq.onsuccess = () => resolve(row);
+                            putReq.onerror = () => reject(putReq.error);
+                        };
+                        getReq.onerror = () => reject(getReq.error);
+                    });
+                });
+            },
+            async getTemplate(name) {
+                const trimmed = String(name ?? '').trim();
+                if (!trimmed) throw new Error('Template name required');
+                return txRunStore(TEMPLATE_STORE, 'readonly', store => {
+                    return new Promise((resolve, reject) => {
+                        const req = store.get(trimmed);
+                        req.onsuccess = () => resolve(req.result || null);
+                        req.onerror = () => reject(req.error);
+                    });
+                });
             }
         };
         window.db = db;
@@ -198,8 +238,10 @@ if (!db) {
             search:        (q)                 => invoke('entry:search', q),
             delete:        async (date) => {
                 const res = await invoke('entry:deleteByDate', date);
-                return !!(res && (res.deleted > 0 || res.ok === true));
-            }
+                return !!(res && res.deleted);
+            },
+            saveTemplate: (name, content='') => invoke('template:upsert', { name, content }),
+            getTemplate:  (name)             => invoke('template:getByName', name)
         };
     }
 }
@@ -732,6 +774,7 @@ function printJournalHelp() {
         <div><span class="kbd">journal MM-DD</span> — open the most recent past occurrence of that month/day</div>
         <div><span class="kbd">journal -y</span> — open yesterday</div>
         <div><span class="kbd">journal -t</span> — open tomorrow</div>
+        <div><span class="kbd">journal -tmp "Template"</span> — create a new entry from a template (append date to target another day)</div>
         <div><span class="kbd">journal -help</span> — show this help</div>
     </div>`);
 }
@@ -801,30 +844,102 @@ register('journal', async (argv = []) => {
     //   journal MM-DD           -> most recent past occurrence of that month-day
     //   journal -y               -> yesterday
     //   journal -t               -> tomorrow
-    let date;
-    if (!argv.length) {
-        date = todayISO();
-    } else {
-        const arg = String(argv[0]).trim();
+    const args = argv.map(a => String(a).trim()).filter(a => a.length > 0);
+    let templateName = null;
+    let dateToken = null;
+
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
         if (arg === '-help') { printJournalHelp(); return; }
-        else if (arg === '-y') date = shiftISO(-1);
-        else if (arg === '-t') date = shiftISO(1);
-        else if (isISODate(arg)) date = arg;
-        else if (isMonthDay(arg)) date = resolveMonthDayPast(arg);
-        else {
-            print(`<div class="error">Invalid argument for journal: ${esc(arg)}<br>Use YYYY-MM-DD, MM-DD (most recent past), -y for yesterday, -t for tomorrow, or -help for usage.</div>`);
-            return;
+        if (arg === '-tmp') {
+            if (templateName !== null) {
+                print('<div class="error">Duplicate -tmp arguments. Specify the template name once.</div>');
+                return;
+            }
+            const next = args[++i];
+            if (typeof next !== 'string') {
+                print('<div class="error">Missing template name after -tmp.</div>');
+                return;
+            }
+            const name = next.trim();
+            if (!name) {
+                print('<div class="error">Template name cannot be empty.</div>');
+                return;
+            }
+            templateName = name;
+            continue;
         }
+        if (dateToken === null) {
+            dateToken = arg;
+            continue;
+        }
+        print('<div class="error">Too many arguments for journal. Use -help for usage.</div>');
+        return;
     }
 
-    let row = await db.get(date);
-    if (!row) row = await db.upsert(date, '');
+    let date;
+    if (!dateToken) {
+        date = todayISO();
+    } else if (dateToken === '-y') {
+        date = shiftISO(-1);
+    } else if (dateToken === '-t') {
+        date = shiftISO(1);
+    } else if (isISODate(dateToken)) {
+        date = dateToken;
+    } else if (isMonthDay(dateToken)) {
+        date = resolveMonthDayPast(dateToken);
+    } else {
+        print(`<div class="error">Invalid argument for journal: ${esc(dateToken)}<br>Use YYYY-MM-DD, MM-DD (most recent past), -y for yesterday, -t for tomorrow, or -help for usage.</div>`);
+        return;
+    }
 
-    startEditor(shell, {
-        id: row.id ?? date,
-        date: row.date ?? date,
-        initialContent: row.content ?? ''
-    });
+    try {
+        if (templateName !== null) {
+            if (!db || typeof db.getTemplate !== 'function' || typeof db.upsert !== 'function') {
+                print('<div class="error">Templates are not available in this environment.</div>');
+                return;
+            }
+            let template;
+            try {
+                template = await db.getTemplate(templateName);
+            } catch (err) {
+                const msg = err?.message || String(err);
+                print(`<div class="error">Unable to load template: ${esc(msg)}</div>`);
+                return;
+            }
+            if (!template || typeof template.content !== 'string') {
+                print(`<div class="error">Template "${esc(templateName)}" not found.</div>`);
+                return;
+            }
+
+            const existing = await db.get(date);
+            if (existing) {
+                print(`<div class="error">An entry already exists for ${esc(date)}. Remove it before using -tmp.</div>`);
+                return;
+            }
+
+            const inserted = await db.upsert(date, template.content ?? '');
+            const row = inserted || { date, content: template.content ?? '' };
+            startEditor(shell, {
+                id: row.id ?? date,
+                date: row.date ?? date,
+                initialContent: row.content ?? (template.content ?? '')
+            });
+            return;
+        }
+
+        let row = await db.get(date);
+        if (!row) row = await db.upsert(date, '');
+
+        startEditor(shell, {
+            id: row.id ?? date,
+            date: row.date ?? date,
+            initialContent: row.content ?? ''
+        });
+    } catch (err) {
+        const msg = err?.message || String(err);
+        print(`<div class="error">${esc(msg)}</div>`);
+    }
 }, "Open journal (YYYY-MM-DD | MM-DD | -y | -t | -help)");
 
 register('view', async (argv = []) => {

@@ -268,8 +268,9 @@ export function startEditor(shell, opts = {}) {
         const help = document.createElement('div');
         help.className = 'writer-help muted';
         const saveCombo = isMac ? 'CMD + S' : 'CTRL + S';
+        const templateCombo = isMac ? 'CMD + SHIFT + S' : 'CTRL + SHIFT + S';
         const exitCombo = isMac ? 'CTRL + X' : 'CTRL + Q';
-        help.textContent = `${saveCombo} to save, ${exitCombo} to exit`;
+        help.textContent = `${saveCombo} to save, ${templateCombo} to save template, ${exitCombo} to exit`;
 
         // Editor pane wrapper (where CodeMirror will mount)
         const pane = document.createElement('div');
@@ -739,6 +740,162 @@ export function startEditor(shell, opts = {}) {
         }
     }
 
+    function showTemplateModal({ onSave, onCancel, initialValue = '' } = {}) {
+        const prev = document.getElementById('templateModal');
+        if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
+
+        const wrap = document.createElement('div');
+        wrap.id = 'templateModal';
+        wrap.className = 'cj-modal-backdrop';
+        wrap.innerHTML = `
+            <div class="cj-modal" role="dialog" aria-modal="true" aria-labelledby="cjTemplateModalTitle">
+                <div id="cjTemplateModalTitle" class="cj-modal-title">Save Template</div>
+                <div class="cj-modal-body">
+                    <label class="cj-modal-field">
+                        <span>Template name</span>
+                        <input type="text" name="templateName" autocomplete="off" spellcheck="false" />
+                    </label>
+                    <div class="cj-modal-error error" style="display:none;"></div>
+                </div>
+                <div class="cj-modal-actions">
+                    <button class="save" autofocus>Save</button>
+                    <button class="cancel">Cancel</button>
+                </div>
+                <div class="cj-modal-hint muted">enter = save · esc = cancel</div>
+            </div>
+        `;
+        document.body.appendChild(wrap);
+
+        const input = wrap.querySelector('input[name="templateName"]');
+        const btnSave = wrap.querySelector('button.save');
+        const btnCancel = wrap.querySelector('button.cancel');
+        const errorEl = wrap.querySelector('.cj-modal-error');
+
+        if (input) {
+            input.value = initialValue;
+            try { input.setSelectionRange(0, input.value.length); } catch {}
+        }
+
+        const showError = (msg) => {
+            if (!errorEl) return;
+            if (msg) {
+                errorEl.textContent = msg;
+                errorEl.style.display = 'block';
+            } else {
+                errorEl.textContent = '';
+                errorEl.style.display = 'none';
+            }
+        };
+
+        let submitting = false;
+
+        const cleanup = () => {
+            window.removeEventListener('keydown', onKey, true);
+            if (wrap && wrap.parentElement) wrap.parentElement.removeChild(wrap);
+        };
+
+        const reject = () => {
+            if (submitting) return;
+            cleanup();
+            try { onCancel && onCancel(); } catch {}
+        };
+
+        const accept = async () => {
+            if (submitting) return;
+            const value = (input && input.value || '').trim();
+            if (!value) {
+                showError('Template name is required.');
+                if (input) {
+                    try { input.focus({ preventScroll: true }); } catch { input.focus(); }
+                    try { input.select(); } catch {}
+                }
+                return;
+            }
+            showError('');
+            submitting = true;
+            try {
+                if (typeof onSave === 'function') {
+                    await onSave(value);
+                }
+                cleanup();
+            } catch (err) {
+                submitting = false;
+                const message = err?.message || String(err);
+                showError(message);
+                if (input) {
+                    try { input.focus({ preventScroll: true }); } catch { input.focus(); }
+                    try { input.select(); } catch {}
+                }
+            }
+        };
+
+        const onKey = (e) => {
+            const k = (e.key || '').toLowerCase();
+            if (k === 'escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                reject();
+                return;
+            }
+            if (k === 'enter') {
+                // allow Enter from input or Save button
+                if (document.activeElement === input || document.activeElement === btnSave) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    accept();
+                    return;
+                }
+            }
+        };
+
+        window.addEventListener('keydown', onKey, true);
+
+        if (btnSave) btnSave.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            accept();
+        });
+        if (btnCancel) btnCancel.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            reject();
+        });
+        if (input) input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                accept();
+            }
+        });
+
+        setTimeout(() => {
+            if (input) {
+                try { input.focus({ preventScroll: true }); }
+                catch (_) { input.focus(); }
+            }
+        }, 0);
+    }
+
+    function promptTemplateSave() {
+        if (!cmView) return;
+        if (!window.db || typeof window.db.saveTemplate !== 'function') {
+            info('Template storage is not available.');
+            return;
+        }
+        const text = cmView.state.doc.toString();
+        showTemplateModal({
+            onSave: async (name) => {
+                await window.db.saveTemplate(name, text);
+                const status = document.getElementById('writerStatus');
+                if (status) {
+                    status.textContent = `Template "${name}" saved.`;
+                } else {
+                    ok(`Template "${name}" saved.`);
+                }
+            }
+        });
+    }
+
     // --- Unsaved-abandon modal -------------------------------------------------
     function showConfirmModal(message, onYes, onNo) {
         // If an existing modal is present, remove it first
@@ -853,8 +1010,16 @@ export function startEditor(shell, opts = {}) {
     // --- Hotkeys --------------------------------------------------------------
     function onHotkey(e) {
         {
+            // Save template: Cmd/Ctrl + Shift + S
+            if (((isMac && e.metaKey) || (!isMac && e.ctrlKey)) && e.shiftKey && (e.key === 's' || e.key === 'S')) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                e.stopPropagation();
+                promptTemplateSave();
+                return;
+            }
             // Save: Cmd+S (mac) or Ctrl+S (win/linux)
-            if ((isMac && e.metaKey || (!isMac && e.ctrlKey)) && (e.key === 's' || e.key === 'S')) {
+            if (((isMac && e.metaKey) || (!isMac && e.ctrlKey)) && (e.key === 's' || e.key === 'S')) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 e.stopPropagation();
