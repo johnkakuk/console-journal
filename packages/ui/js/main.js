@@ -900,12 +900,12 @@ register('tutorial', () => {
     print(`
     <div class="soft">journal quickstart</div>
     <div class="muted help">
-        <div><span class="kbd">journal</span> — open today's entry; add a date afterwards for a specific day</div>
-        <div><span class="kbd">journal -tmp "Template"</span> — spin up a fresh entry pre-filled from a template</div>
-        <div><span class="kbd">view</span> — browse the latest entries; use ↑/↓ then Enter to reopen one</div>
-        <div><span class="kbd">view templates</span> — review, edit, or delete saved templates</div>
+        <div><span class="kbd">journal</span>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp — open today's entry; or specify a date afterwards (YYYY-MM-DD)</div>
+        <div><span class="kbd">view</span>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp — browse the latest entries; use ↑/↓ then Enter to open</div>
         <div><span class="kbd">search "coffee"</span> — find entries containing your keywords</div>
-        <div><span class="kbd">export -a</span> — create a full PDF export when you need a snapshot</div>
+        <div><span class="kbd">export -pdf</span>&nbsp&nbsp&nbsp&nbsp — create a PDF export of the last week of entries</div>
+        <div><span class="kbd">help</span>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp — view all commands</div>
+        <div><span class="kbd">... -help</span>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp — or add the -help flag to most commands for more info</div>
     </div>`);
 }, 'Quick journaling workflow overview');
 
