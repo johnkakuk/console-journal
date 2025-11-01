@@ -94,12 +94,8 @@ npm install
 
 ### 3. Run the app
 ```cs
-npm run start
-```
-
-### 4. Package it
-```cs
-npm run build
+npm run bundle
+npm run start:web:https
 ```
 
 
@@ -130,4 +126,3 @@ Console Journal is the minimalist, keyboard-first journaling environment I’ve 
 ## 🧑‍💻 Author
 
 John Kakuk
-
