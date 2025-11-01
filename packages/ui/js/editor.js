@@ -205,19 +205,27 @@ const todoPlugin = [
 
 export function startEditor(shell, opts = {}) {
     const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent || '');
+    const mode = opts.mode === 'template' ? 'template' : 'entry';
+    const isTemplate = mode === 'template';
+    const rawTemplateName = isTemplate ? String(opts.templateName ?? '').trim() : '';
+    const templateName = isTemplate ? (rawTemplateName || 'Untitled Template') : null;
+    const initialText = typeof opts.initialContent === 'string' ? opts.initialContent : '';
     // --- Editor-local state ---------------------------------------------------
     const state = {
-        title: opts.title || new Date().toLocaleString(),
-        id:     opts.id ?? null,
-        date: typeof opts.date === 'string' ? opts.date : new Date().toISOString().slice(0,10), // 'YYYY-MM-DD'
-        buffer: (typeof opts.initialContent === 'string' ? opts.initialContent : '').split('\n'),
+        title: opts.title || (isTemplate ? templateName : new Date().toLocaleString()),
+        id:     opts.id ?? (isTemplate ? templateName : null),
+        date: isTemplate ? null : (typeof opts.date === 'string' ? opts.date : new Date().toISOString().slice(0,10)), // 'YYYY-MM-DD'
+        templateName,
+        buffer: initialText.split('\n'),
         dirty: false,
     };
 
     // If this is a brand-new entry (no existing content), seed first line with the formatted date
-    if (!opts.initialContent || (typeof opts.initialContent === 'string' && opts.initialContent.trim() === '')) {
+    if (!isTemplate && (!initialText || initialText.trim() === '')) {
         const banner = `# ${fmtBannerDate(state.date)}`;
         state.buffer = [banner, ''];
+    } else if (!state.buffer.length) {
+        state.buffer = [''];
     }
 
     // CodeMirror editor view
@@ -262,7 +270,9 @@ export function startEditor(shell, opts = {}) {
         // Header
         const header = document.createElement('div');
         header.className = 'writer-header soft';
-        header.textContent = `JOURNAL - ${fmtBannerDate(state.date)}`;
+        header.textContent = isTemplate
+            ? `TEMPLATE - ${templateName}`
+            : `JOURNAL - ${fmtBannerDate(state.date)}`;
 
         // Help line
         const help = document.createElement('div');
@@ -270,7 +280,11 @@ export function startEditor(shell, opts = {}) {
         const saveCombo = isMac ? 'CMD + S' : 'CTRL + S';
         const templateCombo = isMac ? 'CMD + SHIFT + S' : 'CTRL + SHIFT + S';
         const exitCombo = isMac ? 'CTRL + X' : 'CTRL + Q';
-        help.textContent = `${saveCombo} to save, ${templateCombo} to save template, ${exitCombo} to exit`;
+        if (isTemplate) {
+            help.textContent = `${saveCombo} to save, ${templateCombo} to duplicate, ${exitCombo} to exit`;
+        } else {
+            help.textContent = `${saveCombo} to save, ${templateCombo} to save template, ${exitCombo} to exit`;
+        }
 
         // Editor pane wrapper (where CodeMirror will mount)
         const pane = document.createElement('div');
@@ -721,23 +735,59 @@ export function startEditor(shell, opts = {}) {
         } catch (_) {}
     }
 
-    function save() {
+    async function save() {
         if (cmView) {
             const text = cmView.state.doc.toString();
             state.buffer = text.split('\n');
-            // Persist to SQLite via preload bridge if available
-            try { window.db && typeof window.db.upsert === 'function' && window.db.upsert(state.date, text); } catch {}
+            try {
+                if (isTemplate) {
+                    if (!window.db || typeof window.db.saveTemplate !== 'function') {
+                        throw new Error('Template storage is not available.');
+                    }
+                    await window.db.saveTemplate(templateName, text);
+                    showTemplateSavedToast();
+                } else if (window.db && typeof window.db.upsert === 'function') {
+                    await window.db.upsert(state.date, text);
+                }
+            } catch (err) {
+                const msg = err?.message || String(err);
+                const statusEl = document.getElementById('writerStatus');
+                if (statusEl) {
+                    statusEl.textContent = `Save failed: ${msg}`;
+                } else {
+                    info(`Save failed: ${msg}`);
+                }
+                return;
+            }
         }
         clearUnsaved();
         flashSaveBar();
         state.dirty = false;
 
         const status = document.getElementById('writerStatus');
+        const message = isTemplate
+            ? `Template "${templateName}" saved (${summary()})`
+            : `Saved (${summary()})`;
         if (status) {
-            status.textContent = `Saved (${summary()})`;
+            status.textContent = message;
         } else {
-            ok(`Saved (${summary()})`);
+            ok(message);
         }
+    }
+
+    function showTemplateSavedToast() {
+        try {
+            const prev = document.getElementById('templateToast');
+            if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
+            const toast = document.createElement('div');
+            toast.id = 'templateToast';
+            toast.className = 'template-toast';
+            toast.textContent = 'Template Saved';
+            (document.body || document.documentElement).appendChild(toast);
+            toast.addEventListener('animationend', () => {
+                if (toast && toast.parentElement) toast.parentElement.removeChild(toast);
+            }, { once: true });
+        } catch (_) {}
     }
 
     function showTemplateModal({ onSave, onCancel, initialValue = '' } = {}) {
@@ -883,16 +933,19 @@ export function startEditor(shell, opts = {}) {
             return;
         }
         const text = cmView.state.doc.toString();
+        state.buffer = text.split('\n');
         showTemplateModal({
             onSave: async (name) => {
                 await window.db.saveTemplate(name, text);
                 const status = document.getElementById('writerStatus');
                 if (status) {
-                    status.textContent = `Template "${name}" saved.`;
+                    status.textContent = `Template "${name}" saved (${summary()})`;
                 } else {
-                    ok(`Template "${name}" saved.`);
+                    ok(`Template "${name}" saved (${summary()})`);
                 }
-            }
+                showTemplateSavedToast();
+            },
+            initialValue: isTemplate ? (templateName ?? '') : ''
         });
     }
 
@@ -1041,7 +1094,7 @@ export function startEditor(shell, opts = {}) {
     // Hide the title while the editor is active (superfluous during writing)
     if (titleEl) titleEl.style.display = 'none';
     // Prompt change for editor mode
-    shell.setPrompt('journal>');
+    shell.setPrompt(isTemplate ? 'template>' : 'journal>');
     // Replace the console output with a full-screen editor surface
     mountEditorDom();
 

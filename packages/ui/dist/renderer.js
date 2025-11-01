@@ -25811,17 +25811,25 @@ var todoPlugin = [
 ];
 function startEditor(shell2, opts = {}) {
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent || "");
+  const mode = opts.mode === "template" ? "template" : "entry";
+  const isTemplate = mode === "template";
+  const rawTemplateName = isTemplate ? String(opts.templateName ?? "").trim() : "";
+  const templateName = isTemplate ? rawTemplateName || "Untitled Template" : null;
+  const initialText = typeof opts.initialContent === "string" ? opts.initialContent : "";
   const state2 = {
-    title: opts.title || (/* @__PURE__ */ new Date()).toLocaleString(),
-    id: opts.id ?? null,
-    date: typeof opts.date === "string" ? opts.date : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+    title: opts.title || (isTemplate ? templateName : (/* @__PURE__ */ new Date()).toLocaleString()),
+    id: opts.id ?? (isTemplate ? templateName : null),
+    date: isTemplate ? null : typeof opts.date === "string" ? opts.date : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
     // 'YYYY-MM-DD'
-    buffer: (typeof opts.initialContent === "string" ? opts.initialContent : "").split("\n"),
+    templateName,
+    buffer: initialText.split("\n"),
     dirty: false
   };
-  if (!opts.initialContent || typeof opts.initialContent === "string" && opts.initialContent.trim() === "") {
+  if (!isTemplate && (!initialText || initialText.trim() === "")) {
     const banner2 = `# ${fmtBannerDate(state2.date)}`;
     state2.buffer = [banner2, ""];
+  } else if (!state2.buffer.length) {
+    state2.buffer = [""];
   }
   let cmView = null;
   let domSnapshot = null;
@@ -25853,13 +25861,17 @@ function startEditor(shell2, opts = {}) {
     root.style.gap = "8px";
     const header = document.createElement("div");
     header.className = "writer-header soft";
-    header.textContent = `JOURNAL - ${fmtBannerDate(state2.date)}`;
+    header.textContent = isTemplate ? `TEMPLATE - ${templateName}` : `JOURNAL - ${fmtBannerDate(state2.date)}`;
     const help = document.createElement("div");
     help.className = "writer-help muted";
     const saveCombo = isMac ? "CMD + S" : "CTRL + S";
     const templateCombo = isMac ? "CMD + SHIFT + S" : "CTRL + SHIFT + S";
     const exitCombo = isMac ? "CTRL + X" : "CTRL + Q";
-    help.textContent = `${saveCombo} to save, ${templateCombo} to save template, ${exitCombo} to exit`;
+    if (isTemplate) {
+      help.textContent = `${saveCombo} to save, ${templateCombo} to duplicate, ${exitCombo} to exit`;
+    } else {
+      help.textContent = `${saveCombo} to save, ${templateCombo} to save template, ${exitCombo} to exit`;
+    }
     const pane = document.createElement("div");
     pane.id = "writerPane";
     pane.style.position = "relative";
@@ -26271,23 +26283,55 @@ function startEditor(shell2, opts = {}) {
     } catch (_) {
     }
   }
-  function save() {
+  async function save() {
     if (cmView) {
       const text = cmView.state.doc.toString();
       state2.buffer = text.split("\n");
       try {
-        window.db && typeof window.db.upsert === "function" && window.db.upsert(state2.date, text);
-      } catch {
+        if (isTemplate) {
+          if (!window.db || typeof window.db.saveTemplate !== "function") {
+            throw new Error("Template storage is not available.");
+          }
+          await window.db.saveTemplate(templateName, text);
+          showTemplateSavedToast();
+        } else if (window.db && typeof window.db.upsert === "function") {
+          await window.db.upsert(state2.date, text);
+        }
+      } catch (err) {
+        const msg = err?.message || String(err);
+        const statusEl = document.getElementById("writerStatus");
+        if (statusEl) {
+          statusEl.textContent = `Save failed: ${msg}`;
+        } else {
+          info(`Save failed: ${msg}`);
+        }
+        return;
       }
     }
     clearUnsaved();
     flashSaveBar();
     state2.dirty = false;
     const status = document.getElementById("writerStatus");
+    const message = isTemplate ? `Template "${templateName}" saved (${summary()})` : `Saved (${summary()})`;
     if (status) {
-      status.textContent = `Saved (${summary()})`;
+      status.textContent = message;
     } else {
-      ok(`Saved (${summary()})`);
+      ok(message);
+    }
+  }
+  function showTemplateSavedToast() {
+    try {
+      const prev = document.getElementById("templateToast");
+      if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
+      const toast = document.createElement("div");
+      toast.id = "templateToast";
+      toast.className = "template-toast";
+      toast.textContent = "Template Saved";
+      (document.body || document.documentElement).appendChild(toast);
+      toast.addEventListener("animationend", () => {
+        if (toast && toast.parentElement) toast.parentElement.removeChild(toast);
+      }, { once: true });
+    } catch (_) {
     }
   }
   function showTemplateModal({ onSave, onCancel, initialValue = "" } = {}) {
@@ -26442,16 +26486,19 @@ function startEditor(shell2, opts = {}) {
       return;
     }
     const text = cmView.state.doc.toString();
+    state2.buffer = text.split("\n");
     showTemplateModal({
       onSave: async (name2) => {
         await window.db.saveTemplate(name2, text);
         const status = document.getElementById("writerStatus");
         if (status) {
-          status.textContent = `Template "${name2}" saved.`;
+          status.textContent = `Template "${name2}" saved (${summary()})`;
         } else {
-          ok(`Template "${name2}" saved.`);
+          ok(`Template "${name2}" saved (${summary()})`);
         }
-      }
+        showTemplateSavedToast();
+      },
+      initialValue: isTemplate ? templateName ?? "" : ""
     });
   }
   function showConfirmModal(message, onYes, onNo) {
@@ -26594,7 +26641,7 @@ function startEditor(shell2, opts = {}) {
     }
   }
   if (titleEl) titleEl.style.display = "none";
-  shell2.setPrompt("journal>");
+  shell2.setPrompt(isTemplate ? "template>" : "journal>");
   mountEditorDom();
   const paneEl = document.getElementById("writerPane");
   const startDoc = state2.buffer.join("\n");
@@ -28829,6 +28876,50 @@ if (!db) {
             req.onerror = () => reject(req.error);
           });
         });
+      },
+      async listTemplates(limit = 200) {
+        const max = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 500) : 200;
+        return txRunStore(TEMPLATE_STORE, "readonly", (store) => {
+          return new Promise((resolve, reject) => {
+            const idx = store.index("updated_at");
+            const out = [];
+            const cursorReq = idx.openCursor(null, "prev");
+            cursorReq.onsuccess = () => {
+              const cur = cursorReq.result;
+              if (cur && out.length < max) {
+                const value = cur.value || {};
+                out.push({
+                  ...value,
+                  preview: (value.content || "").slice(0, 200)
+                });
+                cur.continue();
+              } else {
+                resolve(out);
+              }
+            };
+            cursorReq.onerror = () => reject(cursorReq.error);
+          });
+        });
+      },
+      async deleteTemplate(name2) {
+        const trimmed = String(name2 ?? "").trim();
+        if (!trimmed) throw new Error("Template name required");
+        return txRunStore(TEMPLATE_STORE, "readwrite", (store) => {
+          return new Promise((resolve, reject) => {
+            const getReq = store.get(trimmed);
+            getReq.onsuccess = () => {
+              const exists = !!getReq.result;
+              if (!exists) {
+                resolve({ deleted: 0 });
+                return;
+              }
+              const delReq = store.delete(trimmed);
+              delReq.onsuccess = () => resolve({ deleted: 1 });
+              delReq.onerror = () => reject(delReq.error);
+            };
+            getReq.onerror = () => reject(getReq.error);
+          });
+        });
       }
     };
     window.db = db;
@@ -28845,7 +28936,9 @@ if (!db) {
         return !!(res && res.deleted);
       },
       saveTemplate: (name2, content2 = "") => invoke("template:upsert", { name: name2, content: content2 }),
-      getTemplate: (name2) => invoke("template:getByName", name2)
+      getTemplate: (name2) => invoke("template:getByName", name2),
+      listTemplates: () => invoke("template:list"),
+      deleteTemplate: (name2) => invoke("template:delete", name2)
     };
   }
 }
@@ -29102,8 +29195,35 @@ var scheduleCaret = () => {
   if (caretRAF) cancelAnimationFrame(caretRAF);
   caretRAF = requestAnimationFrame(updateCaret);
 };
-function createListUI(title, items) {
+function createListUI(title, items, opts = {}) {
   let idx = 0;
+  const {
+    getKey = (item) => String(item.date),
+    getStamp = (item) => String(item.date),
+    getPreview = (item) => {
+      const text = (item.preview ?? item.content ?? "").replace(/\n/g, " ");
+      return text.slice(0, 120);
+    },
+    onOpen = async (item) => {
+      const key = getKey(item);
+      const row = await db.get(key);
+      startEditor(shell, {
+        id: row?.id ?? key,
+        date: key,
+        initialContent: row?.content ?? ""
+      });
+    },
+    onDelete = async (item) => {
+      const key = getKey(item);
+      const res = await db.delete(key);
+      if (typeof res === "object" && res) {
+        if (typeof res.deleted === "number") return res.deleted > 0;
+        if ("ok" in res) return !!res.ok;
+      }
+      return !!res;
+    },
+    emptyMessage = '<div class="muted">No entries left.</div>'
+  } = opts;
   const container = document.createElement("div");
   container.className = "listui";
   const head = document.createElement("div");
@@ -29112,16 +29232,20 @@ function createListUI(title, items) {
   const ul = document.createElement("ul");
   ul.className = "menu";
   let confirmPending = false;
-  let pendingDate = null;
+  let pendingItem = null;
   let confirmDiv = null;
   function render() {
     ul.innerHTML = "";
     items.forEach((it, i) => {
       const li = document.createElement("li");
       if (i === idx) li.classList.add("active");
-      const date = esc(it.date);
-      const prev = esc((it.preview || it.content || "").replace(/\n/g, " ").slice(0, 120));
-      li.innerHTML = `<span class="stamp">${date} - </span>${prev}`;
+      const stampText = esc(String(getStamp(it)));
+      let preview = getPreview(it);
+      if (typeof preview !== "string") preview = "";
+      const trimmed = preview.trim();
+      const previewHtml = trimmed ? esc(trimmed) : "";
+      const sep = previewHtml ? " - " : "";
+      li.innerHTML = `<span class="stamp">${stampText}</span>${sep}${previewHtml}`;
       li.addEventListener("click", () => {
         idx = i;
         render();
@@ -29154,30 +29278,30 @@ function createListUI(title, items) {
               confirmDiv.innerHTML = `Cancelled.`;
             }
             confirmPending = false;
-            pendingDate = null;
+            pendingItem = null;
             return;
           }
           (async () => {
             try {
-              const res = await db.delete(pendingDate);
-              const ok = typeof res === "object" ? res.deleted > 0 : !!res;
+              const ok = await onDelete(pendingItem);
+              const stamp = pendingItem ? esc(String(getStamp(pendingItem))) : "";
               if (confirmDiv) {
                 confirmDiv.className = ok ? "ok" : "error";
-                confirmDiv.innerHTML = ok ? `Deleted <span class="stamp">${esc(pendingDate)}</span>.` : `Nothing deleted for <span class="stamp">${esc(pendingDate)}</span>.`;
+                confirmDiv.innerHTML = ok ? `Deleted <span class="stamp">${stamp}</span>.` : `Nothing deleted for <span class="stamp">${stamp}</span>.`;
               }
               if (ok) {
-                const idxToRemove = items.findIndex((it) => String(it.date) === String(pendingDate));
+                const keyToRemove = pendingItem ? getKey(pendingItem) : null;
+                const idxToRemove = items.findIndex((it) => getKey(it) === keyToRemove);
                 if (idxToRemove !== -1) {
                   items.splice(idxToRemove, 1);
                   idx = Math.min(idx, Math.max(0, items.length - 1));
                   if (items.length) {
                     render();
                   } else {
-                    print('<div class="muted">No entries left.</div>');
+                    print(emptyMessage);
                     shell.exit();
                   }
                 }
-              } else {
               }
             } catch (err) {
               const msg = err?.message || String(err);
@@ -29187,7 +29311,7 @@ function createListUI(title, items) {
               }
             } finally {
               confirmPending = false;
-              pendingDate = null;
+              pendingItem = null;
             }
           })();
           return;
@@ -29231,10 +29355,10 @@ function createListUI(title, items) {
           return;
         }
         confirmPending = true;
-        pendingDate = chosen.date;
+        pendingItem = chosen;
         confirmDiv = document.createElement("div");
         confirmDiv.className = "warn";
-        confirmDiv.innerHTML = `Delete <span class="stamp">${esc(pendingDate)}</span>? <span class="warn">y/n</span>`;
+        confirmDiv.innerHTML = `Delete <span class="stamp">${esc(String(getStamp(chosen)))}</span>? <span class="warn">y/n</span>`;
         output.appendChild(confirmDiv);
         scrollToBottom();
         e.preventDefault();
@@ -29244,12 +29368,12 @@ function createListUI(title, items) {
         if (!chosen) return;
         shell.suspend();
         (async () => {
-          const row = await db.get(chosen.date);
-          startEditor(shell, {
-            id: row?.id ?? chosen.date,
-            date: chosen.date,
-            initialContent: row?.content ?? ""
-          });
+          try {
+            await onOpen(chosen);
+          } catch (err) {
+            const msg = err?.message || String(err);
+            print(`<div class="error">${esc(msg)}</div>`);
+          }
         })();
         e.preventDefault();
       }
@@ -29333,6 +29457,7 @@ function printViewHelp() {
         <div><span class="kbd">view</span> \u2014 list latest 15 entries</div>
         <div><span class="kbd">view MM</span> \u2014 list entries for month <em>MM</em> in the most recent past year</div>
         <div><span class="kbd">view YYYY-MM</span> \u2014 list entries for that month and year</div>
+        <div><span class="kbd">view templates</span> \u2014 manage saved templates</div>
         <div><span class="kbd">view -help</span> \u2014 show this help</div>
     </div>`);
 }
@@ -29484,8 +29609,66 @@ register("view", async (argv = []) => {
     return;
   }
   const a0 = String(argv[0]).trim();
+  const a0Lower = a0.toLowerCase();
   if (a0 === "-help") {
     printViewHelp();
+    return;
+  }
+  if (a0Lower === "templates") {
+    if (!db || typeof db.listTemplates !== "function") {
+      print('<div class="error">Templates are not available in this environment.</div>');
+      return;
+    }
+    let templates = [];
+    try {
+      templates = await db.listTemplates();
+    } catch (err) {
+      const msg = err?.message || String(err);
+      print(`<div class="error">Unable to list templates: ${esc(msg)}</div>`);
+      return;
+    }
+    if (!templates || !templates.length) {
+      print('<div class="muted">No templates saved yet.</div>');
+      return;
+    }
+    shell.setPrompt("templates>");
+    shell.enter(createListUI("TEMPLATES", templates, {
+      getKey: (item) => String(item.name),
+      getStamp: (item) => item.name,
+      getPreview: (item) => {
+        const src = item.preview ?? item.content ?? "";
+        return src.replace(/\n/g, " ").slice(0, 120);
+      },
+      onOpen: async (item) => {
+        if (!db || typeof db.getTemplate !== "function") {
+          throw new Error("Template retrieval is not available.");
+        }
+        const tpl = await db.getTemplate(item.name);
+        const record = tpl && typeof tpl.content === "string" ? tpl : item;
+        if (!record || typeof record.content !== "string") {
+          throw new Error(`Template "${item.name}" not found.`);
+        }
+        startEditor(shell, {
+          mode: "template",
+          templateName: item.name,
+          id: item.name,
+          initialContent: record.content ?? "",
+          title: `Template: ${item.name}`
+        });
+      },
+      onDelete: async (item) => {
+        if (!db || typeof db.deleteTemplate !== "function") {
+          throw new Error("Template deletion is not available.");
+        }
+        const res = await db.deleteTemplate(item.name);
+        if (typeof res === "object" && res) {
+          if (typeof res.deleted === "number") return res.deleted > 0;
+          if ("ok" in res) return !!res.ok;
+        }
+        return !!res;
+      },
+      emptyMessage: '<div class="muted">No templates left.</div>'
+    }));
     return;
   }
   if (isYearMonth(a0)) {

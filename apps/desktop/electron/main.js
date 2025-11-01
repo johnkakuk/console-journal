@@ -142,6 +142,16 @@ function initDB() {
         RETURNING id, name, content, created_at, updated_at
     `);
     db._getTemplateByName = db.prepare(`SELECT * FROM templates WHERE name = ?`);
+    db._deleteTemplate = db.prepare(`DELETE FROM templates WHERE name = ?`);
+    db._listTemplates = db.prepare(`
+        SELECT name,
+               substr(content, 1, 200) AS preview,
+               content,
+               created_at,
+               updated_at
+        FROM templates
+        ORDER BY updated_at DESC, name ASC
+    `);
 }
 
 function createWindow() {
@@ -235,6 +245,15 @@ ipcMain.handle('template:upsert', (_evt, { name, content }) => {
 ipcMain.handle('template:getByName', (_evt, name) => {
     if (typeof name !== 'string' || !name.trim()) throw new Error('Bad template name');
     return db._getTemplateByName.get(name.trim()) || null;
+});
+
+ipcMain.handle('template:list', () => {
+    return db._listTemplates.all();
+});
+
+ipcMain.handle('template:delete', (_evt, name) => {
+    if (typeof name !== 'string' || !name.trim()) throw new Error('Bad template name');
+    return { deleted: db._deleteTemplate.run(name.trim()).changes };
 });
 
 ipcMain.handle('app:quit', () => {

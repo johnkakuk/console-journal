@@ -220,6 +220,50 @@ if (!db) {
                         req.onerror = () => reject(req.error);
                     });
                 });
+            },
+            async listTemplates(limit = 200) {
+                const max = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 500) : 200;
+                return txRunStore(TEMPLATE_STORE, 'readonly', store => {
+                    return new Promise((resolve, reject) => {
+                        const idx = store.index('updated_at');
+                        const out = [];
+                        const cursorReq = idx.openCursor(null, 'prev');
+                        cursorReq.onsuccess = () => {
+                            const cur = cursorReq.result;
+                            if (cur && out.length < max) {
+                                const value = cur.value || {};
+                                out.push({
+                                    ...value,
+                                    preview: (value.content || '').slice(0, 200)
+                                });
+                                cur.continue();
+                            } else {
+                                resolve(out);
+                            }
+                        };
+                        cursorReq.onerror = () => reject(cursorReq.error);
+                    });
+                });
+            },
+            async deleteTemplate(name) {
+                const trimmed = String(name ?? '').trim();
+                if (!trimmed) throw new Error('Template name required');
+                return txRunStore(TEMPLATE_STORE, 'readwrite', store => {
+                    return new Promise((resolve, reject) => {
+                        const getReq = store.get(trimmed);
+                        getReq.onsuccess = () => {
+                            const exists = !!getReq.result;
+                            if (!exists) {
+                                resolve({ deleted: 0 });
+                                return;
+                            }
+                            const delReq = store.delete(trimmed);
+                            delReq.onsuccess = () => resolve({ deleted: 1 });
+                            delReq.onerror = () => reject(delReq.error);
+                        };
+                        getReq.onerror = () => reject(getReq.error);
+                    });
+                });
             }
         };
         window.db = db;
@@ -241,7 +285,9 @@ if (!db) {
                 return !!(res && res.deleted);
             },
             saveTemplate: (name, content='') => invoke('template:upsert', { name, content }),
-            getTemplate:  (name)             => invoke('template:getByName', name)
+            getTemplate:  (name)             => invoke('template:getByName', name),
+            listTemplates: ()                => invoke('template:list'),
+            deleteTemplate: (name)           => invoke('template:delete', name)
         };
     }
 }
@@ -547,9 +593,37 @@ const scheduleCaret = () => {
 /* -----------------------------------------------------------------------------
  * List UI subprogram
  * --------------------------------------------------------------------------- */
-function createListUI(title, items) {
-    // items: [{ date, preview }]
+function createListUI(title, items, opts = {}) {
+    // items: [{ date, preview }] by default
     let idx = 0;
+    const {
+        getKey = (item) => String(item.date),
+        getStamp = (item) => String(item.date),
+        getPreview = (item) => {
+            const text = (item.preview ?? item.content ?? '').replace(/\n/g, ' ');
+            return text.slice(0, 120);
+        },
+        onOpen = async (item) => {
+            const key = getKey(item);
+            const row = await db.get(key);
+            startEditor(shell, {
+                id: row?.id ?? key,
+                date: key,
+                initialContent: row?.content ?? ''
+            });
+        },
+        onDelete = async (item) => {
+            const key = getKey(item);
+            const res = await db.delete(key);
+            if (typeof res === 'object' && res) {
+                if (typeof res.deleted === 'number') return res.deleted > 0;
+                if ('ok' in res) return !!res.ok;
+            }
+            return !!res;
+        },
+        emptyMessage = '<div class="muted">No entries left.</div>'
+    } = opts;
+
     const container = document.createElement('div');
     container.className = 'listui';
     const head = document.createElement('div');
@@ -558,7 +632,7 @@ function createListUI(title, items) {
     const ul = document.createElement('ul');
     ul.className = 'menu';
     let confirmPending = false;
-    let pendingDate = null;
+    let pendingItem = null;
     let confirmDiv = null;
 
     function render() {
@@ -566,14 +640,16 @@ function createListUI(title, items) {
         items.forEach((it, i) => {
             const li = document.createElement('li');
             if (i === idx) li.classList.add('active');
-            const date = esc(it.date);
-            const prev = esc(((it.preview || it.content || '').replace(/\n/g,' ').slice(0, 120)));
-            li.innerHTML = `<span class="stamp">${date} - </span>${prev}`;
-            // Click-to-select
+            const stampText = esc(String(getStamp(it)));
+            let preview = getPreview(it);
+            if (typeof preview !== 'string') preview = '';
+            const trimmed = preview.trim();
+            const previewHtml = trimmed ? esc(trimmed) : '';
+            const sep = previewHtml ? ' - ' : '';
+            li.innerHTML = `<span class="stamp">${stampText}</span>${sep}${previewHtml}`;
             li.addEventListener('click', () => { idx = i; render(); });
             ul.appendChild(li);
         });
-        // Keep the active row visible when navigating
         const activeEl = ul.querySelector('li.active');
         if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
     }
@@ -589,7 +665,6 @@ function createListUI(title, items) {
         onKey: (e) => {
             if (container.classList.contains('disabled')) return;
             if (!items.length) return;
-            // If a delete confirmation is pending, only accept y/n
             if (confirmPending) {
                 const k = e.key?.toLowerCase?.() || '';
                 if (k === 'y' || k === 'n') {
@@ -601,35 +676,32 @@ function createListUI(title, items) {
                             confirmDiv.innerHTML = `Cancelled.`;
                         }
                         confirmPending = false;
-                        pendingDate = null;
+                        pendingItem = null;
                         return;
                     }
                     (async () => {
                         try {
-                            const res = await db.delete(pendingDate);
-                            const ok = typeof res === 'object' ? (res.deleted > 0) : !!res;
+                            const ok = await onDelete(pendingItem);
+                            const stamp = pendingItem ? esc(String(getStamp(pendingItem))) : '';
                             if (confirmDiv) {
                                 confirmDiv.className = ok ? 'ok' : 'error';
                                 confirmDiv.innerHTML = ok
-                                    ? `Deleted <span class="stamp">${esc(pendingDate)}</span>.`
-                                    : `Nothing deleted for <span class="stamp">${esc(pendingDate)}</span>.`;
+                                    ? `Deleted <span class="stamp">${stamp}</span>.`
+                                    : `Nothing deleted for <span class="stamp">${stamp}</span>.`;
                             }
-                            // Keep list navigable after delete; only exit if list becomes empty
                             if (ok) {
-                                const idxToRemove = items.findIndex(it => String(it.date) === String(pendingDate));
+                                const keyToRemove = pendingItem ? getKey(pendingItem) : null;
+                                const idxToRemove = items.findIndex(it => getKey(it) === keyToRemove);
                                 if (idxToRemove !== -1) {
                                     items.splice(idxToRemove, 1);
                                     idx = Math.min(idx, Math.max(0, items.length - 1));
                                     if (items.length) {
-                                        render(); // re-render list, remain active (no suspend/exit)
+                                        render();
                                     } else {
-                                        print('<div class="muted">No entries left.</div>');
+                                        print(emptyMessage);
                                         shell.exit();
                                     }
-                                } // if nothing matched, keep list as-is and remain active
-                            } else {
-                                // Nothing deleted; keep list visible and active
-                                // (no suspend/exit)
+                                }
                             }
                         } catch (err) {
                             const msg = err?.message || String(err);
@@ -639,12 +711,11 @@ function createListUI(title, items) {
                             }
                         } finally {
                             confirmPending = false;
-                            pendingDate = null;
+                            pendingItem = null;
                         }
                     })();
                     return;
                 }
-                // If the user presses any other key, exit list view entirely
                 e.preventDefault();
                 e.stopPropagation();
                 shell.exit();
@@ -661,10 +732,10 @@ function createListUI(title, items) {
                 const chosen = items[idx];
                 if (!chosen) { e.preventDefault(); return; }
                 confirmPending = true;
-                pendingDate = chosen.date;
+                pendingItem = chosen;
                 confirmDiv = document.createElement('div');
                 confirmDiv.className = 'warn';
-                confirmDiv.innerHTML = `Delete <span class="stamp">${esc(pendingDate)}</span>? <span class="warn">y/n</span>`;
+                confirmDiv.innerHTML = `Delete <span class="stamp">${esc(String(getStamp(chosen)))}</span>? <span class="warn">y/n</span>`;
                 output.appendChild(confirmDiv);
                 scrollToBottom();
                 e.preventDefault();
@@ -673,16 +744,14 @@ function createListUI(title, items) {
             else if (e.key === 'Enter') {
                 const chosen = items[idx];
                 if (!chosen) return;
-                // Freeze the current list so it's static when returning from editor
                 shell.suspend();
-                // Fetch full content then open editor
                 (async () => {
-                    const row = await db.get(chosen.date);
-                    startEditor(shell, {
-                        id: row?.id ?? chosen.date,
-                        date: chosen.date,
-                        initialContent: row?.content ?? ''
-                    });
+                    try {
+                        await onOpen(chosen);
+                    } catch (err) {
+                        const msg = err?.message || String(err);
+                        print(`<div class="error">${esc(msg)}</div>`);
+                    }
                 })();
                 e.preventDefault();
             }
@@ -695,11 +764,8 @@ function createListUI(title, items) {
             confirmDiv.className = 'muted';
             confirmDiv.innerHTML = `Canceled`;
             output.appendChild(confirmDiv);
-
-            // Delete list from screen. Comment out to leave and just grey it out
-            // shell.exit();
         },
-        destroy: () => { container.remove() }
+        destroy: () => { container.remove(); }
     };
 }
 
@@ -787,6 +853,7 @@ function printViewHelp() {
         <div><span class="kbd">view</span> — list latest 15 entries</div>
         <div><span class="kbd">view MM</span> — list entries for month <em>MM</em> in the most recent past year</div>
         <div><span class="kbd">view YYYY-MM</span> — list entries for that month and year</div>
+        <div><span class="kbd">view templates</span> — manage saved templates</div>
         <div><span class="kbd">view -help</span> — show this help</div>
     </div>`);
 }
@@ -952,7 +1019,65 @@ register('view', async (argv = []) => {
         return;
     }
     const a0 = String(argv[0]).trim();
+    const a0Lower = a0.toLowerCase();
     if (a0 === '-help') { printViewHelp(); return; }
+    if (a0Lower === 'templates') {
+        if (!db || typeof db.listTemplates !== 'function') {
+            print('<div class="error">Templates are not available in this environment.</div>');
+            return;
+        }
+        let templates = [];
+        try {
+            templates = await db.listTemplates();
+        } catch (err) {
+            const msg = err?.message || String(err);
+            print(`<div class="error">Unable to list templates: ${esc(msg)}</div>`);
+            return;
+        }
+        if (!templates || !templates.length) {
+            print('<div class="muted">No templates saved yet.</div>');
+            return;
+        }
+        shell.setPrompt('templates>');
+        shell.enter(createListUI('TEMPLATES', templates, {
+            getKey: (item) => String(item.name),
+            getStamp: (item) => item.name,
+            getPreview: (item) => {
+                const src = item.preview ?? item.content ?? '';
+                return src.replace(/\n/g, ' ').slice(0, 120);
+            },
+            onOpen: async (item) => {
+                if (!db || typeof db.getTemplate !== 'function') {
+                    throw new Error('Template retrieval is not available.');
+                }
+                const tpl = await db.getTemplate(item.name);
+                const record = (tpl && typeof tpl.content === 'string') ? tpl : item;
+                if (!record || typeof record.content !== 'string') {
+                    throw new Error(`Template "${item.name}" not found.`);
+                }
+                startEditor(shell, {
+                    mode: 'template',
+                    templateName: item.name,
+                    id: item.name,
+                    initialContent: record.content ?? '',
+                    title: `Template: ${item.name}`
+                });
+            },
+            onDelete: async (item) => {
+                if (!db || typeof db.deleteTemplate !== 'function') {
+                    throw new Error('Template deletion is not available.');
+                }
+                const res = await db.deleteTemplate(item.name);
+                if (typeof res === 'object' && res) {
+                    if (typeof res.deleted === 'number') return res.deleted > 0;
+                    if ('ok' in res) return !!res.ok;
+                }
+                return !!res;
+            },
+            emptyMessage: '<div class="muted">No templates left.</div>'
+        }));
+        return;
+    }
     if (isYearMonth(a0)) {
         items = await db.listByYearMonth(a0);
         if (!items.length) { print(`<div class="muted">No entries for ${esc(a0)}.</div>`); return; }

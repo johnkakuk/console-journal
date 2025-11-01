@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('db', {
     delete:   (date)          => ipcRenderer.invoke('entry:deleteByDate', date),
     saveTemplate: (name, content) => ipcRenderer.invoke('template:upsert', { name, content }),
     getTemplate:  (name)          => ipcRenderer.invoke('template:getByName', name),
+    listTemplates: ()             => ipcRenderer.invoke('template:list'),
+    deleteTemplate: (name)        => ipcRenderer.invoke('template:delete', name),
 });
 
 contextBridge.exposeInMainWorld('electronAPI', {
