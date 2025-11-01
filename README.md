@@ -20,7 +20,7 @@ Type, reflect, and organize your thoughts in a glowing green terminal that feels
 - Markdown Editor (Writer)
 	- Built with CodeMirror 6
 	- Basic Markdown highlighting
-	- To-do list support (- [ ](#) and - [x](#) with clickable toggles)
+	- To-do list support (- [ ]() and - [x]() with clickable toggles)
 	- Persistent save to SQLite (for now)
 	- Typewriter mode (centered active line)
 	- CMD+S to save, CTRL+X to exit
@@ -34,7 +34,7 @@ Type, reflect, and organize your thoughts in a glowing green terminal that feels
 	- Non-interactive frozen views remain visible in the console
 	- SQLite Integration
 		- All journal entries are stored locally in a fast, file-based database located at:  
-			~/Library/Application Support/console-journal/app.db
+			\~/Library/Application Support/console-journal/app.db
 - Command History
 	- Recall previous commands using the ↑ / ↓ arrow keys.
 - Exporting
@@ -60,6 +60,9 @@ Type, reflect, and organize your thoughts in a glowing green terminal that feels
 - Theme Engine
 	- Switch between retro CRT themes and modern minimal aesthetics.
 - Windows/Linux ports
+
+
+
 
 ---- 
 
