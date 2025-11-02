@@ -1531,8 +1531,28 @@ export function startEditor(shell, opts = {}) {
     const docLen = cmView.state.doc.length;
     cmView.dispatch({ selection: { anchor: docLen }, scrollIntoView: true });
     requestAnimationFrame(() => {
-        const scroller = cmView.scrollDOM;
-        if (scroller) scroller.scrollTop = scroller.scrollHeight;
+        // Position the end of the document around ~35% from the top, accounting for bottom padding
+        const scroller = (typeof getScrollContainer === 'function') ? getScrollContainer(cmView) : cmView.scrollDOM;
+        if (!scroller) return;
+        const child = cmView.scrollDOM; // CM's internal scroller/content root
+
+        const ch = scroller.clientHeight || Math.max(0, window.innerHeight || document.documentElement.clientHeight || 0);
+
+        // Compute effective bottom of real content by subtracting any bottom padding present
+        const csContainer = getComputedStyle(scroller);
+        const csChild = child && child !== scroller ? getComputedStyle(child) : csContainer;
+        const padBottomContainer = parseFloat(csContainer.paddingBottom || '0') || 0;
+        const padBottomChild = parseFloat(csChild.paddingBottom || '0') || 0;
+        const padBottom = Math.max(padBottomContainer, padBottomChild);
+
+        const contentBottom = Math.max(0, scroller.scrollHeight - padBottom);
+        const target = Math.max(0, contentBottom - Math.round(ch * 0.35));
+        scroller.scrollTop = target;
+
+        // Let one more frame render, then re-enable typewriter/snap behavior
+        requestAnimationFrame(() => {
+            INIT_SCROLL_SUPPRESS.delete(cmView);
+        });
     });
 
     // Start listening for hotkeys (capture=true to win against browser defaults)

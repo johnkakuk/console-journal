@@ -27315,8 +27315,21 @@ function startEditor(shell2, opts = {}) {
   const docLen = cmView.state.doc.length;
   cmView.dispatch({ selection: { anchor: docLen }, scrollIntoView: true });
   requestAnimationFrame(() => {
-    const scroller = cmView.scrollDOM;
-    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    const scroller = typeof getScrollContainer === "function" ? getScrollContainer(cmView) : cmView.scrollDOM;
+    if (!scroller) return;
+    const child = cmView.scrollDOM;
+    const ch = scroller.clientHeight || Math.max(0, window.innerHeight || document.documentElement.clientHeight || 0);
+    const csContainer = getComputedStyle(scroller);
+    const csChild = child && child !== scroller ? getComputedStyle(child) : csContainer;
+    const padBottomContainer = parseFloat(csContainer.paddingBottom || "0") || 0;
+    const padBottomChild = parseFloat(csChild.paddingBottom || "0") || 0;
+    const padBottom = Math.max(padBottomContainer, padBottomChild);
+    const contentBottom = Math.max(0, scroller.scrollHeight - padBottom);
+    const target = Math.max(0, contentBottom - Math.round(ch * 0.35));
+    scroller.scrollTop = target;
+    requestAnimationFrame(() => {
+      INIT_SCROLL_SUPPRESS.delete(cmView);
+    });
   });
   window.addEventListener("keydown", onHotkey, true);
   const program = {
