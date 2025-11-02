@@ -158,9 +158,39 @@ body {
     }
 }
 
+/* Hacky shit */
+#screen.locked {
+    overflow: hidden !important;
+    padding: 0 15px !important;
+}
+
+.cm-scroller {
+    /* overflow: hidden; */
+    /* padding-top: 60vh !important;
+    padding-bottom: 120vh !important; */
+    height: 100% !important;
+}
+
+#writerStatus {
+    position: absolute;
+}
+
+#writerRoot {
+    height: calc(100% + 12px) !important;
+    margin-bottom: -15px !important;
+}
+
+#writerPane {
+    height: calc(100% - 3px);
+    padding: 0 16px 12px 16px;
+    margin-top: -30px;
+    height: calc(100% + 57px);
+}
+
 .cm-editor {
     max-width: calc(var(--editor-max-width) + 1ch + 30px);
-    margin: 30px auto;
+    margin: 0 auto 0 auto;
+    overflow: scroll;
 }
 
 .cm-content {
@@ -268,7 +298,7 @@ body {
 }
 
 .menu li.active {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
   outline: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
@@ -284,9 +314,18 @@ body {
   background: rgba(0,0,0,0.25);
 }
 
+.cm-line.todo-line {
+    padding-left: calc(var(--todo-prefix-ch, 0) * 1ch);
+    text-indent: calc(var(--todo-prefix-ch, 0) * -1ch);
+}
+
+.cm-line.todo-line .todo-text {
+    white-space: pre-wrap;
+}
+
 .cm-line.completed .todo-text {
-  opacity: 0.6;        /* example style */
-  text-decoration: line-through;
+    opacity: 0.6;        /* example style */
+    text-decoration: line-through;
 }
 
 /* ==== Console Output Wrapping =============================================== */
@@ -350,7 +389,8 @@ body {
 
 .template-toast {
     position: fixed;
-    left: 24px;
+    right: 24px;
+    left: auto;
     bottom: 24px;
     padding: 8px 12px;
     background: color-mix(in srgb, var(--panel-bg, #0b0b0b) 90%, rgba(0,0,0,0.85) 10%);
