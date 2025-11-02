@@ -4,6 +4,11 @@ const Database = require('better-sqlite3');
 const fs = require('fs');
 const { marked } = require('marked');
 
+marked.setOptions({
+    gfm: true,
+    breaks: true,
+});
+
 function readCssText(cssPath) {
     if (!cssPath) return '';
     const candidates = [];

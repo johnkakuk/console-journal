@@ -4,6 +4,11 @@ const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const { marked } = require('marked');
+
+marked.setOptions({
+    gfm: true,
+    breaks: true,
+});
 const puppeteer = require('puppeteer');
 
 const app = express();
