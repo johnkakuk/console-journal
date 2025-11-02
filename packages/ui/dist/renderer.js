@@ -25952,6 +25952,15 @@ function matchTemplateSchedule(schedule, dateStr) {
 }
 
 // packages/ui/js/editor.js
+function hasPointerUserEvent(update) {
+  if (!update || !Array.isArray(update.transactions)) return false;
+  return update.transactions.some((tr) => {
+    const userEvent = tr.annotation(Transaction.userEvent);
+    if (typeof userEvent !== "string") return false;
+    const lowered = userEvent.toLowerCase();
+    return lowered.includes("pointer") || lowered.includes("mouse");
+  });
+}
 var todoDecorationPlugin = ViewPlugin.fromClass(class {
   constructor(view) {
     this.decorations = this.buildDecorations(view);
@@ -25962,23 +25971,33 @@ var todoDecorationPlugin = ViewPlugin.fromClass(class {
   }
   buildDecorations(view) {
     const builder = new RangeSetBuilder();
+    const tabSize = view.state.tabSize ?? 4;
+    const measureColumns = (str) => {
+      let cols = 0;
+      for (const ch of str) cols += ch === "	" ? tabSize : 1;
+      return cols;
+    };
     for (let { from, to } of view.visibleRanges) {
       let startLine = view.state.doc.lineAt(from).number;
       let endLine = view.state.doc.lineAt(to).number;
       for (let i = startLine; i <= endLine; ++i) {
         const line = view.state.doc.line(i);
-        const match = line.text.match(/^\s*[-*]\s+\[( |x)\]/);
-        if (match) {
+        const todoPrefixMatch = line.text.match(/^(\s*[-*]\s+\[( |x)\]\s*)/);
+        if (todoPrefixMatch) {
+          const isChecked = todoPrefixMatch[2] === "x";
+          const prefixLen = measureColumns(todoPrefixMatch[1] ?? "");
+          const lineClasses = ["todo-line"];
+          if (isChecked) lineClasses.push("completed");
+          const lineSpec = { class: lineClasses.join(" ") };
+          lineSpec.attributes = { style: `--todo-prefix-ch:${prefixLen};` };
+          builder.add(
+            line.from,
+            line.from,
+            Decoration.line(lineSpec)
+          );
           const bracketStart = line.text.indexOf("[");
           const bracketEnd = line.text.indexOf("]", bracketStart);
           if (bracketStart !== -1 && bracketEnd !== -1) {
-            if (match[1] === "x") {
-              builder.add(
-                line.from,
-                line.from,
-                Decoration.line({ class: "completed" })
-              );
-            }
             const decoFrom = line.from + bracketStart;
             const decoTo = line.from + bracketEnd + 1;
             builder.add(
@@ -26058,11 +26077,12 @@ var todoPlugin = [
         const checked2 = match2[1] === "x";
         const newMark2 = checked2 ? " " : "x";
         const newText2 = line2.text.replace(
-          /^\s*([-*]\s+\[)( |x)(\])/,
-          (_, a, mark, c) => `${a}${newMark2}${c}`
+          /^(\s*[-*]\s+\[)( |x)(\])/,
+          (_, prefix, mark, suffix) => `${prefix}${newMark2}${suffix}`
         );
         const tr2 = view.state.update({
-          changes: { from: line2.from, to: line2.to, insert: newText2 }
+          changes: { from: line2.from, to: line2.to, insert: newText2 },
+          annotations: Transaction.userEvent.of("pointer.todo-toggle")
         });
         view.dispatch(tr2);
         return true;
@@ -26084,11 +26104,12 @@ var todoPlugin = [
       const checked = match[1] === "x";
       const newMark = checked ? " " : "x";
       const newText = line.text.replace(
-        /^\s*([-*]\s+\[)( |x)(\])/,
-        (_, a, mark, c) => `${a}${newMark}${c}`
+        /^(\s*[-*]\s+\[)( |x)(\])/,
+        (_, prefix, mark, suffix) => `${prefix}${newMark}${suffix}`
       );
       const tr = view.state.update({
-        changes: { from: line.from, to: line.to, insert: newText }
+        changes: { from: line.from, to: line.to, insert: newText },
+        annotations: Transaction.userEvent.of("pointer.todo-toggle")
       });
       view.dispatch(tr);
       return true;
@@ -26114,6 +26135,7 @@ function startEditor(shell2, opts = {}) {
     templateSchedule: initialSchedule
   };
   let cmView = null;
+  let savedSnapshot = "";
   let domSnapshot = null;
   const outputEl = document.getElementById("output");
   const inputWrapEl = document.getElementById("inputWrap");
@@ -26183,6 +26205,8 @@ function startEditor(shell2, opts = {}) {
     } else if (screenEl) {
       screenEl.appendChild(root);
     }
+    const screen2 = document.querySelector("#screen");
+    if (screen2) screen2.classList.add("locked");
   }
   let unsaved = false;
   function markUnsaved() {
@@ -26201,13 +26225,15 @@ function startEditor(shell2, opts = {}) {
     }
   }
   function focusEnd(view) {
-    const docLen = view.state.doc.length;
+    const docLen2 = view.state.doc.length;
     view.dispatch({
-      selection: { anchor: docLen },
+      selection: { anchor: docLen2 },
       scrollIntoView: true
     });
   }
   function restoreEditorDom() {
+    const screen2 = document.querySelector("#screen");
+    if (screen2) screen2.classList.remove("locked");
     const root = document.getElementById("writerRoot");
     if (root && root.parentElement) {
       root.parentElement.removeChild(root);
@@ -26307,8 +26333,9 @@ function startEditor(shell2, opts = {}) {
   ]);
   const snapOutOfView = EditorView.updateListener.of((update) => {
     if (!(update.docChanged || update.selectionSet)) return;
+    if (hasPointerUserEvent(update)) return;
     const view = update.view;
-    const scroller = document.querySelector("#screen");
+    const scroller = view.scrollDOM;
     if (!scroller) return;
     requestAnimationFrame(() => {
       const head = view.state.selection.main.head;
@@ -26389,13 +26416,15 @@ function startEditor(shell2, opts = {}) {
       this.dom = null;
     }
   });
-  function typewriterAdvanceScroll(screenEl2) {
+  function typewriterAdvanceScroll() {
     return ViewPlugin.fromClass(class {
       constructor(view) {
         this.view = view;
         this._scheduled = false;
         this._lastBottom = null;
         this._lineH = view.defaultLineHeight || 24;
+        this._suppressScroll = false;
+        this._curBottom = null;
         this.schedule();
       }
       schedule() {
@@ -26405,25 +26434,32 @@ function startEditor(shell2, opts = {}) {
           read: () => {
             const head = this.view.state.selection.main.head;
             const caret3 = this.view.coordsAtPos(head);
-            if (!caret3 || !screenEl2) {
+            const scroller = this.view.scrollDOM;
+            if (!caret3 || !scroller) {
               this._curBottom = null;
               return;
             }
-            const scrRect = screenEl2.getBoundingClientRect();
-            this._curBottom = caret3.bottom - scrRect.top + screenEl2.scrollTop;
+            const scrRect = scroller.getBoundingClientRect();
+            this._curBottom = caret3.bottom - scrRect.top + scroller.scrollTop;
           },
           write: () => {
             this._scheduled = false;
+            const scroller = this.view.scrollDOM;
             const cur = this._curBottom;
-            if (cur == null) return;
+            if (!scroller || cur == null) return;
             if (this._lastBottom == null) {
               this._lastBottom = cur;
               return;
             }
-            let dy = cur - this._lastBottom;
+            if (this._suppressScroll) {
+              this._lastBottom = cur;
+              this._suppressScroll = false;
+              return;
+            }
+            const dy = cur - this._lastBottom;
             const threshold = this._lineH * 0.6;
             if (dy > threshold) {
-              screenEl2.scrollTop += Math.round(dy);
+              scroller.scrollTop += Math.round(dy);
               this._lastBottom = cur;
             } else if (dy < -threshold) {
               this._lastBottom = cur;
@@ -26432,15 +26468,23 @@ function startEditor(shell2, opts = {}) {
         });
       }
       update(update) {
+        if (hasPointerUserEvent(update)) {
+          this._suppressScroll = true;
+        }
         if (update.selectionSet || update.docChanged || update.viewportChanged || update.scrollChanged || update.domChanged) {
           this.schedule();
         }
       }
     });
   }
-  const markDirtyListener = EditorView.updateListener.of((update) => {
-    if (update.docChanged) {
-      markUnsaved();
+  const unsavedTracker = EditorView.updateListener.of((update) => {
+    if (!(update && update.docChanged)) return;
+    const cur = update.state.doc.toString();
+    if (cur === savedSnapshot) {
+      if (unsaved) clearUnsaved();
+      state2.dirty = false;
+    } else {
+      if (!unsaved) markUnsaved();
       state2.dirty = true;
     }
   });
@@ -26506,7 +26550,53 @@ function startEditor(shell2, opts = {}) {
       }
     }
   ]);
+  function dynamicScrollerPadding() {
+    return ViewPlugin.fromClass(class {
+      constructor(view) {
+        this.view = view;
+        this.scroller = view.scrollDOM;
+        this.scroller.style.boxSizing = "content-box";
+        this._onWindowResize = () => this.updatePads();
+        this._ro = new ResizeObserver(() => this.updatePads());
+        this._ro.observe(this.scroller);
+        window.addEventListener("resize", this._onWindowResize, { passive: true });
+        this.updatePads();
+      }
+      updatePads() {
+        const h = this.scroller.clientHeight || 0;
+        const pad = Math.max(0, Math.round(h * 0.5));
+        this.scroller.style.paddingTop = pad + "px";
+        this.scroller.style.paddingBottom = pad + "px";
+      }
+      update(update) {
+        if (update.viewportChanged || update.domChanged) {
+          this.updatePads();
+        }
+      }
+      destroy() {
+        try {
+          this._ro && this._ro.disconnect();
+        } catch {
+        }
+        window.removeEventListener("resize", this._onWindowResize);
+      }
+    });
+  }
   function buildExtensions() {
+    const insertTodo = (view) => {
+      const spec = view.state.changeByRange((range) => {
+        const insertText = "- [ ] ";
+        return {
+          changes: { from: range.from, to: range.to, insert: insertText },
+          range: EditorSelection.cursor(range.from + insertText.length)
+        };
+      });
+      view.dispatch(view.state.update(spec, {
+        scrollIntoView: true,
+        userEvent: "input"
+      }));
+      return true;
+    };
     const saveExitKeymap = keymap.of([
       { key: "Mod-s", preventDefault: true, run: () => {
         save();
@@ -26515,12 +26605,12 @@ function startEditor(shell2, opts = {}) {
       { key: isMac ? "Ctrl-x" : "Ctrl-q", preventDefault: true, run: () => {
         exit();
         return true;
-      } }
+      } },
+      { key: "Mod-t", preventDefault: true, run: insertTodo }
     ]);
-    const padTheme = EditorView.theme({ ".cm-scroller": { paddingBottom: "80vh" } });
     return [
       retroTheme,
-      padTheme,
+      dynamicScrollerPadding(),
       drawSelection(),
       // === Active line highlight mode ============================================
       // Current: use a single visual-row overlay (safe measured plugin).
@@ -26528,9 +26618,9 @@ function startEditor(shell2, opts = {}) {
       // below and uncomment the `highlightActiveLine()` line here. Also restore the
       // .cm-activeLine background in the theme above.
       activeRowPlugin,
-      typewriterAdvanceScroll(screenEl),
+      typewriterAdvanceScroll(),
       snapOutOfView,
-      markDirtyListener,
+      unsavedTracker,
       history(),
       todoPlugin,
       indentConfig,
@@ -26551,16 +26641,17 @@ function startEditor(shell2, opts = {}) {
       EditorView.lineWrapping
     ];
   }
-  function flashSaveBar() {
+  function showToast(message, id2 = "writerToast") {
     try {
-      const prev = document.getElementById("saveFlash");
+      const prev = id2 ? document.getElementById(id2) : null;
       if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
-      const bar = document.createElement("div");
-      bar.id = "saveFlash";
-      bar.className = "save-flash";
-      (document.body || document.documentElement).appendChild(bar);
-      bar.addEventListener("animationend", () => {
-        if (bar && bar.parentElement) bar.parentElement.removeChild(bar);
+      const toast = document.createElement("div");
+      if (id2) toast.id = id2;
+      toast.className = "template-toast";
+      toast.textContent = message;
+      (document.body || document.documentElement).appendChild(toast);
+      toast.addEventListener("animationend", () => {
+        if (toast && toast.parentElement) toast.parentElement.removeChild(toast);
       }, { once: true });
     } catch (_) {
     }
@@ -26576,6 +26667,7 @@ function startEditor(shell2, opts = {}) {
     try {
       if (window.db && typeof window.db.upsert === "function") {
         await window.db.upsert(state2.date, text);
+        savedSnapshot = text;
       }
     } catch (err) {
       const msg = err?.message || String(err);
@@ -26588,30 +26680,11 @@ function startEditor(shell2, opts = {}) {
       return;
     }
     clearUnsaved();
-    flashSaveBar();
+    showToast("Saved");
     state2.dirty = false;
-    const status = document.getElementById("writerStatus");
-    const message = `Saved (${summary()})`;
-    if (status) {
-      status.textContent = message;
-    } else {
-      ok(message);
-    }
   }
   function showTemplateSavedToast() {
-    try {
-      const prev = document.getElementById("templateToast");
-      if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
-      const toast = document.createElement("div");
-      toast.id = "templateToast";
-      toast.className = "template-toast";
-      toast.textContent = "Template Saved";
-      (document.body || document.documentElement).appendChild(toast);
-      toast.addEventListener("animationend", () => {
-        if (toast && toast.parentElement) toast.parentElement.removeChild(toast);
-      }, { once: true });
-    } catch (_) {
-    }
+    showToast("Template Saved", "templateToast");
   }
   function showTemplateModal({ onSave, onCancel, initialValue = "", initialSchedule: initialSchedule2 = null } = {}) {
     const prev = document.getElementById("templateModal");
@@ -27064,15 +27137,9 @@ function startEditor(shell2, opts = {}) {
         state2.title = `Template: ${name2}`;
         const headerEl = document.querySelector(".writer-header");
         if (headerEl) headerEl.textContent = `TEMPLATE - ${name2}`;
+        if (cmView) savedSnapshot = cmView.state.doc.toString();
         clearUnsaved();
-        flashSaveBar();
         state2.dirty = false;
-        const status = document.getElementById("writerStatus");
-        if (status) {
-          status.textContent = `Template "${name2}" saved (${summary()})`;
-        } else {
-          ok(`Template "${name2}" saved (${summary()})`);
-        }
         showTemplateSavedToast();
       },
       initialValue: isTemplate ? state2.templateName ?? templateName ?? "" : "",
@@ -27223,12 +27290,18 @@ function startEditor(shell2, opts = {}) {
   mountEditorDom();
   const paneEl = document.getElementById("writerPane");
   const startDoc = state2.buffer.join("\n");
+  savedSnapshot = startDoc;
   cmView = new EditorView({
     state: EditorState.create({ doc: startDoc, extensions: buildExtensions() }),
     parent: paneEl
   });
   cmView.focus();
-  focusEnd(cmView);
+  const docLen = cmView.state.doc.length;
+  cmView.dispatch({ selection: { anchor: docLen }, scrollIntoView: true });
+  requestAnimationFrame(() => {
+    const scroller = cmView.scrollDOM;
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+  });
   window.addEventListener("keydown", onHotkey, true);
   const program = {
     async consume(_line) {

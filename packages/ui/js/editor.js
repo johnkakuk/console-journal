@@ -1,5 +1,5 @@
 /* ==== editor.js — Minimal inline writer (subprogram) ======================= */
-import { EditorState, RangeSetBuilder } from '@codemirror/state';
+import { EditorState, RangeSetBuilder, Transaction, EditorSelection } from '@codemirror/state';
 import { EditorView, keymap, drawSelection, highlightActiveLine, Decoration, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
 import { defaultKeymap, indentMore, indentLess, history, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
@@ -7,6 +7,16 @@ import { indentOnInput, indentUnit, syntaxHighlighting, HighlightStyle } from '@
 import { tags as t } from '@lezer/highlight';
 import { search, searchKeymap, openSearchPanel, findNext, findPrevious } from '@codemirror/search';
 import { normalizeTemplateSchedule, cloneTemplateSchedule, isISODate } from './schedule.js';
+
+function hasPointerUserEvent(update) {
+    if (!update || !Array.isArray(update.transactions)) return false;
+    return update.transactions.some(tr => {
+        const userEvent = tr.annotation(Transaction.userEvent);
+        if (typeof userEvent !== 'string') return false;
+        const lowered = userEvent.toLowerCase();
+        return lowered.includes('pointer') || lowered.includes('mouse');
+    });
+}
 
 // Widget for clickable overlay on the [ ] or [x] in todo list
 class TodoClickTargetWidget extends WidgetType {
@@ -37,26 +47,35 @@ const todoDecorationPlugin = ViewPlugin.fromClass(class {
     }
     buildDecorations(view) {
         const builder = new RangeSetBuilder();
+        const tabSize = view.state.tabSize ?? 4;
+        const measureColumns = (str) => {
+            let cols = 0;
+            for (const ch of str) cols += (ch === '\t') ? tabSize : 1;
+            return cols;
+        };
         for (let { from, to } of view.visibleRanges) {
             let startLine = view.state.doc.lineAt(from).number;
             let endLine = view.state.doc.lineAt(to).number;
             for (let i = startLine; i <= endLine; ++i) {
                 const line = view.state.doc.line(i);
-                const match = line.text.match(/^\s*[-*]\s+\[( |x)\]/);
-                if (match) {
+                const todoPrefixMatch = line.text.match(/^(\s*[-*]\s+\[( |x)\]\s*)/);
+                if (todoPrefixMatch) {
+                    const isChecked = todoPrefixMatch[2] === 'x';
+                    const prefixLen = measureColumns(todoPrefixMatch[1] ?? '');
+                    const lineClasses = ['todo-line'];
+                    if (isChecked) lineClasses.push('completed');
+                    const lineSpec = { class: lineClasses.join(' ') };
+                    lineSpec.attributes = { style: `--todo-prefix-ch:${prefixLen};` };
+                    builder.add(
+                        line.from,
+                        line.from,
+                        Decoration.line(lineSpec)
+                    );
+
                     const bracketStart = line.text.indexOf('[');
                     const bracketEnd = line.text.indexOf(']', bracketStart);
                     if (bracketStart !== -1 && bracketEnd !== -1) {
-                        // 1) If completed, add the line decoration first so builder order is monotonic
-                        if (match[1] === 'x') {
-                            builder.add(
-                                line.from,
-                                line.from,
-                                Decoration.line({ class: 'completed' })
-                            );
-                        }
-
-                        // 2) Bracket click-target span
+                        // 1) Bracket click-target span
                         const decoFrom = line.from + bracketStart;
                         const decoTo = line.from + bracketEnd + 1;
                         builder.add(
@@ -65,7 +84,7 @@ const todoDecorationPlugin = ViewPlugin.fromClass(class {
                             Decoration.mark({ class: 'todo-click-target' })
                         );
 
-                        // 3) Trailing text span after "]"
+                        // 2) Trailing text span after "]"
                         // Skip spaces after closing bracket so they belong to the left segment (the brackets)
                         const spaceAfter = line.text.slice(bracketEnd + 1).match(/^\s*/)[0].length;
                         const contentStart = line.from + bracketEnd + 1 + spaceAfter;
@@ -156,11 +175,12 @@ const todoPlugin = [
                 const checked = match[1] === 'x';
                 const newMark = checked ? ' ' : 'x';
                 const newText = line.text.replace(
-                    /^\s*([-*]\s+\[)( |x)(\])/,
-                    (_, a, mark, c) => `${a}${newMark}${c}`
+                    /^(\s*[-*]\s+\[)( |x)(\])/,
+                    (_, prefix, mark, suffix) => `${prefix}${newMark}${suffix}`
                 );
                 const tr = view.state.update({
-                    changes: { from: line.from, to: line.to, insert: newText }
+                    changes: { from: line.from, to: line.to, insert: newText },
+                    annotations: Transaction.userEvent.of('pointer.todo-toggle')
                 });
                 view.dispatch(tr);
                 return true;
@@ -192,11 +212,12 @@ const todoPlugin = [
             const checked = match[1] === 'x';
             const newMark = checked ? ' ' : 'x';
             const newText = line.text.replace(
-                /^\s*([-*]\s+\[)( |x)(\])/,
-                (_, a, mark, c) => `${a}${newMark}${c}`
+                /^(\s*[-*]\s+\[)( |x)(\])/,
+                (_, prefix, mark, suffix) => `${prefix}${newMark}${suffix}`
             );
             const tr = view.state.update({
-                changes: { from: line.from, to: line.to, insert: newText }
+                changes: { from: line.from, to: line.to, insert: newText },
+                annotations: Transaction.userEvent.of('pointer.todo-toggle')
             });
             view.dispatch(tr);
             return true;
@@ -233,6 +254,8 @@ export function startEditor(shell, opts = {}) {
 
     // CodeMirror editor view
     let cmView = null;
+    // Tracks the exact text at the last save so we can clear the '*' when undoing back to saved state
+    let savedSnapshot = '';
 
     // Snapshot of console DOM we will restore on exit
     let domSnapshot = null;
@@ -327,6 +350,10 @@ export function startEditor(shell, opts = {}) {
         } else if (screenEl) {
             screenEl.appendChild(root);
         }
+
+        // Add the 'locked' class to #screen after mounting editor window
+        const screen = document.querySelector('#screen');
+        if (screen) screen.classList.add('locked');
     }
 
     // Track unsaved changes in the banner (writer header)
@@ -360,6 +387,9 @@ export function startEditor(shell, opts = {}) {
 
     // Restore console UI from snapshot and remove writer UI
     function restoreEditorDom() {
+        // Remove the 'locked' class from #screen before restoring editor window
+        const screen = document.querySelector('#screen');
+        if (screen) screen.classList.remove('locked');
         const root = document.getElementById('writerRoot');
         if (root && root.parentElement) {
             root.parentElement.removeChild(root);
@@ -451,11 +481,12 @@ export function startEditor(shell, opts = {}) {
     ]);
 
 
-    // When the active line leaves the #screen viewport, snap it back to the nearer edge
+    // When the active line leaves the scroller viewport, snap it back to the nearer edge
     const snapOutOfView = EditorView.updateListener.of((update) => {
         if (!(update.docChanged || update.selectionSet)) return;
+        if (hasPointerUserEvent(update)) return;
         const view = update.view;
-        const scroller = document.querySelector('#screen');
+        const scroller = view.scrollDOM; // Use CM's internal scroller so CSS changes don't break us
         if (!scroller) return;
 
         // Defer to avoid reading layout during CM's update
@@ -470,15 +501,13 @@ export function startEditor(shell, opts = {}) {
             if (!above && !below) return; // already in view
 
             const lineH = view.defaultLineHeight || 24;
-            const pad = lineH * 2; // keep a little breathing room from the edge
+            const pad = lineH * 2; // breathing room from the edge
 
             if (above) {
-                // Snap so the caret sits a bit below the top edge
-                const delta = (caret.top - (scr.top + pad));
+                const delta = caret.top - (scr.top + pad);
                 scroller.scrollTop += delta;
             } else if (below) {
-                // Snap so the caret sits a bit above the bottom edge
-                const delta = (caret.bottom - (scr.bottom - pad));
+                const delta = caret.bottom - (scr.bottom - pad);
                 scroller.scrollTop += delta;
             }
         });
@@ -548,13 +577,15 @@ export function startEditor(shell, opts = {}) {
     });
 
     // Typewriter: pixel-accurate scroll advance when caret moves to a new visual row (no drift)
-    function typewriterAdvanceScroll(screenEl) {
+    function typewriterAdvanceScroll() {
         return ViewPlugin.fromClass(class {
             constructor(view) {
                 this.view = view;
                 this._scheduled = false;
-                this._lastBottom = null;   // last caret bottom (px) relative to screenEl scroll
+                this._lastBottom = null;   // last caret bottom (px) relative to scroller
                 this._lineH = view.defaultLineHeight || 24;
+                this._suppressScroll = false;
+                this._curBottom = null;
                 this.schedule();
             }
             schedule() {
@@ -564,39 +595,46 @@ export function startEditor(shell, opts = {}) {
                     read: () => {
                         const head = this.view.state.selection.main.head;
                         const caret = this.view.coordsAtPos(head);
-                        if (!caret || !screenEl) {
+                        const scroller = this.view.scrollDOM;
+                        if (!caret || !scroller) {
                             this._curBottom = null;
                             return;
                         }
-                        const scrRect = screenEl.getBoundingClientRect();
+                        const scrRect = scroller.getBoundingClientRect();
                         // caret bottom in scroller coordinates (include current scrollTop)
-                        this._curBottom = (caret.bottom - scrRect.top) + screenEl.scrollTop;
+                        this._curBottom = (caret.bottom - scrRect.top) + scroller.scrollTop;
                     },
                     write: () => {
                         this._scheduled = false;
+                        const scroller = this.view.scrollDOM;
                         const cur = this._curBottom;
-                        if (cur == null) return;
+                        if (!scroller || cur == null) return;
                         if (this._lastBottom == null) {
                             this._lastBottom = cur;
                             return;
                         }
+                        if (this._suppressScroll) {
+                            this._lastBottom = cur;
+                            this._suppressScroll = false;
+                            return;
+                        }
                         // Positive delta when caret advanced to a lower visual row (enter or soft-wrap)
-                        let dy = cur - this._lastBottom;
-                        // Ignore tiny jitter; only act when we clearly crossed to next row
-                        const threshold = this._lineH * 0.6;
+                        const dy = cur - this._lastBottom;
+                        const threshold = this._lineH * 0.6; // ignore jitter
                         if (dy > threshold) {
-                            // Scroll by the measured delta (rounded to pixel) to avoid fractional drift
-                            screenEl.scrollTop += Math.round(dy);
+                            scroller.scrollTop += Math.round(dy);
                             this._lastBottom = cur;
                         } else if (dy < -threshold) {
-                            // Caret moved up (e.g., arrow up); resync baseline without scrolling
+                            // Caret moved up (e.g. arrow up); resync baseline
                             this._lastBottom = cur;
                         }
                     }
                 });
             }
             update(update) {
-                // Reschedule on any user action that may shift caret position/layout
+                if (hasPointerUserEvent(update)) {
+                    this._suppressScroll = true;
+                }
                 if (update.selectionSet || update.docChanged || update.viewportChanged || update.scrollChanged || update.domChanged) {
                     this.schedule();
                 }
@@ -604,9 +642,15 @@ export function startEditor(shell, opts = {}) {
         });
     }
 
-    const markDirtyListener = EditorView.updateListener.of((update) => {
-        if (update.docChanged) {
-            markUnsaved();
+    // Keep the banner '*' in sync with the real saved state, even across undo/redo
+    const unsavedTracker = EditorView.updateListener.of((update) => {
+        if (!(update && update.docChanged)) return;
+        const cur = update.state.doc.toString();
+        if (cur === savedSnapshot) {
+            if (unsaved) clearUnsaved();
+            state.dirty = false;
+        } else {
+            if (!unsaved) markUnsaved();
             state.dirty = true;
         }
     });
@@ -680,18 +724,74 @@ export function startEditor(shell, opts = {}) {
         }
     ]);
 
+    // Dynamically maintain top/bottom padding in the CodeMirror scroller based on its height.
+    function dynamicScrollerPadding() {
+        return ViewPlugin.fromClass(class {
+            constructor(view) {
+                this.view = view;
+                this.scroller = view.scrollDOM;
+                // Ensure the scroller uses content-box padding
+                this.scroller.style.boxSizing = 'content-box';
+                // Bind handlers
+                this._onWindowResize = () => this.updatePads();
+                // Observe size changes of the scroller (including when the editor mounts or container resizes)
+                this._ro = new ResizeObserver(() => this.updatePads());
+                this._ro.observe(this.scroller);
+                window.addEventListener('resize', this._onWindowResize, { passive: true });
+                this.updatePads();
+            }
+
+            updatePads() {
+                const h = this.scroller.clientHeight || 0;
+                // Place the first/last lines roughly within the inner 50% band:
+                // keep ~25% top and ~25% bottom breathing room.
+                const pad = Math.max(0, Math.round(h * 0.5));
+                // Apply equal padding above and below
+                this.scroller.style.paddingTop = pad + 'px';
+                this.scroller.style.paddingBottom = pad + 'px';
+            }
+
+            update(update) {
+                // If layout/viewport changed, refresh padding (cheap)
+                if (update.viewportChanged || update.domChanged) {
+                    this.updatePads();
+                }
+            }
+
+            destroy() {
+                try { this._ro && this._ro.disconnect(); } catch {}
+                window.removeEventListener('resize', this._onWindowResize);
+            }
+        });
+    }
+
     function buildExtensions() {
+        const insertTodo = (view) => {
+            const spec = view.state.changeByRange(range => {
+                const insertText = '- [ ] ';
+                return {
+                    changes: { from: range.from, to: range.to, insert: insertText },
+                    range: EditorSelection.cursor(range.from + insertText.length)
+                };
+            });
+            view.dispatch(view.state.update(spec, {
+                scrollIntoView: true,
+                userEvent: 'input'
+            }));
+            return true;
+        };
+
         const saveExitKeymap = keymap.of([
             { key: 'Mod-s', preventDefault: true, run: () => { save(); return true; } },
             { key: isMac ? 'Ctrl-x' : 'Ctrl-q', preventDefault: true, run: () => { exit(); return true; } },
+            { key: 'Mod-t', preventDefault: true, run: insertTodo }
         ]);
 
         // Add some bottom padding to simulate scrollPastEnd effect
-        const padTheme = EditorView.theme({ '.cm-scroller': { paddingBottom: '80vh' } });
 
         return [
             retroTheme,
-            padTheme,
+            dynamicScrollerPadding(),
             drawSelection(),
             // === Active line highlight mode ============================================
             // Current: use a single visual-row overlay (safe measured plugin).
@@ -699,9 +799,9 @@ export function startEditor(shell, opts = {}) {
             // below and uncomment the `highlightActiveLine()` line here. Also restore the
             // .cm-activeLine background in the theme above.
             activeRowPlugin,
-            typewriterAdvanceScroll(screenEl),
+            typewriterAdvanceScroll(),
             snapOutOfView,
-            markDirtyListener,
+            unsavedTracker,
             history(),
             todoPlugin,
             indentConfig,
@@ -723,17 +823,18 @@ export function startEditor(shell, opts = {}) {
         ];
     }
 
-    // Visual feedback: quick save sweep bar along the bottom
-    function flashSaveBar() {
+    // Toast helper reused across save flows to align with global notifications
+    function showToast(message, id = 'writerToast') {
         try {
-            const prev = document.getElementById('saveFlash');
+            const prev = id ? document.getElementById(id) : null;
             if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
-            const bar = document.createElement('div');
-            bar.id = 'saveFlash';
-            bar.className = 'save-flash';
-            (document.body || document.documentElement).appendChild(bar);
-            bar.addEventListener('animationend', () => {
-                if (bar && bar.parentElement) bar.parentElement.removeChild(bar);
+            const toast = document.createElement('div');
+            if (id) toast.id = id;
+            toast.className = 'template-toast';
+            toast.textContent = message;
+            (document.body || document.documentElement).appendChild(toast);
+            toast.addEventListener('animationend', () => {
+                if (toast && toast.parentElement) toast.parentElement.removeChild(toast);
             }, { once: true });
         } catch (_) {}
     }
@@ -750,6 +851,7 @@ export function startEditor(shell, opts = {}) {
         try {
             if (window.db && typeof window.db.upsert === 'function') {
                 await window.db.upsert(state.date, text);
+                savedSnapshot = text;
             }
         } catch (err) {
             const msg = err?.message || String(err);
@@ -762,31 +864,12 @@ export function startEditor(shell, opts = {}) {
             return;
         }
         clearUnsaved();
-        flashSaveBar();
+        showToast('Saved');
         state.dirty = false;
-
-        const status = document.getElementById('writerStatus');
-        const message = `Saved (${summary()})`;
-        if (status) {
-            status.textContent = message;
-        } else {
-            ok(message);
-        }
     }
 
     function showTemplateSavedToast() {
-        try {
-            const prev = document.getElementById('templateToast');
-            if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
-            const toast = document.createElement('div');
-            toast.id = 'templateToast';
-            toast.className = 'template-toast';
-            toast.textContent = 'Template Saved';
-            (document.body || document.documentElement).appendChild(toast);
-            toast.addEventListener('animationend', () => {
-                if (toast && toast.parentElement) toast.parentElement.removeChild(toast);
-            }, { once: true });
-        } catch (_) {}
+        showToast('Template Saved', 'templateToast');
     }
 
     function showTemplateModal({ onSave, onCancel, initialValue = '', initialSchedule = null } = {}) {
@@ -1265,15 +1348,9 @@ export function startEditor(shell, opts = {}) {
                 state.title = `Template: ${name}`;
                 const headerEl = document.querySelector('.writer-header');
                 if (headerEl) headerEl.textContent = `TEMPLATE - ${name}`;
+                if (cmView) savedSnapshot = cmView.state.doc.toString();
                 clearUnsaved();
-                flashSaveBar();
                 state.dirty = false;
-                const status = document.getElementById('writerStatus');
-                if (status) {
-                    status.textContent = `Template "${name}" saved (${summary()})`;
-                } else {
-                    ok(`Template "${name}" saved (${summary()})`);
-                }
                 showTemplateSavedToast();
             },
             initialValue: isTemplate ? ((state.templateName ?? templateName) ?? '') : '',
@@ -1433,12 +1510,19 @@ export function startEditor(shell, opts = {}) {
     // Mount CodeMirror editor into our pane
     const paneEl = document.getElementById('writerPane');
     const startDoc = state.buffer.join('\n');
+    savedSnapshot = startDoc;
     cmView = new EditorView({
         state: EditorState.create({ doc: startDoc, extensions: buildExtensions() }),
         parent: paneEl
     });
     cmView.focus();
-    focusEnd(cmView);
+    // Move cursor to end and scroll to bottom when opening a file
+    const docLen = cmView.state.doc.length;
+    cmView.dispatch({ selection: { anchor: docLen }, scrollIntoView: true });
+    requestAnimationFrame(() => {
+        const scroller = cmView.scrollDOM;
+        if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    });
 
     // Start listening for hotkeys (capture=true to win against browser defaults)
     window.addEventListener('keydown', onHotkey, true);
