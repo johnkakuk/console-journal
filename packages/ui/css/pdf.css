@@ -146,15 +146,12 @@ tr:nth-child(2n) {
 
 /* Horizontal rule */
 hr {
-    height: .25em;
+    height: .125em;
     padding: 0;
+    width: 25%;
     margin: 24px 0;
     background-color: var(--border);
     border: 0;
-    page-break-after: always;
-}
-
-hr:last-of-type {
     page-break-after: avoid;
 }
 
@@ -200,4 +197,11 @@ pre, table, blockquote { page-break-inside: avoid; }
 /* Headings spacing at top of page */
 @media print {
     h1, h2, h3 { break-after: avoid-page; }
+}
+
+.stamp {
+    display: block;
+    break-before: page; /* modern replacement */
+    page-break-before: always; /* legacy fallback */
+    margin-bottom: -1em;
 }

@@ -31523,14 +31523,14 @@ async function gatherEntriesForExport(selector) {
   return Array.isArray(rows) ? rows.slice().reverse() : [];
 }
 function buildMarkdownExport(rows) {
-  if (!rows || !rows.length) return "Console Journal Export\n\n_No entries._\n";
+  if (!rows || !rows.length) return "_No entries._\n";
   const sorted = rows.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  const parts = ["Console Journal Export\n"];
+  const parts = [];
   for (const r of sorted) {
     const date = String(r.date || "").trim();
     const content2 = (r.content ?? "").replace(/\r\n/g, "\n");
     parts.push(`
-${date}
+<span class="stamp">${date}</span>
 
 ${content2}
 

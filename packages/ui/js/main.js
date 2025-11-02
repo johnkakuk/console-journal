@@ -1366,14 +1366,14 @@ async function gatherEntriesForExport(selector) {
 }
 
 function buildMarkdownExport(rows) {
-    if (!rows || !rows.length) return 'Console Journal Export\n\n_No entries._\n';
+    if (!rows || !rows.length) return '_No entries._\n';
     // Ensure chronological order by date ascending
     const sorted = rows.slice().sort((a,b) => String(a.date).localeCompare(String(b.date)));
-    const parts = ['Console Journal Export\n'];
+    const parts = [];
     for (const r of sorted) {
         const date = String(r.date || '').trim();
         const content = (r.content ?? '').replace(/\r\n/g, '\n');
-        parts.push(`\n${date}\n\n${content}\n\n---\n`);
+        parts.push(`\n<span class="stamp">${date}</span>\n\n${content}\n\n---\n`);
     }
     return parts.join('');
 }
