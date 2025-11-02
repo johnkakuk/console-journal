@@ -439,7 +439,7 @@ export function startEditor(shell, opts = {}) {
             fontSize: 'var(--editor-font-size)',
             lineHeight: 'var(--editor-line-height)'
         },
-        '.cm-scroller': { fontFamily: 'inherit' },
+        '.cm-scroller': { fontFamily: 'inherit', height: '100%', overflow: 'auto' },
         '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--editor-caret)' },
         '&.cm-editor.cm-focused': { outline: 'none' },
         // Disable default paragraph-wide highlight; we’ll draw a single-row overlay instead
@@ -481,12 +481,24 @@ export function startEditor(shell, opts = {}) {
     ]);
 
 
+    // Helper to find the actual scroll container (for typewriter/active-line logic)
+    function getScrollContainer(view) {
+        let el = view.scrollDOM;
+        while (el) {
+            const cs = getComputedStyle(el);
+            const oy = cs.overflowY || cs.overflow || '';
+            if (oy.includes('auto') || oy.includes('scroll')) return el;
+            el = el.parentElement;
+        }
+        return view.scrollDOM;
+    }
+
     // When the active line leaves the scroller viewport, snap it back to the nearer edge
     const snapOutOfView = EditorView.updateListener.of((update) => {
         if (!(update.docChanged || update.selectionSet)) return;
         if (hasPointerUserEvent(update)) return;
         const view = update.view;
-        const scroller = view.scrollDOM; // Use CM's internal scroller so CSS changes don't break us
+        const scroller = getScrollContainer(view);
         if (!scroller) return;
 
         // Defer to avoid reading layout during CM's update
@@ -524,11 +536,13 @@ export function startEditor(shell, opts = {}) {
             this.dom.style.right = '0';
             this.dom.style.pointerEvents = 'none';
             this.dom.style.zIndex = '1';
-            // Ensure the scrollDOM is relatively positioned so absolute works
-            const scroller = view.scrollDOM;
-            const cs = getComputedStyle(scroller);
-            if (cs.position === 'static') scroller.style.position = 'relative';
-            scroller.appendChild(this.dom);
+            // Ensure the scroll container is relatively positioned so absolute works
+            const container = getScrollContainer(view);
+            const cs = getComputedStyle(container);
+            if (cs.position === 'static') container.style.position = 'relative';
+            container.appendChild(this.dom);
+            this._onResize = () => this.schedule();
+            window.addEventListener('resize', this._onResize, { passive: true });
             this._scheduled = false;
             this._top = 0;
             this._height = 0;
@@ -546,8 +560,9 @@ export function startEditor(shell, opts = {}) {
                         this._visible = false;
                         return;
                     }
-                    const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
-                    this._top = caret.top - scrollerRect.top + this.view.scrollDOM.scrollTop;
+                    const container = getScrollContainer(this.view);
+                    const scrollerRect = container.getBoundingClientRect();
+                    this._top = caret.top - scrollerRect.top + container.scrollTop;
                     this._height = Math.max(1, caret.bottom - caret.top);
                     this._visible = true;
                 },
@@ -571,6 +586,7 @@ export function startEditor(shell, opts = {}) {
             }
         }
         destroy() {
+            window.removeEventListener('resize', this._onResize);
             if (this.dom && this.dom.parentNode) this.dom.parentNode.removeChild(this.dom);
             this.dom = null;
         }
@@ -595,7 +611,7 @@ export function startEditor(shell, opts = {}) {
                     read: () => {
                         const head = this.view.state.selection.main.head;
                         const caret = this.view.coordsAtPos(head);
-                        const scroller = this.view.scrollDOM;
+                        const scroller = getScrollContainer(this.view);
                         if (!caret || !scroller) {
                             this._curBottom = null;
                             return;
@@ -606,7 +622,7 @@ export function startEditor(shell, opts = {}) {
                     },
                     write: () => {
                         this._scheduled = false;
-                        const scroller = this.view.scrollDOM;
+                        const scroller = getScrollContainer(this.view);
                         const cur = this._curBottom;
                         if (!scroller || cur == null) return;
                         if (this._lastBottom == null) {
@@ -730,11 +746,8 @@ export function startEditor(shell, opts = {}) {
             constructor(view) {
                 this.view = view;
                 this.scroller = view.scrollDOM;
-                // Ensure the scroller uses content-box padding
                 this.scroller.style.boxSizing = 'content-box';
-                // Bind handlers
                 this._onWindowResize = () => this.updatePads();
-                // Observe size changes of the scroller (including when the editor mounts or container resizes)
                 this._ro = new ResizeObserver(() => this.updatePads());
                 this._ro.observe(this.scroller);
                 window.addEventListener('resize', this._onWindowResize, { passive: true });
@@ -742,17 +755,15 @@ export function startEditor(shell, opts = {}) {
             }
 
             updatePads() {
-                const h = this.scroller.clientHeight || 0;
-                // Place the first/last lines roughly within the inner 50% band:
-                // keep ~25% top and ~25% bottom breathing room.
-                const pad = Math.max(0, Math.round(h * 0.5));
-                // Apply equal padding above and below
-                this.scroller.style.paddingTop = pad + 'px';
-                this.scroller.style.paddingBottom = pad + 'px';
+                const vh = Math.max(0, window.innerHeight || document.documentElement.clientHeight || 0);
+                const pad = Math.round(vh * 0.7);
+                const topVal = pad + 'px';
+                const botVal = pad + 'px';
+                if (this.scroller && this.scroller.style.paddingTop !== topVal) this.scroller.style.paddingTop = topVal;
+                if (this.scroller && this.scroller.style.paddingBottom !== botVal) this.scroller.style.paddingBottom = botVal;
             }
 
             update(update) {
-                // If layout/viewport changed, refresh padding (cheap)
                 if (update.viewportChanged || update.domChanged) {
                     this.updatePads();
                 }
