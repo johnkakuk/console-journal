@@ -26289,7 +26289,7 @@ function startEditor(shell2, opts = {}) {
       fontSize: "var(--editor-font-size)",
       lineHeight: "var(--editor-line-height)"
     },
-    ".cm-scroller": { fontFamily: "inherit" },
+    ".cm-scroller": { fontFamily: "inherit", height: "100%", overflow: "auto" },
     ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--editor-caret)" },
     "&.cm-editor.cm-focused": { outline: "none" },
     // Disable default paragraph-wide highlight; we’ll draw a single-row overlay instead
@@ -26331,11 +26331,21 @@ function startEditor(shell2, opts = {}) {
     { tag: tags.heading3, fontWeight: "700", fontSize: "1.2em" },
     { tag: [tags.heading4, tags.heading5, tags.heading6], fontWeight: "700" }
   ]);
+  function getScrollContainer(view) {
+    let el = view.scrollDOM;
+    while (el) {
+      const cs = getComputedStyle(el);
+      const oy = cs.overflowY || cs.overflow || "";
+      if (oy.includes("auto") || oy.includes("scroll")) return el;
+      el = el.parentElement;
+    }
+    return view.scrollDOM;
+  }
   const snapOutOfView = EditorView.updateListener.of((update) => {
     if (!(update.docChanged || update.selectionSet)) return;
     if (hasPointerUserEvent(update)) return;
     const view = update.view;
-    const scroller = view.scrollDOM;
+    const scroller = getScrollContainer(view);
     if (!scroller) return;
     requestAnimationFrame(() => {
       const head = view.state.selection.main.head;
@@ -26366,10 +26376,12 @@ function startEditor(shell2, opts = {}) {
       this.dom.style.right = "0";
       this.dom.style.pointerEvents = "none";
       this.dom.style.zIndex = "1";
-      const scroller = view.scrollDOM;
-      const cs = getComputedStyle(scroller);
-      if (cs.position === "static") scroller.style.position = "relative";
-      scroller.appendChild(this.dom);
+      const container = getScrollContainer(view);
+      const cs = getComputedStyle(container);
+      if (cs.position === "static") container.style.position = "relative";
+      container.appendChild(this.dom);
+      this._onResize = () => this.schedule();
+      window.addEventListener("resize", this._onResize, { passive: true });
       this._scheduled = false;
       this._top = 0;
       this._height = 0;
@@ -26387,8 +26399,9 @@ function startEditor(shell2, opts = {}) {
             this._visible = false;
             return;
           }
-          const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
-          this._top = caret3.top - scrollerRect.top + this.view.scrollDOM.scrollTop;
+          const container = getScrollContainer(this.view);
+          const scrollerRect = container.getBoundingClientRect();
+          this._top = caret3.top - scrollerRect.top + container.scrollTop;
           this._height = Math.max(1, caret3.bottom - caret3.top);
           this._visible = true;
         },
@@ -26412,6 +26425,7 @@ function startEditor(shell2, opts = {}) {
       }
     }
     destroy() {
+      window.removeEventListener("resize", this._onResize);
       if (this.dom && this.dom.parentNode) this.dom.parentNode.removeChild(this.dom);
       this.dom = null;
     }
@@ -26434,7 +26448,7 @@ function startEditor(shell2, opts = {}) {
           read: () => {
             const head = this.view.state.selection.main.head;
             const caret3 = this.view.coordsAtPos(head);
-            const scroller = this.view.scrollDOM;
+            const scroller = getScrollContainer(this.view);
             if (!caret3 || !scroller) {
               this._curBottom = null;
               return;
@@ -26444,7 +26458,7 @@ function startEditor(shell2, opts = {}) {
           },
           write: () => {
             this._scheduled = false;
-            const scroller = this.view.scrollDOM;
+            const scroller = getScrollContainer(this.view);
             const cur = this._curBottom;
             if (!scroller || cur == null) return;
             if (this._lastBottom == null) {
@@ -26563,10 +26577,12 @@ function startEditor(shell2, opts = {}) {
         this.updatePads();
       }
       updatePads() {
-        const h = this.scroller.clientHeight || 0;
-        const pad = Math.max(0, Math.round(h * 0.5));
-        this.scroller.style.paddingTop = pad + "px";
-        this.scroller.style.paddingBottom = pad + "px";
+        const vh = Math.max(0, window.innerHeight || document.documentElement.clientHeight || 0);
+        const pad = Math.round(vh * 0.7);
+        const topVal = pad + "px";
+        const botVal = pad + "px";
+        if (this.scroller && this.scroller.style.paddingTop !== topVal) this.scroller.style.paddingTop = topVal;
+        if (this.scroller && this.scroller.style.paddingBottom !== botVal) this.scroller.style.paddingBottom = botVal;
       }
       update(update) {
         if (update.viewportChanged || update.domChanged) {

@@ -165,10 +165,8 @@ body {
 }
 
 .cm-scroller {
-    /* overflow: hidden; */
-    /* padding-top: 60vh !important;
-    padding-bottom: 120vh !important; */
-    height: 100% !important;
+    overflow: visible !important;   /* let the parent handle scrolling */
+    height: auto !important;        /* don't be a scroll container */
 }
 
 #writerStatus {
@@ -176,27 +174,35 @@ body {
 }
 
 #writerRoot {
-    height: calc(100% + 12px) !important;
-    margin-bottom: -15px !important;
+    height: 100% !important;        /* match parent; no artificial growth */
+    margin-bottom: -15px;
+    padding: 0 !important;
 }
 
 #writerPane {
-    height: calc(100% - 3px);
-    padding: 0 16px 12px 16px;
-    margin-top: -30px;
-    height: calc(100% + 57px);
+    height: 100%;                   /* fill parent */
+    margin-top: 0 auto;
+    overflow-y: auto;               /* sole scroll container for editor */
 }
 
 .cm-editor {
-    max-width: calc(var(--editor-max-width) + 1ch + 30px);
-    margin: 0 auto 0 auto;
-    overflow: scroll;
+    max-width: calc(var(--editor-max-width) + 1ch + 60px);
+    margin: 0 auto -15px auto!important;
+    padding: 30px !important;
+    overflow: visible;              /* prevent inner scroll */
+    height: auto;                   /* size to content; parent scrolls */
 }
 
 .cm-content {
     margin: 50px auto !important;
     max-width: calc(var(--editor-max-width) + 1ch);
 }
+
+.cm-activeRow {
+    max-width: calc(var(--editor-max-width) + 1ch + 60px);
+    margin: auto;
+}
+
 
 /* CodeMirror search panel theming */
 .cm-panels {
