@@ -399,6 +399,8 @@ function typewriterAdvanceScroll() {
                         scroller.scrollTop += Math.round(dy);
                         this._lastBottom = cur;
                     } else if (dy < -threshold) {
+                        const delta = Math.round(dy);
+                        scroller.scrollTop = Math.max(0, scroller.scrollTop + delta);
                         this._lastBottom = cur;
                     }
                 }

@@ -674,7 +674,8 @@ export function startEditor(shell, opts = {}) {
                             scroller.scrollTop += Math.round(dy);
                             this._lastBottom = cur;
                         } else if (dy < -threshold) {
-                            // Caret moved up (e.g. arrow up); resync baseline
+                            const delta = Math.round(dy);
+                            scroller.scrollTop = Math.max(0, scroller.scrollTop + delta);
                             this._lastBottom = cur;
                         }
                     }
