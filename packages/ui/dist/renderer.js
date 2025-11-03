@@ -28134,7 +28134,8 @@ function startWriter(shell2, opts = {}) {
     lastWindowWidth: window.innerWidth || 0,
     domSnapshot: null,
     titlebarInsertions: [],
-    prompt: opts.prompt || "writer>"
+    prompt: opts.prompt || "writer>",
+    emptyOverlayEl: null
   };
   function updateSidebarClasses() {
     const filesOpen = !state2.fileCollapsed;
@@ -28434,9 +28435,24 @@ function startWriter(shell2, opts = {}) {
         `;
     const editor = document.createElement("div");
     editor.className = "writer-editor";
+    editor.style.position = "relative";
     editor.innerHTML = `
             <div class="writer-editor-pane" id="writerEditorPane"></div>
         `;
+    const emptyOverlay = document.createElement("div");
+    emptyOverlay.id = "writerEmptyOverlay";
+    emptyOverlay.textContent = "No document selected";
+    emptyOverlay.style.position = "absolute";
+    emptyOverlay.style.inset = "0";
+    emptyOverlay.style.background = "var(--editor-panel-bg)";
+    emptyOverlay.style.display = "none";
+    emptyOverlay.style.alignItems = "center";
+    emptyOverlay.style.justifyContent = "center";
+    emptyOverlay.style.fontSize = "1rem";
+    emptyOverlay.style.color = "var(--muted, rgba(255,255,255,0.7))";
+    emptyOverlay.style.zIndex = "3";
+    emptyOverlay.style.pointerEvents = "none";
+    editor.appendChild(emptyOverlay);
     main.appendChild(navigation);
     main.appendChild(editor);
     root.appendChild(main);
@@ -28486,6 +28502,7 @@ function startWriter(shell2, opts = {}) {
     INIT_SCROLL_SUPPRESS.add(state2.cmView);
     state2.savedSnapshot = "";
     clearDirty("");
+    state2.emptyOverlayEl = document.getElementById("writerEmptyOverlay");
   }
   function redrawFileList() {
     if (!state2.listEl) return;
@@ -28792,18 +28809,58 @@ function startWriter(shell2, opts = {}) {
     }
     state2.lastWindowWidth = width;
   }
+  function pickMostRecent(docs) {
+    if (!Array.isArray(docs) || !docs.length) return null;
+    const toTime = (d) => {
+      const u = d && d.updated_at ? new Date(d.updated_at).getTime() : NaN;
+      if (!Number.isNaN(u)) return u;
+      const c = d && d.created_at ? new Date(d.created_at).getTime() : NaN;
+      if (!Number.isNaN(c)) return c;
+      return typeof d.id === "number" ? d.id : -Infinity;
+    };
+    let best = docs[0];
+    let bestT = toTime(best);
+    for (let i = 1; i < docs.length; i++) {
+      const t2 = toTime(docs[i]);
+      if (t2 > bestT) {
+        best = docs[i];
+        bestT = t2;
+      }
+    }
+    return best;
+  }
+  function setEmptyOverlayVisible(show) {
+    if (!state2.emptyOverlayEl) return;
+    state2.emptyOverlayEl.style.display = show ? "flex" : "none";
+  }
+  function showNoSelectionOverlay() {
+    setEmptyOverlayVisible(true);
+    if (state2.cmView) {
+      const len = state2.cmView.state.doc.length;
+      if (len > 0) {
+        state2.cmView.dispatch({ changes: { from: 0, to: len, insert: "" } });
+      }
+      try {
+        getScrollContainer(state2.cmView).scrollTop = 0;
+      } catch (_) {
+      }
+    }
+    state2.current = null;
+    state2.savedSnapshot = "";
+    clearDirty("");
+  }
   async function loadDocuments() {
     try {
       const docs = await writerAPI.list();
       state2.docs = Array.isArray(docs) ? docs : [];
       redrawFileList();
       if (!state2.docs.length) {
-        setEditorContent("", "Untitled Document");
-        state2.current = null;
+        showNoSelectionOverlay();
         return;
       }
       if (state2.current && state2.docs.some((d) => d.id === state2.current.id)) {
         setActiveListItem(state2.current.id);
+        setEmptyOverlayVisible(false);
         return;
       }
       let candidates = getFilteredDocs();
@@ -28811,11 +28868,12 @@ function startWriter(shell2, opts = {}) {
         setSelectedFolder("all");
         candidates = getFilteredDocs();
       }
-      if (!candidates.length) {
-        candidates = state2.docs.slice();
-      }
-      if (candidates.length) {
-        await openDocument(candidates[0].id, { force: true });
+      const target = pickMostRecent(candidates.length ? candidates : state2.docs);
+      if (target && target.id != null) {
+        await openDocument(target.id, { force: true });
+        setEmptyOverlayVisible(false);
+      } else {
+        showNoSelectionOverlay();
       }
     } catch (err) {
       shell2.print(`<div class="error">Failed to load writer documents: ${esc2(err?.message || err)}</div>`);
@@ -28846,6 +28904,8 @@ function startWriter(shell2, opts = {}) {
         INIT_SCROLL_SUPPRESS.delete(state2.cmView);
       });
     });
+    state2.cmView.focus();
+    state2.cmView.dispatch({ selection: { anchor: 0 } });
     state2.savedSnapshot = typeof snapshotOverride === "string" ? snapshotOverride : doc2;
     clearDirty(state2.savedSnapshot);
   }
@@ -28871,6 +28931,7 @@ function startWriter(shell2, opts = {}) {
       const folderForDoc = doc2.folder_id == null ? "all" : doc2.folder_id;
       setSelectedFolder(folderForDoc, { fromDocument: true });
       setEditorContent(doc2.content || "", doc2.title || "Untitled Document", doc2.content || "");
+      setEmptyOverlayVisible(false);
     } catch (err) {
       shell2.print(`<div class="error">Unable to open document: ${esc2(err?.message || err)}</div>`);
     }
@@ -28986,6 +29047,7 @@ function startWriter(shell2, opts = {}) {
       const doc2 = await writerAPI.create({ title, content: "", folderId });
       await loadDocuments();
       await openDocument(doc2.id, { force: true });
+      setEmptyOverlayVisible(false);
       showToast("New document created", "ok");
       return doc2;
     } catch (err) {
@@ -29050,14 +29112,10 @@ function startWriter(shell2, opts = {}) {
       await writerAPI.delete(id2);
       showToast("Document deleted", "warn");
       await loadDocuments();
-      if (state2.current && state2.current.id === id2) {
-        state2.current = null;
-        if (state2.docs.length) {
-          await openDocument(state2.docs[0].id, { force: true });
-        } else {
-          setEditorContent("", "Untitled Document", "");
-          clearDirty("");
-        }
+      if (!state2.docs.length) {
+        showNoSelectionOverlay();
+      } else if (state2.current && state2.current.id === id2) {
+        showNoSelectionOverlay();
       }
     } catch (err) {
       shell2.print(`<div class="error">Delete failed: ${esc2(err?.message || err)}</div>`);
@@ -29315,6 +29373,7 @@ function startWriter(shell2, opts = {}) {
     });
   }
   mountUI();
+  setEmptyOverlayVisible(true);
   shell2.setPrompt(state2.prompt);
   loadFolders().catch(() => {
   }).then(() => loadDocuments());

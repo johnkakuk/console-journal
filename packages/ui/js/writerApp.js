@@ -493,6 +493,7 @@ export function startWriter(shell, opts = {}) {
         domSnapshot: null,
         titlebarInsertions: [],
         prompt: opts.prompt || 'writer>',
+        emptyOverlayEl: null,
     };
 
     function updateSidebarClasses() {
@@ -816,9 +817,26 @@ export function startWriter(shell, opts = {}) {
 
         const editor = document.createElement('div');
         editor.className = 'writer-editor';
+        editor.style.position = 'relative';
         editor.innerHTML = `
             <div class="writer-editor-pane" id="writerEditorPane"></div>
         `;
+
+        // Empty-state overlay (shown when no document is selected)
+        const emptyOverlay = document.createElement('div');
+        emptyOverlay.id = 'writerEmptyOverlay';
+        emptyOverlay.textContent = 'No document selected';
+        emptyOverlay.style.position = 'absolute';
+        emptyOverlay.style.inset = '0';
+        emptyOverlay.style.background = 'var(--editor-panel-bg)';
+        emptyOverlay.style.display = 'none';
+        emptyOverlay.style.alignItems = 'center';
+        emptyOverlay.style.justifyContent = 'center';
+        emptyOverlay.style.fontSize = '1rem';
+        emptyOverlay.style.color = 'var(--muted, rgba(255,255,255,0.7))';
+        emptyOverlay.style.zIndex = '3';
+        emptyOverlay.style.pointerEvents = 'none';
+        editor.appendChild(emptyOverlay);
 
         main.appendChild(navigation);
         main.appendChild(editor);
@@ -879,6 +897,7 @@ export function startWriter(shell, opts = {}) {
         INIT_SCROLL_SUPPRESS.add(state.cmView);
         state.savedSnapshot = '';
         clearDirty('');
+        state.emptyOverlayEl = document.getElementById('writerEmptyOverlay');
     }
 
     function redrawFileList() {
@@ -1220,30 +1239,75 @@ export function startWriter(shell, opts = {}) {
         state.lastWindowWidth = width;
     }
 
+    function pickMostRecent(docs) {
+        if (!Array.isArray(docs) || !docs.length) return null;
+        const toTime = d => {
+            const u = d && d.updated_at ? new Date(d.updated_at).getTime() : NaN;
+            if (!Number.isNaN(u)) return u;
+            const c = d && d.created_at ? new Date(d.created_at).getTime() : NaN;
+            if (!Number.isNaN(c)) return c;
+            return typeof d.id === 'number' ? d.id : -Infinity;
+        };
+        let best = docs[0];
+        let bestT = toTime(best);
+        for (let i = 1; i < docs.length; i++) {
+            const t = toTime(docs[i]);
+            if (t > bestT) { best = docs[i]; bestT = t; }
+        }
+        return best;
+    }
+
+    function setEmptyOverlayVisible(show) {
+        if (!state.emptyOverlayEl) return;
+        state.emptyOverlayEl.style.display = show ? 'flex' : 'none';
+    }
+
+    // Helper to positively clear the editor when no document is selected
+    function showNoSelectionOverlay() {
+        setEmptyOverlayVisible(true);
+        if (state.cmView) {
+            const len = state.cmView.state.doc.length;
+            if (len > 0) {
+                state.cmView.dispatch({ changes: { from: 0, to: len, insert: '' } });
+            }
+            // Reset scroll position for good measure
+            try { getScrollContainer(state.cmView).scrollTop = 0; } catch (_) {}
+        }
+        state.current = null;
+        state.savedSnapshot = '';
+        clearDirty('');
+    }
+
     async function loadDocuments() {
         try {
             const docs = await writerAPI.list();
             state.docs = Array.isArray(docs) ? docs : [];
             redrawFileList();
+
             if (!state.docs.length) {
-                setEditorContent('', 'Untitled Document');
-                state.current = null;
+                showNoSelectionOverlay();
                 return;
             }
+
+            // If we already have a current doc and it's still present, keep it selected
             if (state.current && state.docs.some(d => d.id === state.current.id)) {
                 setActiveListItem(state.current.id);
+                setEmptyOverlayVisible(false);
                 return;
             }
+
+            // Otherwise, open the most recent document (prefer updated_at)
             let candidates = getFilteredDocs();
             if (!candidates.length && state.selectedFolderId !== 'all') {
                 setSelectedFolder('all');
                 candidates = getFilteredDocs();
             }
-            if (!candidates.length) {
-                candidates = state.docs.slice();
-            }
-            if (candidates.length) {
-                await openDocument(candidates[0].id, { force: true });
+            const target = pickMostRecent(candidates.length ? candidates : state.docs);
+            if (target && target.id != null) {
+                await openDocument(target.id, { force: true });
+                setEmptyOverlayVisible(false);
+            } else {
+                showNoSelectionOverlay();
             }
         } catch (err) {
             shell.print(`<div class="error">Failed to load writer documents: ${esc(err?.message || err)}</div>`);
@@ -1275,6 +1339,8 @@ export function startWriter(shell, opts = {}) {
                 INIT_SCROLL_SUPPRESS.delete(state.cmView);
             });
         });
+        state.cmView.focus();
+        state.cmView.dispatch({ selection: { anchor: 0 } });
         state.savedSnapshot = typeof snapshotOverride === 'string' ? snapshotOverride : doc;
         clearDirty(state.savedSnapshot);
     }
@@ -1301,6 +1367,7 @@ export function startWriter(shell, opts = {}) {
             const folderForDoc = doc.folder_id == null ? 'all' : doc.folder_id;
             setSelectedFolder(folderForDoc, { fromDocument: true });
             setEditorContent(doc.content || '', doc.title || 'Untitled Document', doc.content || '');
+            setEmptyOverlayVisible(false);
         } catch (err) {
             shell.print(`<div class="error">Unable to open document: ${esc(err?.message || err)}</div>`);
         }
@@ -1421,6 +1488,7 @@ export function startWriter(shell, opts = {}) {
             const doc = await writerAPI.create({ title, content: '', folderId });
             await loadDocuments();
             await openDocument(doc.id, { force: true });
+            setEmptyOverlayVisible(false);
             showToast('New document created', 'ok');
             return doc;
         } catch (err) {
@@ -1488,14 +1556,11 @@ export function startWriter(shell, opts = {}) {
             await writerAPI.delete(id);
             showToast('Document deleted', 'warn');
             await loadDocuments();
-            if (state.current && state.current.id === id) {
-                state.current = null;
-                if (state.docs.length) {
-                    await openDocument(state.docs[0].id, { force: true });
-                } else {
-                    setEditorContent('', 'Untitled Document', '');
-                    clearDirty('');
-                }
+            // If no documents remain, or the deleted doc was the current one, show the empty overlay and clear the editor
+            if (!state.docs.length) {
+                showNoSelectionOverlay();
+            } else if (state.current && state.current.id === id) {
+                showNoSelectionOverlay();
             }
         } catch (err) {
             shell.print(`<div class="error">Delete failed: ${esc(err?.message || err)}</div>`);
@@ -1731,6 +1796,7 @@ export function startWriter(shell, opts = {}) {
     }
 
     mountUI();
+    setEmptyOverlayVisible(true);
     shell.setPrompt(state.prompt);
     loadFolders()
         .catch(() => {})
