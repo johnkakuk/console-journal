@@ -41,6 +41,14 @@ function htmlForExport(markdown, cssText) {
 </head><body><article class="markdown-body">${body}</article></body></html>`;
 }
 
+function normalizeWriterTitle(title) {
+    if (typeof title === 'string') {
+        const trimmed = title.trim();
+        if (trimmed.length) return trimmed;
+    }
+    return 'Untitled Document';
+}
+
 
 process.on('unhandledRejection', (reason, promise) => {
     console.error('🚨 Unhandled Rejection:', reason);
@@ -94,6 +102,22 @@ function initDB() {
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS writer_documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            folder_id INTEGER,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS writer_folders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_writer_documents_updated_at ON writer_documents (updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_writer_documents_folder ON writer_documents (folder_id);
         -- Optional FTS (enable if your SQLite has FTS5):
         -- CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(content, content='entries', content_rowid='id');
         -- CREATE TRIGGER IF NOT EXISTS entries_ai AFTER INSERT ON entries BEGIN
@@ -175,6 +199,41 @@ function initDB() {
         VALUES (@key, @value)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
         RETURNING key, value
+    `);
+    db._writerList = db.prepare(`
+        SELECT
+            id,
+            title,
+            substr(content, 1, 200) AS preview,
+            content,
+            folder_id,
+            created_at,
+            updated_at
+        FROM writer_documents
+        ORDER BY datetime(updated_at) DESC, id DESC
+    `);
+    db._writerGet = db.prepare(`SELECT * FROM writer_documents WHERE id = ?`);
+    db._writerInsert = db.prepare(`
+        INSERT INTO writer_documents (title, content, folder_id)
+        VALUES (@title, @content, @folder_id)
+        RETURNING id, title, content, folder_id, created_at, updated_at
+    `);
+    db._writerUpdate = db.prepare(`
+        UPDATE writer_documents
+        SET title = @title,
+            content = @content,
+            folder_id = @folder_id,
+            updated_at = datetime('now')
+        WHERE id = @id
+        RETURNING id, title, content, folder_id, created_at, updated_at
+    `);
+    db._writerDelete = db.prepare(`DELETE FROM writer_documents WHERE id = ?`);
+    db._writerRename = db.prepare(`
+        UPDATE writer_documents
+        SET title = @title,
+            updated_at = datetime('now')
+        WHERE id = @id
+        RETURNING id, title, content, folder_id, created_at, updated_at
     `);
 }
 
@@ -303,6 +362,80 @@ ipcMain.handle('template:list', () => {
 ipcMain.handle('template:delete', (_evt, name) => {
     if (typeof name !== 'string' || !name.trim()) throw new Error('Bad template name');
     return { deleted: db._deleteTemplate.run(name.trim()).changes };
+});
+
+ipcMain.handle('writer:list', () => {
+    return db._writerList.all().map(row => ({
+        ...row,
+        folder_id: row.folder_id == null ? null : row.folder_id
+    }));
+});
+
+ipcMain.handle('writer:get', (_evt, id) => {
+    const key = Number(id);
+    if (!Number.isInteger(key) || key <= 0) throw new Error('Bad writer document id');
+    const row = db._writerGet.get(key);
+    return row || null;
+});
+
+ipcMain.handle('writer:create', (_evt, payload = {}) => {
+    const title = normalizeWriterTitle(payload.title);
+    const content = typeof payload.content === 'string' ? payload.content : '';
+    const folderId = payload.folderId == null ? null : Number(payload.folderId);
+    if (folderId != null && !Number.isInteger(folderId)) throw new Error('Bad folder id');
+    return db._writerInsert.get({
+        title,
+        content,
+        folder_id: folderId
+    });
+});
+
+ipcMain.handle('writer:update', (_evt, payload = {}) => {
+    const id = Number(payload.id);
+    if (!Number.isInteger(id) || id <= 0) throw new Error('Bad writer document id');
+    const title = normalizeWriterTitle(payload.title);
+    const content = typeof payload.content === 'string' ? payload.content : '';
+    const folderId = payload.folderId == null ? null : Number(payload.folderId);
+    if (folderId != null && !Number.isInteger(folderId)) throw new Error('Bad folder id');
+    const row = db._writerUpdate.get({
+        id,
+        title,
+        content,
+        folder_id: folderId
+    });
+    if (!row) throw new Error('Writer document not found');
+    return row;
+});
+
+ipcMain.handle('writer:delete', (_evt, id) => {
+    const key = Number(id);
+    if (!Number.isInteger(key) || key <= 0) throw new Error('Bad writer document id');
+    return { deleted: db._writerDelete.run(key).changes };
+});
+
+ipcMain.handle('writer:duplicate', (_evt, payload = {}) => {
+    const id = Number(payload.id);
+    if (!Number.isInteger(id) || id <= 0) throw new Error('Bad writer document id');
+    const source = db._writerGet.get(id);
+    if (!source) throw new Error('Document not found');
+    const desiredTitle = typeof payload.title === 'string' ? payload.title : '';
+    const title = normalizeWriterTitle(desiredTitle || `${source.title} Copy`);
+    const folderId = payload.folderId == null ? source.folder_id ?? null : Number(payload.folderId);
+    if (folderId != null && !Number.isInteger(folderId)) throw new Error('Bad folder id');
+    return db._writerInsert.get({
+        title,
+        content: source.content || '',
+        folder_id: folderId
+    });
+});
+
+ipcMain.handle('writer:rename', (_evt, payload = {}) => {
+    const id = Number(payload.id);
+    if (!Number.isInteger(id) || id <= 0) throw new Error('Bad writer document id');
+    const title = normalizeWriterTitle(payload.title);
+    const row = db._writerRename.get({ id, title });
+    if (!row) throw new Error('Document not found');
+    return row;
 });
 
 ipcMain.handle('settings:get', (_evt, key) => {

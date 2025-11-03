@@ -17,7 +17,12 @@ Type, reflect, and organize your thoughts in a glowing green terminal that feels
 		- -t → tomorrow
 		- -help → usage guide
 		- MM-DD → opens the most recent past occurrence of that month/day
-- Markdown Editor (Writer)
+- Writer Workspace
+	- Launch with the `write` command
+	- Dual-pane retro UI with file selector and live editor
+	- Create, duplicate, delete, and export documents to PDF
+	- Editable document titles with folder-ready storage model
+- Journal Markdown Editor
 	- Built with CodeMirror 6
 	- Basic Markdown highlighting
 	- To-do list support (- [ ]() and - [x]() with clickable toggles)
@@ -119,6 +124,7 @@ Console Journal is the minimalist, keyboard-first journaling environment I’ve 
 | --------------------- | ------------------------------- |
 | ⌘ + S                 | Save entry                      |
 | ⌘ + Q / CTRL + Q      | Quit editor                     |
+| ⌘ + Shift + N / CTRL + Shift + N | New writer document     |
 | ⌘ + F                 | Open search panel               |
 | Enter / Shift + Enter | Next / Previous match           |
 | ↑ / ↓                 | Navigate command history        |

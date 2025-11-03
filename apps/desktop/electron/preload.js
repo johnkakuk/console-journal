@@ -14,6 +14,15 @@ contextBridge.exposeInMainWorld('db', {
     getTemplate:  (name)          => ipcRenderer.invoke('template:getByName', name),
     listTemplates: ()             => ipcRenderer.invoke('template:list'),
     deleteTemplate: (name)        => ipcRenderer.invoke('template:delete', name),
+    writer: {
+        list:      () => ipcRenderer.invoke('writer:list'),
+        get:       (id) => ipcRenderer.invoke('writer:get', id),
+        create:    (payload = {}) => ipcRenderer.invoke('writer:create', payload),
+        update:    (payload = {}) => ipcRenderer.invoke('writer:update', payload),
+        delete:    (id) => ipcRenderer.invoke('writer:delete', id),
+        duplicate: (id, overrides = {}) => ipcRenderer.invoke('writer:duplicate', { id, ...overrides }),
+        rename:    (id, title) => ipcRenderer.invoke('writer:rename', { id, title })
+    }
 });
 
 contextBridge.exposeInMainWorld('electronAPI', {

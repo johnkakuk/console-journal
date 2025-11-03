@@ -4,6 +4,7 @@
  * 
 /* ==== main.js — Shell Router & UI ================================================== */
 import { startEditor } from './editor.js';
+import { startWriter } from './writerApp.js';
 import { startThemeApp } from './themeApp.js';
 import { ensureActiveTheme, applyTheme, getDefaultTheme, saveActiveTheme } from './theme.js';
 import { marked } from 'marked';
@@ -116,10 +117,11 @@ if (!db) {
     if (!window.electronAPI) {
         // ===== Minimal IndexedDB adapter for PWA =====
         const DB_NAME = 'console-journal';
-        const DB_VERSION = 3;
+        const DB_VERSION = 4;
         const STORE = 'entries';
         const TEMPLATE_STORE = 'templates';
         const SETTINGS_STORE = 'settings';
+        const WRITER_STORE = 'writer_docs';
 
         const openDB = () => new Promise((resolve, reject) => {
             const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -136,6 +138,12 @@ if (!db) {
                 }
                 if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
                     db.createObjectStore(SETTINGS_STORE, { keyPath: 'key' });
+                }
+                if (!db.objectStoreNames.contains(WRITER_STORE)) {
+                    const w = db.createObjectStore(WRITER_STORE, { keyPath: 'id', autoIncrement: true });
+                    w.createIndex('updated_at', 'updated_at', { unique: false });
+                    w.createIndex('folder_id', 'folder_id', { unique: false });
+                    w.createIndex('title_lower', 'title_lower', { unique: false });
                 }
             };
             req.onsuccess = () => resolve(req.result);
@@ -154,6 +162,12 @@ if (!db) {
             });
         };
         const txRun = (mode, fn) => txRunStore(STORE, mode, fn);
+        const txRunWriter = (mode, fn) => txRunStore(WRITER_STORE, mode, fn);
+
+        function normalizeWriterTitle(title) {
+            const trimmed = String(title ?? '').trim();
+            return trimmed || 'Untitled Document';
+        }
 
         db = {
             async get(date) {
@@ -311,6 +325,132 @@ if (!db) {
                         getReq.onerror = () => reject(getReq.error);
                     });
                 });
+            },
+            writer: {
+                async list() {
+                    return txRunWriter('readonly', store => {
+                        const idx = store.index('updated_at');
+                        const out = [];
+                        return new Promise((resolve, reject) => {
+                            const cursor = idx.openCursor(null, 'prev');
+                            cursor.onsuccess = () => {
+                                const cur = cursor.result;
+                                if (!cur) return resolve(out);
+                                out.push(cur.value);
+                                cur.continue();
+                            };
+                            cursor.onerror = () => reject(cursor.error);
+                        });
+                    });
+                },
+                async get(id) {
+                    const key = Number(id);
+                    if (!Number.isFinite(key)) throw new Error('Writer document id required');
+                    return txRunWriter('readonly', store => {
+                        const req = store.get(key);
+                        return new Promise((resolve, reject) => {
+                            req.onsuccess = () => resolve(req.result || null);
+                            req.onerror = () => reject(req.error);
+                        });
+                    });
+                },
+                async create({ title, content = '', folderId = null } = {}) {
+                    const now = new Date().toISOString();
+                    const titleNormalized = normalizeWriterTitle(title);
+                    const doc = {
+                        title: titleNormalized,
+                        title_lower: titleNormalized.toLowerCase(),
+                        content: String(content ?? ''),
+                        folder_id: folderId == null ? null : Number(folderId),
+                        created_at: now,
+                        updated_at: now
+                    };
+                    return txRunWriter('readwrite', store => {
+                        const req = store.add(doc);
+                        return new Promise((resolve, reject) => {
+                            req.onsuccess = () => resolve({ ...doc, id: req.result });
+                            req.onerror = () => reject(req.error);
+                        });
+                    });
+                },
+                async update({ id, title, content = '', folderId = null } = {}) {
+                    const key = Number(id);
+                    if (!Number.isFinite(key)) throw new Error('Writer document id required');
+                    const now = new Date().toISOString();
+                    const titleNormalized = normalizeWriterTitle(title);
+                    return txRunWriter('readwrite', store => {
+                        const getReq = store.get(key);
+                        return new Promise((resolve, reject) => {
+                            getReq.onsuccess = () => {
+                                const existing = getReq.result;
+                                if (!existing) {
+                                    reject(new Error('Document not found'));
+                                    return;
+                                }
+                                const next = {
+                                    ...existing,
+                                    title: titleNormalized,
+                                    title_lower: titleNormalized.toLowerCase(),
+                                    content: String(content ?? ''),
+                                    folder_id: folderId == null ? null : Number(folderId),
+                                    updated_at: now
+                                };
+                                const putReq = store.put(next);
+                                putReq.onsuccess = () => resolve(next);
+                                putReq.onerror = () => reject(putReq.error);
+                            };
+                            getReq.onerror = () => reject(getReq.error);
+                        });
+                    });
+                },
+                async delete(id) {
+                    const key = Number(id);
+                    if (!Number.isFinite(key)) throw new Error('Writer document id required');
+                    return txRunWriter('readwrite', store => {
+                        const req = store.delete(key);
+                        return new Promise((resolve, reject) => {
+                            req.onsuccess = () => resolve({ deleted: 1 });
+                            req.onerror = () => reject(req.error);
+                        });
+                    });
+                },
+                async duplicate(id, { title, folderId = null } = {}) {
+                    const source = await this.get(id);
+                    if (!source) throw new Error('Document not found');
+                    const nextTitle = normalizeWriterTitle(title || `${source.title} Copy`);
+                    return this.create({
+                        title: nextTitle,
+                        content: source.content ?? '',
+                        folderId: folderId ?? source.folder_id ?? null
+                    });
+                },
+                async rename(id, title) {
+                    const key = Number(id);
+                    if (!Number.isFinite(key)) throw new Error('Writer document id required');
+                    const normalized = normalizeWriterTitle(title);
+                    return txRunWriter('readwrite', store => {
+                        const getReq = store.get(key);
+                        return new Promise((resolve, reject) => {
+                            getReq.onsuccess = () => {
+                                const existing = getReq.result;
+                                if (!existing) {
+                                    reject(new Error('Document not found'));
+                                    return;
+                                }
+                                const next = {
+                                    ...existing,
+                                    title: normalized,
+                                    title_lower: normalized.toLowerCase(),
+                                    updated_at: new Date().toISOString()
+                                };
+                                const putReq = store.put(next);
+                                putReq.onsuccess = () => resolve(next);
+                                putReq.onerror = () => reject(putReq.error);
+                            };
+                            getReq.onerror = () => reject(getReq.error);
+                        });
+                    });
+                }
             }
         };
         window.db = db;
@@ -379,7 +519,16 @@ if (!db) {
                     schedule: parseTemplateSchedule(row.schedule)
                 }));
             },
-            deleteTemplate: (name)           => invoke('template:delete', name)
+            deleteTemplate: (name)           => invoke('template:delete', name),
+            writer: {
+                list:      () => invoke('writer:list'),
+                get:       (id) => invoke('writer:get', id),
+                create:    (payload = {}) => invoke('writer:create', payload),
+                update:    (payload = {}) => invoke('writer:update', payload),
+                delete:    (id) => invoke('writer:delete', id),
+                duplicate: (id, overrides = {}) => invoke('writer:duplicate', { id, ...overrides }),
+                rename:    (id, title) => invoke('writer:rename', { id, title })
+            }
         };
     }
 }
@@ -1033,6 +1182,18 @@ register('quit', async () => {
         print(`<div class="error">Quit failed: ${esc(msg)}</div>`);
     }
 }, 'Close the application');
+
+register('write', async (argv = []) => {
+    if (argv && argv.length) {
+        print('<div class="warn">Writer ignores additional arguments.</div>');
+    }
+    try {
+        startWriter(shell);
+    } catch (err) {
+        const msg = err?.message || String(err);
+        print(`<div class="error">Unable to open Writer: ${esc(msg)}</div>`);
+    }
+}, 'Open the Writer workspace');
 
 // App starters
 register('journal', async (argv = []) => {

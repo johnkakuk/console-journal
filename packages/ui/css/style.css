@@ -198,6 +198,324 @@ body {
     max-width: calc(var(--editor-max-width) + 1ch);
 }
 
+.ͼ1 .cm-linene {
+    padding: 0;
+}
+
+.cm-content h1,
+.cm-content h2,
+.cm-content h3 {
+    margin-top: 1.8em;
+}
+
+.cm-content ul,
+.cm-content ol {
+    margin: 1.25em 0;
+    padding-left: 0;
+}
+
+.cm-content li {
+    line-height: 2em;
+    padding-left: 1.6em;
+    text-indent: -1.6em;
+}
+
+.cm-content li::marker {
+    font-variant-numeric: tabular-nums;
+}
+
+.cm-content ol li:nth-child(n+10) {
+    padding-left: 2em;
+    text-indent: -2em;
+}
+
+.cm-content ol li:nth-child(n+100) {
+    padding-left: 2.4em;
+    text-indent: -2.4em;
+}
+
+/* Writer workspace -------------------------------------------------------- */
+.titlebar.writer-mode {
+    gap: 12px;
+    height: 30px;
+}
+
+.titlebar.writer-mode .title {
+    font-size: 0.95em;
+    opacity: 0.6;
+    letter-spacing: 0.08em;
+}
+
+.writer-toggle {
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--muted) 65%, transparent);
+    color: var(--text);
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: var(--font-ui, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial);
+    font-size: 0.9em;
+    display: grid;
+    place-items: center;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.writer-toggle:hover,
+.writer-toggle[aria-pressed="true"] {
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.writer-toggle-icon {
+    width: 20px;
+    height: 20px;
+    display: block;
+    background: var(--accent);
+    mask: url(../img/sidebar.svg) 50% 50% / 120% no-repeat;
+    mask-position: 110% 50%;
+}
+
+.writer-title-help {
+    font-size: 0.8em;
+    margin-left: auto;
+    letter-spacing: 0.04em;
+}
+
+.writer-root {
+    --writer-nav-width: 260px;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    gap: 12px;
+    padding: 18px 22px;
+    box-sizing: border-box;
+    font-family: var(--font-ui, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial);
+}
+
+.writer-main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: var(--writer-nav-width) minmax(0, 1fr);
+    min-height: 0;
+    transition: grid-template-columns 0.25s ease;
+}
+
+.writer-root.nav-collapsed .writer-main {
+    grid-template-columns: 0 minmax(0, 1fr);
+}
+
+.writer-navigation {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    margin-left: -14px;
+    border-radius: 0 0 0 10px;
+    border-right: solid 1px var(--border);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.writer-root.nav-collapsed .writer-navigation {
+    opacity: 0;
+    transform: translateX(-22px);
+    pointer-events: none;
+}
+
+.writer-files {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: color-mix(in srgb, var(--panel) 88%, rgba(0,0,0,0.8));
+    min-height: 0;
+    border-radius: 10px;
+}
+
+.writer-files-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--muted) 60%, transparent);
+    font-weight: 600;
+    letter-spacing: 0.05em;
+}
+
+.writer-create {
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--muted) 70%, transparent);
+    border-radius: 6px;
+    color: var(--text);
+    cursor: pointer;
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    transition: border-color 0.15s, transform 0.15s;
+    mask: url('../img/plus.svg') center/78% no-repeat;
+    -webkit-mask: url('../img/plus.svg') center/78% no-repeat;
+    background: var(--accent);
+}
+
+.writer-create:hover {
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    transform: translateY(-1px);
+}
+
+.writer-files-body {
+    flex: 1;
+    overflow: auto;
+}
+
+.writer-file-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.writer-file-item {
+    padding: 10px 14px;
+    border-left: 3px solid transparent;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.writer-file-item:hover {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border-left-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.writer-file-item.active {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    border-left-color: var(--accent);
+}
+
+.writer-file-item.dirty .writer-file-title::after {
+    content: '•';
+    color: var(--warn);
+    margin-left: 6px;
+    font-size: 0.8em;
+}
+
+.writer-file-title {
+    font-weight: 600;
+    letter-spacing: 0.03em;
+}
+
+.writer-file-meta {
+    font-size: 0.78em;
+    margin-top: 4px;
+}
+
+.writer-files-empty {
+    padding: 14px;
+    text-align: center;
+}
+
+.writer-editor {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: color-mix(in srgb, var(--panel) 90%, rgba(0,0,0,0.85));
+    overflow: scroll;
+    margin-right: -14px;
+}
+
+.writer-editor-pane {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: visible;
+}
+
+.writer-context-menu {
+    position: fixed;
+    display: none;
+    flex-direction: column;
+    background: color-mix(in srgb, var(--panel) 92%, rgba(0,0,0,0.8));
+    border: 1px solid color-mix(in srgb, var(--muted) 60%, transparent);
+    border-radius: 8px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.45);
+    padding: 6px 0;
+    z-index: 4000;
+}
+
+.writer-context-menu.visible {
+    display: flex;
+}
+
+.writer-context-menu button {
+    background: transparent;
+    border: none;
+    color: var(--text);
+    text-align: left;
+    padding: 8px 18px;
+    font-family: var(--font-ui, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial);
+    font-size: 0.95em;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.writer-context-menu button:hover {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.writer-context-menu button.danger {
+    color: var(--error);
+}
+
+.writer-context-menu button.danger:hover {
+    background: color-mix(in srgb, var(--error) 18%, transparent);
+}
+
+@keyframes writerToast {
+    0% { opacity: 0; transform: translateY(10px); }
+    10% { opacity: 1; transform: translateY(0); }
+    85% { opacity: 1; transform: translateY(0); }
+    100% { opacity: 0; transform: translateY(8px); }
+}
+
+.writer-toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: color-mix(in srgb, var(--panel) 85%, rgba(0,0,0,0.85));
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-family: var(--font-ui, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial);
+    font-size: 0.9em;
+    letter-spacing: 0.04em;
+    animation: writerToast 2.8s ease forwards;
+    z-index: 4500;
+}
+
+.writer-toast.ok {
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.writer-toast.warn {
+    border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+
+.writer-toast.error {
+    border-color: color-mix(in srgb, var(--error) 45%, transparent);
+}
+
+@media (max-width: 960px) {
+    .writer-main {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .writer-navigation {
+        transform-origin: top left;
+    }
+    .writer-root.nav-collapsed .writer-navigation {
+        transform: translateY(-18px);
+    }
+}
+
 .cm-activeRow {
     max-width: calc(var(--editor-max-width) + 1ch + 60px);
     margin: auto;
@@ -321,16 +639,22 @@ body {
 }
 
 .cm-line.todo-line {
-    padding-left: calc(var(--todo-prefix-ch, 0) * 1ch);
-    text-indent: calc(var(--todo-prefix-ch, 0) * -1ch);
+    padding-left: 0;
+    text-indent: 0;
 }
 
 .cm-line.todo-line .todo-text {
     white-space: pre-wrap;
 }
 
+.cm-line.todo-line .todo-click-target {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .cm-line.completed .todo-text {
-    opacity: 0.6;        /* example style */
+    opacity: 0.6;
     text-decoration: line-through;
 }
 

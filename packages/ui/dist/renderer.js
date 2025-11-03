@@ -25951,6 +25951,382 @@ function matchTemplateSchedule(schedule, dateStr) {
   return null;
 }
 
+// packages/ui/js/listLayout.js
+var ORDERED_LIST_RE = /^(\s*)(\d+)([.)])(\s+)(.*)$/;
+var TODO_LIST_RE = /^(\s*)([-*])(\s+)\[( |x|X)\](\s*)(.*)$/;
+var UNORDERED_LIST_RE = /^(\s*)([-+*])(\s+)(.*)$/;
+var LIST_GAP_CH = 0.5;
+function countLeadingSpaces(text) {
+  const match = text.match(/^\s*/);
+  return match ? match[0].length : 0;
+}
+function linesInSelection(state2) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const r of state2.selection.ranges) {
+    let line = state2.doc.lineAt(r.from).number;
+    const endLine = state2.doc.lineAt(r.to).number;
+    for (; line <= endLine; line++) {
+      if (!seen.has(line)) {
+        seen.add(line);
+        out.push(line);
+      }
+    }
+  }
+  return out;
+}
+function parseListLine(text) {
+  if (!text) return null;
+  const todo = text.match(TODO_LIST_RE);
+  if (todo) {
+    const indent = todo[1] || "";
+    const bullet2 = todo[2];
+    const gap = todo[3] || " ";
+    const mark = todo[4] || " ";
+    const after = todo[5] && todo[5].length ? todo[5] : " ";
+    const rest = todo[6] ?? "";
+    const prefix = indent + bullet2 + gap + `[${mark}]` + after;
+    return {
+      type: "todo",
+      indent,
+      indentLength: indent.length,
+      bullet: bullet2,
+      spacing: gap,
+      checked: mark.toLowerCase() === "x",
+      afterBracket: after,
+      content: rest,
+      contentStart: prefix.length,
+      markerLength: prefix.length - indent.length
+    };
+  }
+  const ordered = text.match(ORDERED_LIST_RE);
+  if (ordered) {
+    const indent = ordered[1] || "";
+    const numberText = ordered[2];
+    const markerChar = ordered[3];
+    const gap = ordered[4] || " ";
+    const rest = ordered[5] ?? "";
+    const prefix = indent + numberText + markerChar + gap;
+    return {
+      type: "ordered",
+      indent,
+      indentLength: indent.length,
+      number: Number(numberText),
+      numberText,
+      markerChar,
+      spacing: gap,
+      content: rest,
+      contentStart: prefix.length,
+      markerLength: prefix.length - indent.length
+    };
+  }
+  const unordered = text.match(UNORDERED_LIST_RE);
+  if (unordered) {
+    const indent = unordered[1] || "";
+    const bullet2 = unordered[2];
+    const gap = unordered[3] || " ";
+    const rest = unordered[4] ?? "";
+    const prefix = indent + bullet2 + gap;
+    return {
+      type: "unordered",
+      indent,
+      indentLength: indent.length,
+      bullet: bullet2,
+      spacing: gap,
+      content: rest,
+      contentStart: prefix.length,
+      markerLength: prefix.length - indent.length
+    };
+  }
+  return null;
+}
+function makeListPrefix(parsed, overrides2 = {}) {
+  const indent = overrides2.indent ?? parsed.indent;
+  switch (parsed.type) {
+    case "ordered": {
+      const number2 = overrides2.number ?? 1;
+      const spacing = parsed.spacing && parsed.spacing.length ? parsed.spacing : " ";
+      return `${indent}${number2}${parsed.markerChar}${spacing}`;
+    }
+    case "unordered": {
+      const spacing = parsed.spacing && parsed.spacing.length ? parsed.spacing : " ";
+      const bullet2 = overrides2.bullet ?? parsed.bullet;
+      return `${indent}${bullet2}${spacing}`;
+    }
+    case "todo": {
+      const spacing = parsed.spacing && parsed.spacing.length ? parsed.spacing : " ";
+      const afterBracket = parsed.afterBracket && parsed.afterBracket.length ? parsed.afterBracket : " ";
+      const bullet2 = overrides2.bullet ?? parsed.bullet;
+      const checked = overrides2.checked === true ? "x" : " ";
+      return `${indent}${bullet2}${spacing}[${checked}]${afterBracket}`;
+    }
+    default:
+      return indent;
+  }
+}
+function listEnterCommandFactory(indentString2) {
+  return function listEnterCommand(view) {
+    const { state: state2 } = view;
+    if (state2.selection.ranges.length !== 1) return false;
+    const range = state2.selection.main;
+    if (!range.empty) return false;
+    const line = state2.doc.lineAt(range.head);
+    const parsed = parseListLine(line.text);
+    if (!parsed) return false;
+    const cursorOffset = range.head - line.from;
+    if (cursorOffset < parsed.contentStart) {
+      const target = line.from + parsed.contentStart;
+      if (range.head !== target) {
+        view.dispatch({
+          selection: EditorSelection.cursor(target),
+          scrollIntoView: true
+        });
+      }
+      return true;
+    }
+    const content2 = line.text.slice(parsed.contentStart).trim();
+    if (!content2) {
+      const parentIndentLength = Math.max(0, parsed.indentLength - indentString2.length);
+      const parentIndent = parsed.indent.slice(0, parentIndentLength);
+      const removeTo = line.from + parsed.contentStart;
+      view.dispatch({
+        changes: { from: line.from, to: removeTo, insert: parentIndent },
+        selection: EditorSelection.cursor(line.from + parentIndentLength),
+        scrollIntoView: true,
+        annotations: Transaction.userEvent.of("input")
+      });
+      insertNewlineAndIndent(view);
+      return true;
+    }
+    const nextNumber = parsed.type === "ordered" ? parsed.number + 1 : void 0;
+    const prefix = makeListPrefix(parsed, {
+      number: nextNumber,
+      checked: false
+    });
+    const insertText = `
+${prefix}`;
+    view.dispatch({
+      changes: { from: range.from, to: range.to, insert: insertText },
+      selection: EditorSelection.cursor(range.from + insertText.length),
+      scrollIntoView: true,
+      annotations: Transaction.userEvent.of("input")
+    });
+    return true;
+  };
+}
+function listIndentCommandFactory(indentString2) {
+  return function listIndentCommand(view) {
+    const { state: state2 } = view;
+    const selectedLines = linesInSelection(state2);
+    if (!selectedLines.length) return indentMore(view);
+    const targets = [];
+    for (const lineNumber of selectedLines) {
+      const ln = state2.doc.line(lineNumber);
+      const parsed = parseListLine(ln.text);
+      if (!parsed) return indentMore(view);
+      targets.push(ln);
+    }
+    if (!targets.length) return true;
+    const changes = targets.map((ln) => ({ from: ln.from, to: ln.from, insert: indentString2 }));
+    view.dispatch({
+      changes,
+      scrollIntoView: true,
+      annotations: Transaction.userEvent.of("input")
+    });
+    return true;
+  };
+}
+function listOutdentCommandFactory(indentString2) {
+  return function listOutdentCommand(view) {
+    const { state: state2 } = view;
+    const selectedLines = linesInSelection(state2);
+    if (!selectedLines.length) return indentLess(view);
+    const changes = [];
+    for (const lineNumber of selectedLines) {
+      const ln = state2.doc.line(lineNumber);
+      const parsed = parseListLine(ln.text);
+      if (!parsed) return indentLess(view);
+      if (!parsed.indentLength) return indentLess(view);
+      const remove2 = Math.min(indentString2.length, parsed.indentLength);
+      changes.push({ from: ln.from, to: ln.from + remove2, insert: "" });
+    }
+    if (!changes.length) return true;
+    view.dispatch({
+      changes,
+      scrollIntoView: true,
+      annotations: Transaction.userEvent.of("input")
+    });
+    return true;
+  };
+}
+function createListKeymap(indentString2 = "  ") {
+  const enterCommand = listEnterCommandFactory(indentString2);
+  const indentCommand = listIndentCommandFactory(indentString2);
+  const outdentCommand = listOutdentCommandFactory(indentString2);
+  return Prec.highest(keymap.of([
+    { key: "Enter", run: enterCommand },
+    { key: "Shift-Enter", run: enterCommand },
+    {
+      key: "Tab",
+      preventDefault: true,
+      run: indentCommand
+    },
+    {
+      key: "Shift-Tab",
+      preventDefault: true,
+      run: outdentCommand
+    }
+  ]));
+}
+function analyzeListStructure(state2) {
+  const builder = new RangeSetBuilder();
+  const numberingChanges = [];
+  const doc2 = state2.doc;
+  const levels = [];
+  const allLevels = [];
+  const lineInfos = [];
+  const ensureLevel = (parsed) => {
+    const indent = parsed.indentLength;
+    while (levels.length && indent < levels[levels.length - 1].indent) {
+      levels.pop();
+    }
+    let level = levels.length ? levels[levels.length - 1] : null;
+    if (!level || indent > level.indent) {
+      level = {
+        indent,
+        type: parsed.type,
+        counter: 0,
+        maxDigits: 0,
+        markerWidth: parsed.markerLength,
+        spacingWidth: parsed.spacing ? parsed.spacing.length : 1
+      };
+      levels.push(level);
+      allLevels.push(level);
+      return level;
+    }
+    if (indent === level.indent && level.type !== parsed.type) {
+      level = {
+        indent,
+        type: parsed.type,
+        counter: 0,
+        maxDigits: 0,
+        markerWidth: parsed.markerLength,
+        spacingWidth: parsed.spacing ? parsed.spacing.length : 1
+      };
+      levels[levels.length - 1] = level;
+      allLevels.push(level);
+      return level;
+    }
+    if (indent === level.indent) {
+      level.markerWidth = Math.max(level.markerWidth, parsed.markerLength);
+      level.spacingWidth = Math.max(level.spacingWidth, parsed.spacing ? parsed.spacing.length : 1);
+      return level;
+    }
+    return level;
+  };
+  for (let lineNo = 1; lineNo <= doc2.lines; lineNo++) {
+    const line = doc2.line(lineNo);
+    const parsed = parseListLine(line.text);
+    if (parsed) {
+      const level = ensureLevel(parsed);
+      if (parsed.type === "ordered") {
+        level.counter += 1;
+        const expected = level.counter;
+        const expectedText = String(expected);
+        level.maxDigits = Math.max(level.maxDigits, expectedText.length);
+        level.markerWidth = Math.max(level.markerWidth, parsed.markerLength);
+        if (parsed.number !== expected) {
+          const numberFrom = line.from + parsed.indentLength;
+          const numberTo = numberFrom + parsed.numberText.length;
+          numberingChanges.push({ from: numberFrom, to: numberTo, insert: expectedText });
+        }
+        lineInfos.push({ line, parsed, level });
+      } else {
+        level.markerWidth = Math.max(level.markerWidth, parsed.markerLength);
+        lineInfos.push({ line, parsed, level });
+      }
+    } else {
+      if (!line.text.trim().length) {
+        levels.length = 0;
+        continue;
+      }
+      const indentLen = countLeadingSpaces(line.text);
+      while (levels.length && indentLen <= levels[levels.length - 1].indent) {
+        levels.pop();
+      }
+    }
+  }
+  for (const level of allLevels) {
+    if (level.type === "ordered") {
+      const digits = Math.max(level.maxDigits, 1);
+      const spacing = Math.max(level.spacingWidth || 1, 1);
+      level.markerWidth = Math.max(level.markerWidth, digits + 1 + spacing);
+    } else if (level.type === "todo") {
+      level.markerWidth = Math.max(level.markerWidth, 5);
+    } else if (level.type === "unordered") {
+      level.markerWidth = Math.max(level.markerWidth, 2);
+    }
+  }
+  for (const info of lineInfos) {
+    const { line, parsed, level } = info;
+    const styleParts = [
+      `--list-indent-ch:${parsed.indentLength}`,
+      `--list-marker-ch:${level.markerWidth}`,
+      `--list-gap-ch:${LIST_GAP_CH}`
+    ];
+    const attributes = {
+      style: styleParts.join(";"),
+      "data-list-type": parsed.type
+    };
+    builder.add(
+      line.from,
+      line.from,
+      Decoration.line({ class: `cm-list-line cm-list-type-${parsed.type}`, attributes })
+    );
+    if (parsed.indentLength > 0) {
+      builder.add(
+        line.from,
+        line.from + parsed.indentLength,
+        Decoration.mark({ class: "cm-list-indent" })
+      );
+    }
+    const markerFrom = line.from + parsed.indentLength;
+    const markerTo = line.from + parsed.contentStart;
+    builder.add(markerFrom, markerTo, Decoration.mark({ class: "cm-list-marker" }));
+    if (markerTo < line.to) {
+      builder.add(markerTo, line.to, Decoration.mark({ class: "cm-list-content" }));
+    }
+  }
+  return {
+    decorations: builder.finish(),
+    numberingChanges
+  };
+}
+var autoNumberAnnotation = Annotation.define();
+var listLayoutPlugin = ViewPlugin.fromClass(class {
+  constructor(view) {
+    const result = analyzeListStructure(view.state);
+    this.decorations = result.decorations;
+  }
+  update(update) {
+    if (!(update.docChanged || update.viewportChanged)) return;
+    const result = analyzeListStructure(update.state);
+    this.decorations = result.decorations;
+  }
+}, {
+  decorations: (v) => v.decorations
+});
+var listRenumberListener = EditorView.updateListener.of((update) => {
+  if (!update.docChanged) return;
+  if (update.transactions.some((tr) => tr.annotation(autoNumberAnnotation))) return;
+  const result = analyzeListStructure(update.state);
+  if (!result.numberingChanges.length) return;
+  update.view.dispatch({
+    changes: result.numberingChanges,
+    annotations: [autoNumberAnnotation.of(true), Transaction.addToHistory.of(false)]
+  });
+});
+
 // packages/ui/js/editor.js
 function hasPointerUserEvent(update) {
   if (!update || !Array.isArray(update.transactions)) return false;
@@ -25971,12 +26347,6 @@ var todoDecorationPlugin = ViewPlugin.fromClass(class {
   }
   buildDecorations(view) {
     const builder = new RangeSetBuilder();
-    const tabSize = view.state.tabSize ?? 4;
-    const measureColumns = (str) => {
-      let cols = 0;
-      for (const ch of str) cols += ch === "	" ? tabSize : 1;
-      return cols;
-    };
     for (let { from, to } of view.visibleRanges) {
       let startLine = view.state.doc.lineAt(from).number;
       let endLine = view.state.doc.lineAt(to).number;
@@ -25985,11 +26355,9 @@ var todoDecorationPlugin = ViewPlugin.fromClass(class {
         const todoPrefixMatch = line.text.match(/^(\s*[-*]\s+\[( |x)\]\s*)/);
         if (todoPrefixMatch) {
           const isChecked = todoPrefixMatch[2] === "x";
-          const prefixLen = measureColumns(todoPrefixMatch[1] ?? "");
           const lineClasses = ["todo-line"];
           if (isChecked) lineClasses.push("completed");
           const lineSpec = { class: lineClasses.join(" ") };
-          lineSpec.attributes = { style: `--todo-prefix-ch:${prefixLen};` };
           builder.add(
             line.from,
             line.from,
@@ -26281,7 +26649,7 @@ function startEditor(shell2, opts = {}) {
     const lines = state2.buffer.length;
     return `${lines} line${lines === 1 ? "" : "s"}`;
   }
-  const retroTheme = EditorView.theme({
+  const retroTheme2 = EditorView.theme({
     "&": { backgroundColor: "var(--editor-bg)", color: "var(--editor-fg)", height: "100%" },
     ".cm-content": {
       caretColor: "var(--editor-caret)",
@@ -26304,6 +26672,10 @@ function startEditor(shell2, opts = {}) {
     // --- To-do clickable overlay style ---
     ".todo-click-target": {
       position: "relative",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      minWidth: "2ch",
       cursor: "pointer",
       background: "transparent",
       zIndex: 2,
@@ -26321,9 +26693,38 @@ function startEditor(shell2, opts = {}) {
       transition: "opacity 0.1s",
       pointerEvents: "none"
     },
-    ".todo-click-target:hover::after": { opacity: 1 }
+    ".todo-click-target:hover::after": { opacity: 1 },
+    ".cm-line.cm-list-line": {
+      display: "flex",
+      alignItems: "flex-start",
+      gap: "calc(var(--list-gap-ch, 0.5) * 1ch)"
+    },
+    ".cm-line.cm-list-line .cm-list-indent": {
+      flex: "0 0 calc(var(--list-indent-ch, 0) * 1ch)",
+      width: "calc(var(--list-indent-ch, 0) * 1ch)",
+      whiteSpace: "pre"
+    },
+    ".cm-line.cm-list-line .cm-list-marker": {
+      display: "flex",
+      justifyContent: "flex-end",
+      flex: "0 0 calc(var(--list-marker-ch, 2) * 1ch)",
+      width: "calc(var(--list-marker-ch, 2) * 1ch)",
+      whiteSpace: "pre",
+      textAlign: "right",
+      fontVariantNumeric: "tabular-nums lining-nums",
+      fontFeatureSettings: '"tnum" 1, "lnum" 1',
+      opacity: 0.85,
+      userSelect: "none"
+    },
+    ".cm-line.cm-list-line .cm-list-content": {
+      flex: "1 1 auto",
+      minWidth: 0,
+      whiteSpace: "pre-wrap",
+      lineHeight: "1.5",
+      wordBreak: "break-word"
+    }
   }, { dark: true });
-  const retroHighlight = HighlightStyle.define([
+  const retroHighlight2 = HighlightStyle.define([
     { tag: tags.strong, fontWeight: "700" },
     { tag: tags.emphasis, fontStyle: "italic" },
     { tag: tags.heading1, fontWeight: "700", fontSize: "1.5em" },
@@ -26331,7 +26732,7 @@ function startEditor(shell2, opts = {}) {
     { tag: tags.heading3, fontWeight: "700", fontSize: "1.2em" },
     { tag: [tags.heading4, tags.heading5, tags.heading6], fontWeight: "700" }
   ]);
-  function getScrollContainer(view) {
+  function getScrollContainer2(view) {
     let el = view.scrollDOM;
     while (el) {
       const cs = getComputedStyle(el);
@@ -26341,11 +26742,11 @@ function startEditor(shell2, opts = {}) {
     }
     return view.scrollDOM;
   }
-  const snapOutOfView = EditorView.updateListener.of((update) => {
+  const snapOutOfView2 = EditorView.updateListener.of((update) => {
     if (!(update.docChanged || update.selectionSet)) return;
     if (hasPointerUserEvent(update)) return;
     const view = update.view;
-    const scroller = getScrollContainer(view);
+    const scroller = getScrollContainer2(view);
     if (!scroller) return;
     requestAnimationFrame(() => {
       const head = view.state.selection.main.head;
@@ -26366,7 +26767,7 @@ function startEditor(shell2, opts = {}) {
       }
     });
   });
-  const activeRowPlugin = ViewPlugin.fromClass(class {
+  const activeRowPlugin2 = ViewPlugin.fromClass(class {
     constructor(view) {
       this.view = view;
       this.dom = document.createElement("div");
@@ -26376,7 +26777,7 @@ function startEditor(shell2, opts = {}) {
       this.dom.style.right = "0";
       this.dom.style.pointerEvents = "none";
       this.dom.style.zIndex = "1";
-      const container = getScrollContainer(view);
+      const container = getScrollContainer2(view);
       const cs = getComputedStyle(container);
       if (cs.position === "static") container.style.position = "relative";
       container.appendChild(this.dom);
@@ -26399,7 +26800,7 @@ function startEditor(shell2, opts = {}) {
             this._visible = false;
             return;
           }
-          const container = getScrollContainer(this.view);
+          const container = getScrollContainer2(this.view);
           const scrollerRect = container.getBoundingClientRect();
           this._top = caret3.top - scrollerRect.top + container.scrollTop;
           this._height = Math.max(1, caret3.bottom - caret3.top);
@@ -26430,7 +26831,7 @@ function startEditor(shell2, opts = {}) {
       this.dom = null;
     }
   });
-  function typewriterAdvanceScroll() {
+  function typewriterAdvanceScroll2() {
     return ViewPlugin.fromClass(class {
       constructor(view) {
         this.view = view;
@@ -26448,7 +26849,7 @@ function startEditor(shell2, opts = {}) {
           read: () => {
             const head = this.view.state.selection.main.head;
             const caret3 = this.view.coordsAtPos(head);
-            const scroller = getScrollContainer(this.view);
+            const scroller = getScrollContainer2(this.view);
             if (!caret3 || !scroller) {
               this._curBottom = null;
               return;
@@ -26458,7 +26859,7 @@ function startEditor(shell2, opts = {}) {
           },
           write: () => {
             this._scheduled = false;
-            const scroller = getScrollContainer(this.view);
+            const scroller = getScrollContainer2(this.view);
             const cur = this._curBottom;
             if (!scroller || cur == null) return;
             if (this._lastBottom == null) {
@@ -26502,69 +26903,9 @@ function startEditor(shell2, opts = {}) {
       state2.dirty = true;
     }
   });
-  const INDENT = "    ";
-  const indentConfig = indentUnit.of(INDENT);
-  const LIST_START_RE = /^\s*(?:[-+*]\s|\d+\.\s|>\s)/;
-  function linesInSelection(state3) {
-    const seen = /* @__PURE__ */ new Set();
-    const out = [];
-    for (const r of state3.selection.ranges) {
-      let line = state3.doc.lineAt(r.from).number;
-      const endLine = state3.doc.lineAt(r.to).number;
-      for (; line <= endLine; line++) {
-        if (!seen.has(line)) {
-          seen.add(line);
-          out.push(line);
-        }
-      }
-    }
-    return out;
-  }
-  const smartListTabKeymap = keymap.of([
-    {
-      key: "Tab",
-      preventDefault: true,
-      run: (view) => {
-        const { state: state3 } = view;
-        const lines = linesInSelection(state3);
-        if (lines.length && lines.every((n) => LIST_START_RE.test(state3.doc.line(n).text))) {
-          const changes = lines.map((n) => {
-            const ln = state3.doc.line(n);
-            return { from: ln.from, to: ln.from, insert: INDENT };
-          });
-          view.dispatch({ changes, scrollIntoView: true });
-          return true;
-        }
-        return indentMore(view);
-      }
-    },
-    {
-      key: "Shift-Tab",
-      preventDefault: true,
-      run: (view) => {
-        const { state: state3 } = view;
-        const lines = linesInSelection(state3);
-        if (!lines.length) return indentLess(view);
-        if (lines.every((n) => /^\s+/.test(state3.doc.line(n).text))) {
-          const changes = [];
-          for (const n of lines) {
-            const ln = state3.doc.line(n);
-            const txt = ln.text;
-            if (!LIST_START_RE.test(txt)) return indentLess(view);
-            let remove2 = 0;
-            for (let i = 0; i < INDENT.length && i < txt.length && txt[i] === " "; i++) remove2++;
-            if (remove2 > 0) changes.push({ from: ln.from, to: ln.from + remove2, insert: "" });
-          }
-          if (changes.length) {
-            view.dispatch({ changes, scrollIntoView: true });
-            return true;
-          }
-        }
-        return indentLess(view);
-      }
-    }
-  ]);
-  function dynamicScrollerPadding() {
+  const INDENT2 = "  ";
+  const indentConfig = indentUnit.of(INDENT2);
+  function dynamicScrollerPadding2() {
     return ViewPlugin.fromClass(class {
       constructor(view) {
         this.view = view;
@@ -26625,22 +26966,24 @@ function startEditor(shell2, opts = {}) {
       { key: "Mod-t", preventDefault: true, run: insertTodo }
     ]);
     return [
-      retroTheme,
-      dynamicScrollerPadding(),
+      retroTheme2,
+      dynamicScrollerPadding2(),
       drawSelection(),
       // === Active line highlight mode ============================================
       // Current: use a single visual-row overlay (safe measured plugin).
       // If you prefer the paragraph-wide highlight, comment out `activeRowPlugin`
       // below and uncomment the `highlightActiveLine()` line here. Also restore the
       // .cm-activeLine background in the theme above.
-      activeRowPlugin,
-      typewriterAdvanceScroll(),
-      snapOutOfView,
+      activeRowPlugin2,
+      typewriterAdvanceScroll2(),
+      snapOutOfView2,
       unsavedTracker,
       history(),
       todoPlugin,
+      listLayoutPlugin,
+      listRenumberListener,
       indentConfig,
-      smartListTabKeymap,
+      createListKeymap(INDENT2),
       keymap.of([
         ...defaultKeymap,
         ...historyKeymap,
@@ -26653,11 +26996,11 @@ function startEditor(shell2, opts = {}) {
       saveExitKeymap,
       indentOnInput(),
       markdown(),
-      syntaxHighlighting(retroHighlight),
+      syntaxHighlighting(retroHighlight2),
       EditorView.lineWrapping
     ];
   }
-  function showToast(message, id2 = "writerToast") {
+  function showToast2(message, id2 = "writerToast") {
     try {
       const prev = id2 ? document.getElementById(id2) : null;
       if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
@@ -26696,11 +27039,11 @@ function startEditor(shell2, opts = {}) {
       return;
     }
     clearUnsaved();
-    showToast("Saved");
+    showToast2("Saved");
     state2.dirty = false;
   }
   function showTemplateSavedToast() {
-    showToast("Template Saved", "templateToast");
+    showToast2("Template Saved", "templateToast");
   }
   function showTemplateModal({ onSave, onCancel, initialValue = "", initialSchedule: initialSchedule2 = null } = {}) {
     const prev = document.getElementById("templateModal");
@@ -27315,7 +27658,7 @@ function startEditor(shell2, opts = {}) {
   const docLen = cmView.state.doc.length;
   cmView.dispatch({ selection: { anchor: docLen }, scrollIntoView: true });
   requestAnimationFrame(() => {
-    const scroller = typeof getScrollContainer === "function" ? getScrollContainer(cmView) : cmView.scrollDOM;
+    const scroller = typeof getScrollContainer2 === "function" ? getScrollContainer2(cmView) : cmView.scrollDOM;
     if (!scroller) return;
     const child = cmView.scrollDOM;
     const ch = scroller.clientHeight || Math.max(0, window.innerHeight || document.documentElement.clientHeight || 0);
@@ -27327,14 +27670,1191 @@ function startEditor(shell2, opts = {}) {
     const contentBottom = Math.max(0, scroller.scrollHeight - padBottom);
     const target = Math.max(0, contentBottom - Math.round(ch * 0.35));
     scroller.scrollTop = target;
-    requestAnimationFrame(() => {
-      INIT_SCROLL_SUPPRESS.delete(cmView);
-    });
   });
   window.addEventListener("keydown", onHotkey, true);
   const program = {
     async consume(_line) {
       state2.dirty = true;
+    }
+  };
+  shell2.enter(program);
+  return program;
+}
+
+// packages/ui/js/writerApp.js
+var MENU_ACTIONS = {
+  OPEN: "open",
+  DUPLICATE: "duplicate",
+  DELETE: "delete",
+  EXPORT: "export",
+  RENAME: "rename"
+};
+var INDENT = "  ";
+function hasPointerUserEvent2(update) {
+  if (!update || !Array.isArray(update.transactions)) return false;
+  return update.transactions.some((tr) => {
+    const userEvent = tr.annotation(Transaction.userEvent);
+    if (typeof userEvent !== "string") return false;
+    const lowered = userEvent.toLowerCase();
+    return lowered.includes("pointer") || lowered.includes("mouse");
+  });
+}
+var todoDecorationPlugin2 = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.decorations = this.buildDecorations(view);
+  }
+  update(update) {
+    if (update.docChanged || update.viewportChanged)
+      this.decorations = this.buildDecorations(update.view);
+  }
+  buildDecorations(view) {
+    const builder = new RangeSetBuilder();
+    for (let { from, to } of view.visibleRanges) {
+      let startLine = view.state.doc.lineAt(from).number;
+      let endLine = view.state.doc.lineAt(to).number;
+      for (let i = startLine; i <= endLine; ++i) {
+        const line = view.state.doc.line(i);
+        const match = line.text.match(/^(\s*[-*]\s+\[( |x)\]\s*)/);
+        if (!match) continue;
+        const isChecked = match[2] === "x";
+        const lineClasses = ["todo-line"];
+        if (isChecked) lineClasses.push("completed");
+        const lineSpec = { class: lineClasses.join(" ") };
+        builder.add(line.from, line.from, Decoration.line(lineSpec));
+        const bracketStart = line.text.indexOf("[");
+        const bracketEnd = line.text.indexOf("]", bracketStart);
+        if (bracketStart === -1 || bracketEnd === -1) continue;
+        const decoFrom = line.from + bracketStart;
+        const decoTo = line.from + bracketEnd + 1;
+        builder.add(decoFrom, decoTo, Decoration.mark({ class: "todo-click-target" }));
+        const spaceAfter = line.text.slice(bracketEnd + 1).match(/^\s*/)[0].length;
+        const contentStart = line.from + bracketEnd + 1 + spaceAfter;
+        if (contentStart < line.to) {
+          builder.add(contentStart, line.to, Decoration.mark({ class: "todo-text" }));
+        }
+      }
+    }
+    return builder.finish();
+  }
+}, {
+  decorations: (v) => v.decorations
+});
+var todoPlugin2 = [
+  todoDecorationPlugin2,
+  EditorView.domEventHandlers({
+    mousedown(event, view) {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return false;
+      const processToggle = (line2) => {
+        const match2 = line2.text.match(/^\s*[-*]\s+\[( |x)\]/);
+        if (!match2) return false;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+        const checked = match2[1] === "x";
+        const newMark = checked ? " " : "x";
+        const newText = line2.text.replace(
+          /^(\s*[-*]\s+\[)( |x)(\])/,
+          (_, prefix, mark, suffix) => `${prefix}${newMark}${suffix}`
+        );
+        const tr = view.state.update({
+          changes: { from: line2.from, to: line2.to, insert: newText },
+          annotations: Transaction.userEvent.of("pointer.todo-toggle")
+        });
+        view.dispatch(tr);
+        return true;
+      };
+      if (target.classList.contains("todo-click-target")) {
+        const pos2 = view.posAtDOM(target, event.clientX, event.clientY);
+        const line2 = view.state.doc.lineAt(pos2);
+        return processToggle(line2);
+      }
+      const lineNode = target.closest(".cm-line");
+      if (!lineNode) return false;
+      const pos = view.posAtDOM(lineNode, event.clientX, event.clientY);
+      const line = view.state.doc.lineAt(pos);
+      const match = line.text.match(/^\s*[-*]\s+\[( |x)\]/);
+      if (!match) return false;
+      const bracketStart = line.text.indexOf("[");
+      const bracketEnd = line.text.indexOf("]", bracketStart);
+      if (bracketStart === -1 || bracketEnd === -1) return false;
+      const range = document.createRange();
+      range.setStart(lineNode.firstChild || lineNode, 0);
+      range.setEnd(lineNode.firstChild || lineNode, lineNode.textContent?.length ?? 0);
+      const rects = range.getClientRects();
+      const rect = Array.from(rects).find((r) => event.clientY >= r.top && event.clientY <= r.bottom);
+      if (!rect) return false;
+      const relativeX = event.clientX - rect.left;
+      const averageChar = rect.width / (line.text.length || 1);
+      const charOffset = Math.floor(relativeX / Math.max(averageChar, 1));
+      if (charOffset < bracketStart || charOffset > bracketEnd) return false;
+      return processToggle(line);
+    }
+  })
+];
+var retroTheme = EditorView.theme({
+  "&": { backgroundColor: "var(--editor-bg)", color: "var(--editor-fg)", height: "100%" },
+  ".cm-content": {
+    caretColor: "var(--editor-caret)",
+    fontFamily: "var(--font-editor, var(--font-mono))",
+    fontSize: "var(--editor-font-size)",
+    lineHeight: "var(--editor-line-height)"
+  },
+  ".cm-scroller": { fontFamily: "inherit", height: "100%", overflow: "auto" },
+  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--editor-caret)" },
+  "&.cm-editor.cm-focused": { outline: "none" },
+  ".cm-activeLine": { backgroundColor: "transparent" },
+  ".cm-selectionBackground, ::selection": { backgroundColor: "var(--editor-selection-bg)" },
+  ".cm-lineNumbers": { color: "color-mix(in srgb, var(--text) 55%, transparent)" },
+  ".cm-gutters": { backgroundColor: "var(--editor-gutter-bg)", borderRight: "1px solid var(--border, rgba(255,255,255,0.1))" },
+  ".cm-panels": { background: "var(--editor-panel-bg)" },
+  ".todo-click-target": {
+    position: "relative",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: "2ch",
+    cursor: "pointer",
+    background: "transparent",
+    zIndex: 2,
+    pointerEvents: "auto"
+  },
+  ".todo-click-target::after": {
+    content: '""',
+    position: "absolute",
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    background: "var(--editor-todo-hover-bg)",
+    opacity: 0,
+    transition: "opacity 0.1s",
+    pointerEvents: "none"
+  },
+  ".todo-click-target:hover::after": { opacity: 1 },
+  ".cm-line.cm-list-line": {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: "calc(var(--list-gap-ch, 0.5) * 1ch)"
+  },
+  ".cm-line.cm-list-line .cm-list-indent": {
+    flex: "0 0 calc(var(--list-indent-ch, 0) * 1ch)",
+    width: "calc(var(--list-indent-ch, 0) * 1ch)",
+    whiteSpace: "pre"
+  },
+  ".cm-line.cm-list-line .cm-list-marker": {
+    display: "flex",
+    justifyContent: "flex-end",
+    flex: "0 0 calc(var(--list-marker-ch, 2) * 1ch)",
+    width: "calc(var(--list-marker-ch, 2) * 1ch)",
+    whiteSpace: "pre",
+    textAlign: "right",
+    fontVariantNumeric: "tabular-nums lining-nums",
+    fontFeatureSettings: '"tnum" 1, "lnum" 1',
+    opacity: 0.85,
+    userSelect: "none"
+  },
+  ".cm-line.cm-list-line .cm-list-content": {
+    flex: "1 1 auto",
+    minWidth: 0,
+    whiteSpace: "pre-wrap",
+    lineHeight: "1.5",
+    wordBreak: "break-word"
+  }
+}, { dark: true });
+var retroHighlight = HighlightStyle.define([
+  { tag: tags.strong, fontWeight: "700" },
+  { tag: tags.emphasis, fontStyle: "italic" },
+  { tag: tags.heading1, fontWeight: "700", fontSize: "1.5em" },
+  { tag: tags.heading2, fontWeight: "700", fontSize: "1.35em" },
+  { tag: tags.heading3, fontWeight: "700", fontSize: "1.2em" },
+  { tag: [tags.heading4, tags.heading5, tags.heading6], fontWeight: "700" }
+]);
+function getScrollContainer(view) {
+  let el = view.scrollDOM;
+  while (el) {
+    const cs = getComputedStyle(el);
+    const oy = cs.overflowY || cs.overflow || "";
+    if (oy.includes("auto") || oy.includes("scroll")) return el;
+    el = el.parentElement;
+  }
+  return view.scrollDOM;
+}
+var snapOutOfView = EditorView.updateListener.of((update) => {
+  if (!(update.docChanged || update.selectionSet)) return;
+  if (hasPointerUserEvent2(update)) return;
+  const view = update.view;
+  const scroller = getScrollContainer(view);
+  if (!scroller) return;
+  requestAnimationFrame(() => {
+    const head = view.state.selection.main.head;
+    const caret3 = view.coordsAtPos(head);
+    if (!caret3) return;
+    const scr = scroller.getBoundingClientRect();
+    const above = caret3.top < scr.top;
+    const below = caret3.bottom > scr.bottom;
+    if (!above && !below) return;
+    const lineH = view.defaultLineHeight || 24;
+    const pad = lineH * 2;
+    if (above) {
+      const delta = caret3.top - (scr.top + pad);
+      scroller.scrollTop += delta;
+    } else if (below) {
+      const delta = caret3.bottom - (scr.bottom - pad);
+      scroller.scrollTop += delta;
+    }
+  });
+});
+var activeRowPlugin = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.view = view;
+    this.dom = document.createElement("div");
+    this.dom.className = "cm-activeRow";
+    this.dom.style.position = "absolute";
+    this.dom.style.left = "0";
+    this.dom.style.right = "0";
+    this.dom.style.pointerEvents = "none";
+    this.dom.style.zIndex = "1";
+    const container = getScrollContainer(view);
+    const cs = getComputedStyle(container);
+    if (cs.position === "static") container.style.position = "relative";
+    container.appendChild(this.dom);
+    this._onResize = () => this.schedule();
+    window.addEventListener("resize", this._onResize, { passive: true });
+    this._scheduled = false;
+    this._top = 0;
+    this._height = 0;
+    this._visible = false;
+    this.schedule();
+  }
+  schedule() {
+    if (this._scheduled) return;
+    this._scheduled = true;
+    this.view.requestMeasure({
+      read: () => {
+        const head = this.view.state.selection.main.head;
+        const caret3 = this.view.coordsAtPos(head);
+        if (!caret3) {
+          this._visible = false;
+          return;
+        }
+        const container = getScrollContainer(this.view);
+        const scrollerRect = container.getBoundingClientRect();
+        this._top = caret3.top - scrollerRect.top + container.scrollTop;
+        this._height = Math.max(1, caret3.bottom - caret3.top);
+        this._visible = true;
+      },
+      write: () => {
+        this._scheduled = false;
+        if (!this.dom) return;
+        if (!this._visible) {
+          this.dom.style.display = "none";
+          return;
+        }
+        this.dom.style.display = "block";
+        this.dom.style.top = `${this._top}px`;
+        this.dom.style.height = `${this._height}px`;
+        this.dom.style.background = "var(--editor-active-line-bg)";
+      }
+    });
+  }
+  update(update) {
+    if (update.selectionSet || update.viewportChanged || update.domChanged || update.scrollChanged) {
+      this.schedule();
+    }
+  }
+  destroy() {
+    window.removeEventListener("resize", this._onResize);
+    if (this.dom && this.dom.parentNode) this.dom.parentNode.removeChild(this.dom);
+    this.dom = null;
+  }
+});
+function typewriterAdvanceScroll() {
+  return ViewPlugin.fromClass(class {
+    constructor(view) {
+      this.view = view;
+      this._scheduled = false;
+      this._lastBottom = null;
+      this._lineH = view.defaultLineHeight || 24;
+      this._suppressScroll = false;
+      this._curBottom = null;
+      this.schedule();
+    }
+    schedule() {
+      if (this._scheduled) return;
+      this._scheduled = true;
+      this.view.requestMeasure({
+        read: () => {
+          const head = this.view.state.selection.main.head;
+          const caret3 = this.view.coordsAtPos(head);
+          const scroller = getScrollContainer(this.view);
+          if (!caret3 || !scroller) {
+            this._curBottom = null;
+            return;
+          }
+          const scrRect = scroller.getBoundingClientRect();
+          this._curBottom = caret3.bottom - scrRect.top + scroller.scrollTop;
+        },
+        write: () => {
+          this._scheduled = false;
+          const scroller = getScrollContainer(this.view);
+          const cur = this._curBottom;
+          if (!scroller || cur == null) return;
+          if (this._lastBottom == null) {
+            this._lastBottom = cur;
+            return;
+          }
+          if (this._suppressScroll) {
+            this._lastBottom = cur;
+            this._suppressScroll = false;
+            return;
+          }
+          const dy = cur - this._lastBottom;
+          const threshold = this._lineH * 0.6;
+          if (dy > threshold) {
+            scroller.scrollTop += Math.round(dy);
+            this._lastBottom = cur;
+          } else if (dy < -threshold) {
+            this._lastBottom = cur;
+          }
+        }
+      });
+    }
+    update(update) {
+      if (hasPointerUserEvent2(update)) {
+        this._suppressScroll = true;
+      }
+      if (update.selectionSet || update.docChanged || update.viewportChanged || update.scrollChanged || update.domChanged) {
+        this.schedule();
+      }
+    }
+  });
+}
+function dynamicScrollerPadding() {
+  return ViewPlugin.fromClass(class {
+    constructor(view) {
+      this.view = view;
+      this.scroller = view.scrollDOM;
+      this.scroller.style.boxSizing = "content-box";
+      this._onWindowResize = () => this.updatePads();
+      this._ro = new ResizeObserver(() => this.updatePads());
+      this._ro.observe(this.scroller);
+      window.addEventListener("resize", this._onWindowResize, { passive: true });
+      this.updatePads();
+    }
+    updatePads() {
+      const vh = Math.max(0, window.innerHeight || document.documentElement.clientHeight || 0);
+      const pad = Math.round(vh * 0.7);
+      const topVal = pad + "px";
+      const botVal = pad + "px";
+      if (this.scroller && this.scroller.style.paddingTop !== topVal) this.scroller.style.paddingTop = topVal;
+      if (this.scroller && this.scroller.style.paddingBottom !== botVal) this.scroller.style.paddingBottom = botVal;
+    }
+    update(update) {
+      if (update.viewportChanged || update.domChanged) this.updatePads();
+    }
+    destroy() {
+      try {
+        this._ro && this._ro.disconnect();
+      } catch {
+      }
+      window.removeEventListener("resize", this._onWindowResize);
+    }
+  });
+}
+var INIT_SCROLL_SUPPRESS = /* @__PURE__ */ new WeakSet();
+function showToast(message, variant = "info", id2 = "writerToast") {
+  try {
+    const prev = id2 ? document.getElementById(id2) : null;
+    if (prev && prev.parentElement) prev.parentElement.removeChild(prev);
+    const toast = document.createElement("div");
+    if (id2) toast.id = id2;
+    toast.className = `template-toast ${variant}`;
+    toast.textContent = message;
+    (document.body || document.documentElement).appendChild(toast);
+    toast.addEventListener("animationend", () => {
+      if (toast && toast.parentElement) toast.parentElement.removeChild(toast);
+    }, { once: true });
+  } catch (_) {
+  }
+}
+function startWriter(shell2, opts = {}) {
+  const writerAPI = window?.db?.writer;
+  if (!writerAPI || typeof writerAPI.list !== "function") {
+    shell2.print('<div class="error">Writer is unavailable in this environment.</div>');
+    return null;
+  }
+  const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent || "");
+  const outputEl = document.getElementById("output");
+  const inputWrapEl = document.getElementById("inputWrap");
+  const caretEl = document.querySelector(".caret");
+  const screenEl = document.getElementById("screen");
+  const titleEl = document.querySelector(".title");
+  const titlebar = document.querySelector(".titlebar");
+  const state2 = {
+    docs: [],
+    current: null,
+    dirty: false,
+    savedSnapshot: "",
+    cmView: null,
+    rootEl: null,
+    listEl: null,
+    contextMenuEl: null,
+    toggleBtn: null,
+    titleHelpEl: null,
+    navCollapsed: false,
+    domSnapshot: null,
+    titlebarInsertions: [],
+    prompt: opts.prompt || "writer>"
+  };
+  function esc2(str) {
+    return String(str ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  }
+  function captureDOMSnapshot() {
+    state2.domSnapshot = {
+      outputHTML: outputEl ? outputEl.innerHTML : "",
+      inputDisplay: inputWrapEl ? inputWrapEl.style.display : "",
+      caretDisplay: caretEl ? caretEl.style.display : "",
+      screenPadding: screenEl ? screenEl.style.padding : ""
+    };
+  }
+  function hideConsole() {
+    if (inputWrapEl) inputWrapEl.style.display = "none";
+    if (caretEl) caretEl.style.display = "none";
+    if (outputEl) outputEl.innerHTML = "";
+    if (screenEl) screenEl.classList.add("locked");
+    if (titleEl) titleEl.style.opacity = "0.6";
+    if (titlebar) titlebar.classList.add("writer-mode");
+    if (titlebar) {
+      const toggleBtn = document.createElement("button");
+      toggleBtn.type = "button";
+      toggleBtn.className = "writer-toggle";
+      toggleBtn.title = "Toggle file selector";
+      toggleBtn.setAttribute("aria-label", "Toggle file selector");
+      toggleBtn.setAttribute("aria-pressed", "false");
+      toggleBtn.innerHTML = '<span class="writer-toggle-icon" aria-hidden="true"></span>';
+      toggleBtn.addEventListener("click", toggleNavigation);
+      titlebar.insertBefore(toggleBtn, titlebar.firstChild);
+      state2.toggleBtn = toggleBtn;
+      state2.titlebarInsertions.push(toggleBtn);
+      const help = document.createElement("span");
+      help.className = "writer-title-help muted";
+      help.textContent = isMac ? "\u2318+S save \xB7 Ctrl+X exit" : "Ctrl+S save \xB7 Ctrl+Q exit";
+      titlebar.appendChild(help);
+      state2.titleHelpEl = help;
+      state2.titlebarInsertions.push(help);
+    }
+  }
+  function restoreConsole() {
+    if (screenEl) screenEl.classList.remove("locked");
+    if (state2.rootEl && state2.rootEl.parentElement) {
+      state2.rootEl.parentElement.removeChild(state2.rootEl);
+    }
+    if (outputEl && state2.domSnapshot) outputEl.innerHTML = state2.domSnapshot.outputHTML;
+    if (inputWrapEl && state2.domSnapshot) inputWrapEl.style.display = state2.domSnapshot.inputDisplay;
+    if (caretEl && state2.domSnapshot) caretEl.style.display = state2.domSnapshot.caretDisplay;
+    if (screenEl && state2.domSnapshot) screenEl.style.padding = state2.domSnapshot.screenPadding;
+    if (titleEl) titleEl.style.opacity = "";
+    if (titlebar) {
+      titlebar.classList.remove("writer-mode");
+      state2.titlebarInsertions.forEach((node) => {
+        if (node && node.parentElement) node.parentElement.removeChild(node);
+      });
+      state2.titlebarInsertions = [];
+    }
+    if (state2.contextMenuEl && state2.contextMenuEl.parentElement) {
+      state2.contextMenuEl.parentElement.removeChild(state2.contextMenuEl);
+    }
+  }
+  function ensureContextMenu() {
+    if (state2.contextMenuEl) return state2.contextMenuEl;
+    const menu = document.createElement("div");
+    menu.className = "writer-context-menu";
+    menu.innerHTML = `
+            <button data-action="${MENU_ACTIONS.OPEN}">Open</button>
+            <button data-action="${MENU_ACTIONS.RENAME}">Rename</button>
+            <button data-action="${MENU_ACTIONS.DUPLICATE}">Duplicate</button>
+            <button data-action="${MENU_ACTIONS.EXPORT}">Export PDF</button>
+            <button data-action="${MENU_ACTIONS.DELETE}" class="danger">Delete</button>
+        `;
+    document.body.appendChild(menu);
+    state2.contextMenuEl = menu;
+    return menu;
+  }
+  function closeContextMenu() {
+    if (state2.contextMenuEl) state2.contextMenuEl.classList.remove("visible");
+  }
+  function markDirty() {
+    if (state2.dirty) return;
+    state2.dirty = true;
+    if (state2.current) {
+      const item = state2.listEl?.querySelector(`[data-id="${state2.current.id}"]`);
+      if (item) item.classList.add("dirty");
+    }
+  }
+  function clearDirty(snapshot) {
+    state2.dirty = false;
+    if (typeof snapshot === "string") state2.savedSnapshot = snapshot;
+    if (state2.current) {
+      const item = state2.listEl?.querySelector(`[data-id="${state2.current.id}"]`);
+      if (item) item.classList.remove("dirty");
+    }
+  }
+  function buildExtensions() {
+    const saveExitKeymap = keymap.of([
+      {
+        key: "Mod-s",
+        preventDefault: true,
+        run: () => {
+          saveCurrentDocument();
+          return true;
+        }
+      },
+      {
+        key: isMac ? "Ctrl-x" : "Ctrl-q",
+        preventDefault: true,
+        run: () => {
+          requestExit();
+          return true;
+        }
+      },
+      {
+        key: "Mod-t",
+        preventDefault: true,
+        run: (view) => {
+          const spec = view.state.changeByRange((range) => {
+            const insertText = "- [ ] ";
+            return {
+              changes: { from: range.from, to: range.to, insert: insertText },
+              range: EditorSelection.cursor(range.from + insertText.length)
+            };
+          });
+          view.dispatch(view.state.update(spec, {
+            scrollIntoView: true,
+            userEvent: "input"
+          }));
+          return true;
+        }
+      }
+    ]);
+    const unsavedTracker = EditorView.updateListener.of((update) => {
+      if (!(update && update.docChanged)) return;
+      const cur = update.state.doc.toString();
+      if (cur === state2.savedSnapshot) {
+        clearDirty();
+        state2.dirty = false;
+      } else {
+        markDirty();
+      }
+    });
+    return [
+      retroTheme,
+      dynamicScrollerPadding(),
+      drawSelection(),
+      activeRowPlugin,
+      typewriterAdvanceScroll(),
+      snapOutOfView,
+      unsavedTracker,
+      history(),
+      todoPlugin2,
+      listLayoutPlugin,
+      listRenumberListener,
+      indentUnit.of(INDENT),
+      createListKeymap(INDENT),
+      keymap.of([
+        ...defaultKeymap,
+        ...historyKeymap,
+        ...searchKeymap,
+        { key: "Mod-f", preventDefault: true, run: openSearchPanel },
+        { key: "Enter", run: findNext },
+        { key: "Shift-Enter", run: findPrevious }
+      ]),
+      search({ top: true }),
+      saveExitKeymap,
+      indentOnInput(),
+      markdown(),
+      syntaxHighlighting(retroHighlight),
+      EditorView.lineWrapping
+    ];
+  }
+  function attachGlobalListeners() {
+    window.addEventListener("click", closeContextMenu, true);
+    window.addEventListener("contextmenu", (e) => {
+      if (!state2.listEl || !state2.listEl.contains(e.target)) {
+        closeContextMenu();
+      }
+    });
+    window.addEventListener("keydown", onHotkey, true);
+  }
+  function detachGlobalListeners() {
+    window.removeEventListener("click", closeContextMenu, true);
+    window.removeEventListener("keydown", onHotkey, true);
+  }
+  function onHotkey(e) {
+    if (isMac && e.metaKey || !isMac && e.ctrlKey) {
+      if (e.shiftKey && (e.key === "n" || e.key === "N")) {
+        e.preventDefault();
+        createNewDocument();
+        return;
+      }
+    }
+    if (e.key === "Escape") closeContextMenu();
+  }
+  function toggleNavigation() {
+    state2.navCollapsed = !state2.navCollapsed;
+    if (state2.rootEl) {
+      if (state2.navCollapsed) state2.rootEl.classList.add("nav-collapsed");
+      else state2.rootEl.classList.remove("nav-collapsed");
+    }
+    if (state2.toggleBtn) {
+      state2.toggleBtn.setAttribute("aria-pressed", state2.navCollapsed ? "true" : "false");
+    }
+  }
+  function renderLayout() {
+    const root = document.createElement("div");
+    root.id = "writerRoot";
+    root.className = "writer-root";
+    const main = document.createElement("div");
+    main.className = "writer-main";
+    const navigation = document.createElement("div");
+    navigation.className = "writer-navigation";
+    navigation.innerHTML = `
+            <div class="writer-files">
+                <div class="writer-files-header">
+                    <span>Files</span>
+                    <button class="writer-create" title="New document" aria-label="New document"></button>
+                </div>
+                <div class="writer-files-body">
+                    <ul class="writer-file-list"></ul>
+                </div>
+            </div>
+        `;
+    const editor = document.createElement("div");
+    editor.className = "writer-editor";
+    editor.innerHTML = `
+            <div class="writer-editor-pane" id="writerEditorPane"></div>
+        `;
+    main.appendChild(navigation);
+    main.appendChild(editor);
+    root.appendChild(main);
+    state2.rootEl = root;
+    state2.listEl = navigation.querySelector(".writer-file-list");
+    const createBtn = navigation.querySelector(".writer-create");
+    if (createBtn) {
+      createBtn.addEventListener("click", () => createNewDocument());
+    }
+    if (state2.listEl) {
+      state2.listEl.addEventListener("click", onFileClick);
+      state2.listEl.addEventListener("contextmenu", onFileContextMenu);
+    }
+    return root;
+  }
+  function mountUI() {
+    captureDOMSnapshot();
+    hideConsole();
+    const parent = outputEl?.parentElement || screenEl;
+    if (parent) parent.appendChild(renderLayout());
+    attachGlobalListeners();
+    ensureContextMenu();
+    const paneEl = document.getElementById("writerEditorPane");
+    if (!paneEl) throw new Error("Writer editor pane missing");
+    state2.cmView = new EditorView({
+      state: EditorState.create({ doc: "", extensions: buildExtensions() }),
+      parent: paneEl
+    });
+    INIT_SCROLL_SUPPRESS.add(state2.cmView);
+    state2.savedSnapshot = "";
+    clearDirty("");
+  }
+  function redrawFileList() {
+    if (!state2.listEl) return;
+    state2.listEl.innerHTML = "";
+    for (const doc2 of state2.docs) {
+      const item = document.createElement("li");
+      item.className = "writer-file-item";
+      item.dataset.id = String(doc2.id);
+      if (state2.current && doc2.id === state2.current.id) item.classList.add("active");
+      item.innerHTML = `
+                <div class="writer-file-title">${esc2(doc2.title)}</div>
+                <div class="writer-file-meta muted">${formatUpdatedAt(doc2.updated_at)}</div>
+            `;
+      state2.listEl.appendChild(item);
+    }
+    const host = state2.listEl.parentElement;
+    if (host) {
+      const prevEmpty = host.querySelector(".writer-files-empty");
+      if (prevEmpty) prevEmpty.remove();
+      if (!state2.docs.length) {
+        const empty2 = document.createElement("div");
+        empty2.className = "writer-files-empty muted";
+        empty2.textContent = "Create your first document with the + button.";
+        host.appendChild(empty2);
+      }
+    }
+  }
+  function setActiveListItem(id2) {
+    if (!state2.listEl) return;
+    state2.listEl.querySelectorAll(".writer-file-item").forEach((item) => {
+      if (item.dataset.id === String(id2)) item.classList.add("active");
+      else item.classList.remove("active");
+    });
+  }
+  function formatUpdatedAt(value) {
+    if (!value) return "";
+    try {
+      const dt = new Date(value);
+      if (Number.isNaN(dt.getTime())) return "";
+      return dt.toLocaleString();
+    } catch (_) {
+      return "";
+    }
+  }
+  async function loadDocuments() {
+    try {
+      const docs = await writerAPI.list();
+      state2.docs = Array.isArray(docs) ? docs : [];
+      redrawFileList();
+      if (state2.docs.length && (!state2.current || !state2.docs.some((d) => d.id === state2.current.id))) {
+        await openDocument(state2.docs[0].id, { force: true });
+      } else if (!state2.docs.length) {
+        setEditorContent("", "Untitled Document");
+        state2.current = null;
+      }
+    } catch (err) {
+      shell2.print(`<div class="error">Failed to load writer documents: ${esc2(err?.message || err)}</div>`);
+    }
+  }
+  function setEditorContent(content2, title, snapshotOverride) {
+    if (!state2.cmView) return;
+    const doc2 = typeof content2 === "string" ? content2 : "";
+    state2.cmView.dispatch({
+      changes: { from: 0, to: state2.cmView.state.doc.length, insert: doc2 }
+    });
+    const docLen = state2.cmView.state.doc.length;
+    state2.cmView.dispatch({ selection: { anchor: docLen }, scrollIntoView: true });
+    requestAnimationFrame(() => {
+      const scroller = getScrollContainer(state2.cmView);
+      if (!scroller) return;
+      const ch = scroller.clientHeight || Math.max(0, window.innerHeight || 0);
+      const csContainer = getComputedStyle(scroller);
+      const child = state2.cmView.scrollDOM;
+      const csChild = child && child !== scroller ? getComputedStyle(child) : csContainer;
+      const padBottomContainer = parseFloat(csContainer.paddingBottom || "0") || 0;
+      const padBottomChild = parseFloat(csChild.paddingBottom || "0") || 0;
+      const padBottom = Math.max(padBottomContainer, padBottomChild);
+      const contentBottom = Math.max(0, scroller.scrollHeight - padBottom);
+      const target = Math.max(0, contentBottom - Math.round(ch * 0.35));
+      scroller.scrollTop = target;
+      requestAnimationFrame(() => {
+        INIT_SCROLL_SUPPRESS.delete(state2.cmView);
+      });
+    });
+    state2.savedSnapshot = typeof snapshotOverride === "string" ? snapshotOverride : doc2;
+    clearDirty(state2.savedSnapshot);
+  }
+  async function openDocument(id2, { force = false } = {}) {
+    if (!force && state2.current && state2.current.id === id2) return;
+    if (!force && state2.dirty) {
+      const result = await confirmModal({
+        title: "Unsaved changes",
+        message: "Save changes before switching documents?",
+        confirmLabel: "Save",
+        cancelLabel: "Discard"
+      });
+      if (result === "confirm") {
+        const saved = await saveCurrentDocument();
+        if (!saved) return;
+      }
+      clearDirty();
+    }
+    try {
+      const doc2 = await writerAPI.get(id2);
+      if (!doc2) return;
+      state2.current = doc2;
+      setActiveListItem(id2);
+      setEditorContent(doc2.content || "", doc2.title || "Untitled Document", doc2.content || "");
+    } catch (err) {
+      shell2.print(`<div class="error">Unable to open document: ${esc2(err?.message || err)}</div>`);
+    }
+  }
+  function onFileClick(e) {
+    const li = e.target.closest(".writer-file-item");
+    if (!li) return;
+    const id2 = Number(li.dataset.id);
+    if (!Number.isFinite(id2)) return;
+    openDocument(id2);
+  }
+  function onFileContextMenu(e) {
+    const li = e.target.closest(".writer-file-item");
+    if (!li) return;
+    e.preventDefault();
+    const id2 = Number(li.dataset.id);
+    if (!Number.isFinite(id2)) return;
+    const menu = ensureContextMenu();
+    menu.dataset.fileId = String(id2);
+    menu.style.left = `${e.clientX}px`;
+    menu.style.top = `${e.clientY}px`;
+    menu.classList.add("visible");
+    menu.querySelectorAll("button").forEach((btn) => {
+      btn.onclick = () => {
+        const action = btn.dataset.action;
+        handleContextAction(action, id2);
+        closeContextMenu();
+      };
+    });
+  }
+  async function handleContextAction(action, id2) {
+    switch (action) {
+      case MENU_ACTIONS.OPEN:
+        await openDocument(id2);
+        break;
+      case MENU_ACTIONS.DUPLICATE:
+        await duplicateDocument(id2);
+        break;
+      case MENU_ACTIONS.DELETE:
+        await deleteDocument(id2);
+        break;
+      case MENU_ACTIONS.EXPORT:
+        await exportDocument(id2);
+        break;
+      case MENU_ACTIONS.RENAME:
+        await renameDocument(id2);
+        break;
+      default:
+        break;
+    }
+  }
+  async function saveCurrentDocument() {
+    if (!state2.current) {
+      const doc2 = await createNewDocument();
+      if (!doc2) return false;
+    }
+    if (!state2.cmView || !state2.current) return false;
+    const title = state2.current.title || "Untitled Document";
+    const content2 = state2.cmView.state.doc.toString();
+    try {
+      const updated = await writerAPI.update({
+        id: state2.current.id,
+        title,
+        content: content2,
+        folderId: state2.current.folder_id ?? null
+      });
+      state2.current = updated;
+      state2.savedSnapshot = content2;
+      clearDirty(content2);
+      await loadDocuments();
+      setActiveListItem(state2.current.id);
+      showToast("Document saved", "ok");
+      return true;
+    } catch (err) {
+      showToast(`Save failed: ${err?.message || err}`, "error", "writerToastError");
+      return false;
+    }
+  }
+  async function createNewDocument() {
+    if (state2.dirty) {
+      const proceed = await confirmModal({
+        title: "Unsaved changes",
+        message: "Save current document before creating a new one?",
+        confirmLabel: "Save",
+        cancelLabel: "Discard"
+      });
+      if (proceed === "confirm") {
+        const saved = await saveCurrentDocument();
+        if (!saved) return null;
+      } else {
+        clearDirty();
+      }
+    }
+    const requested = await promptModal({
+      title: "New document",
+      value: "Untitled",
+      confirmLabel: "Create",
+      cancelLabel: "Cancel"
+    });
+    if (requested === null) return null;
+    const trimmed = String(requested ?? "").trim();
+    if (!trimmed) return null;
+    const desiredTitle = trimmed;
+    const existingTitles = new Set(state2.docs.map((doc2) => doc2.title));
+    let title = desiredTitle;
+    let counter = 2;
+    while (existingTitles.has(title)) {
+      title = `${desiredTitle} ${counter++}`;
+    }
+    try {
+      const doc2 = await writerAPI.create({ title, content: "" });
+      await loadDocuments();
+      await openDocument(doc2.id, { force: true });
+      showToast("New document created", "ok");
+      return doc2;
+    } catch (err) {
+      shell2.print(`<div class="error">Failed to create document: ${esc2(err?.message || err)}</div>`);
+      return null;
+    }
+  }
+  async function duplicateDocument(id2) {
+    try {
+      const source = await writerAPI.get(id2);
+      if (!source) return;
+      const base2 = `${source.title} Copy`;
+      const existingTitles = new Set(state2.docs.map((doc3) => doc3.title));
+      let title = base2;
+      let counter = 1;
+      while (existingTitles.has(title)) {
+        counter += 1;
+        title = `${base2} ${counter}`;
+      }
+      const doc2 = await writerAPI.duplicate(id2, { title });
+      await loadDocuments();
+      await openDocument(doc2.id, { force: true });
+      showToast("Document duplicated", "ok");
+    } catch (err) {
+      shell2.print(`<div class="error">Duplicate failed: ${esc2(err?.message || err)}</div>`);
+    }
+  }
+  async function renameDocument(id2) {
+    const target = state2.docs.find((doc2) => doc2.id === id2);
+    if (!target) return;
+    const result = await promptModal({
+      title: "Rename document",
+      value: target.title || "Untitled Document",
+      confirmLabel: "Rename"
+    });
+    if (!result || !result.trim()) return;
+    const title = result.trim();
+    try {
+      const renamed = await writerAPI.rename(id2, title);
+      await loadDocuments();
+      if (state2.current && state2.current.id === id2) {
+        state2.current = { ...state2.current, title: renamed.title };
+        if (!state2.dirty) setActiveListItem(id2);
+      }
+      showToast("Document renamed", "ok");
+    } catch (err) {
+      shell2.print(`<div class="error">Rename failed: ${esc2(err?.message || err)}</div>`);
+    }
+  }
+  async function deleteDocument(id2) {
+    const target = state2.docs.find((doc2) => doc2.id === id2);
+    if (!target) return;
+    const result = await confirmModal({
+      title: "Delete document?",
+      message: `This will permanently remove "${target.title}".`,
+      confirmLabel: "Delete",
+      cancelLabel: "Cancel",
+      danger: true
+    });
+    if (result !== "confirm") return;
+    try {
+      await writerAPI.delete(id2);
+      showToast("Document deleted", "warn");
+      await loadDocuments();
+      if (state2.current && state2.current.id === id2) {
+        state2.current = null;
+        if (state2.docs.length) {
+          await openDocument(state2.docs[0].id, { force: true });
+        } else {
+          setEditorContent("", "Untitled Document", "");
+          clearDirty("");
+        }
+      }
+    } catch (err) {
+      shell2.print(`<div class="error">Delete failed: ${esc2(err?.message || err)}</div>`);
+    }
+  }
+  async function exportDocument(id2) {
+    try {
+      const doc2 = await writerAPI.get(id2);
+      if (!doc2) return;
+      await exportAsPdf(doc2);
+    } catch (err) {
+      shell2.print(`<div class="error">Export failed: ${esc2(err?.message || err)}</div>`);
+    }
+  }
+  async function exportAsPdf(doc2) {
+    const title = doc2.title || "Writer Document";
+    const base2 = title.replace(/[^\w.-]+/g, "-");
+    const filename = `${base2}.pdf`;
+    const markdownContent = doc2.content || "";
+    const downloadsDir = await getDownloadsDir2();
+    const outputPath = `${downloadsDir}/${filename}`;
+    const useElectron = !!(window.electronAPI && typeof window.electronAPI.exportJournal === "function");
+    if (useElectron) {
+      try {
+        await window.electronAPI.exportJournal({ markdown: markdownContent, outputPath, cssPath: "packages/ui/css/pdf.css", title });
+        showToast(`Exported to ${outputPath}`, "ok", "writerToastExport");
+      } catch (err) {
+        showToast(`Export failed: ${err?.message || err}`, "error", "writerToastExport");
+      }
+      return;
+    }
+    try {
+      const resp = await fetch("/api/export-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ markdown: markdownContent, title })
+      });
+      if (!resp.ok) throw new Error(`Server export failed (${resp.status})`);
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+        a.remove();
+      }, 1e3);
+      showToast(`Downloaded ${filename}`, "ok", "writerToastExport");
+    } catch (err) {
+      showToast(`Export failed: ${err?.message || err}`, "error", "writerToastExport");
+    }
+  }
+  async function getDownloadsDir2() {
+    if (window.electronAPI && typeof window.electronAPI.getPath === "function") {
+      try {
+        return await window.electronAPI.getPath("downloads");
+      } catch (_) {
+      }
+    }
+    return ".";
+  }
+  function requestExit() {
+    if (state2.dirty) {
+      confirmModal({
+        title: "Unsaved changes",
+        message: "Save current document before exiting?",
+        confirmLabel: "Save",
+        cancelLabel: "Discard"
+      }).then(async (result) => {
+        if (result === "confirm") {
+          const saved = await saveCurrentDocument();
+          if (!saved) return;
+        }
+        clearDirty();
+        performExit();
+      });
+    } else {
+      performExit();
+    }
+  }
+  function performExit() {
+    detachGlobalListeners();
+    if (state2.cmView) {
+      state2.cmView.destroy();
+      state2.cmView = null;
+    }
+    restoreConsole();
+    shell2.exit();
+    shell2.print('<div class="muted">Exited Writer.</div>');
+  }
+  function confirmModal({ title, message, confirmLabel = "OK", cancelLabel = "Cancel", danger = false } = {}) {
+    return new Promise((resolve) => {
+      const wrap = document.createElement("div");
+      wrap.className = "cj-modal-backdrop";
+      wrap.innerHTML = `
+                <div class="cj-modal" role="dialog" aria-modal="true">
+                    <div class="cj-modal-title">${esc2(title)}</div>
+                    <div class="cj-modal-body">${esc2(message)}</div>
+                    <div class="cj-modal-actions">
+                        <button class="confirm ${danger ? "danger" : ""}">${confirmLabel}</button>
+                        <button class="cancel">${cancelLabel}</button>
+                    </div>
+                </div>
+            `;
+      document.body.appendChild(wrap);
+      const confirmBtn = wrap.querySelector("button.confirm");
+      const cancelBtn = wrap.querySelector("button.cancel");
+      const cleanup = () => {
+        if (wrap && wrap.parentElement) wrap.parentElement.removeChild(wrap);
+        window.removeEventListener("keydown", onKey, true);
+      };
+      const accept = () => {
+        cleanup();
+        resolve("confirm");
+      };
+      const reject = () => {
+        cleanup();
+        resolve("cancel");
+      };
+      function onKey(e) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          reject();
+        }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          accept();
+        }
+      }
+      confirmBtn.addEventListener("click", accept);
+      cancelBtn.addEventListener("click", reject);
+      window.addEventListener("keydown", onKey, true);
+      setTimeout(() => confirmBtn.focus(), 0);
+    });
+  }
+  function promptModal({ title, value = "", confirmLabel = "OK", cancelLabel = "Cancel" } = {}) {
+    return new Promise((resolve) => {
+      const wrap = document.createElement("div");
+      wrap.className = "cj-modal-backdrop";
+      wrap.innerHTML = `
+                <div class="cj-modal" role="dialog" aria-modal="true">
+                    <div class="cj-modal-title">${esc2(title)}</div>
+                    <div class="cj-modal-body">
+                        <input type="text" class="cj-modal-input" value="${esc2(value)}" spellcheck="false" />
+                    </div>
+                    <div class="cj-modal-actions">
+                        <button class="confirm">${confirmLabel}</button>
+                        <button class="cancel">${cancelLabel}</button>
+                    </div>
+                </div>
+            `;
+      document.body.appendChild(wrap);
+      const input2 = wrap.querySelector(".cj-modal-input");
+      const confirmBtn = wrap.querySelector("button.confirm");
+      const cancelBtn = wrap.querySelector("button.cancel");
+      const cleanup = () => {
+        if (wrap && wrap.parentElement) wrap.parentElement.removeChild(wrap);
+        window.removeEventListener("keydown", onKey, true);
+      };
+      const accept = () => {
+        cleanup();
+        resolve(input2.value);
+      };
+      const reject = () => {
+        cleanup();
+        resolve(null);
+      };
+      function onKey(e) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          reject();
+        }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          accept();
+        }
+      }
+      confirmBtn.addEventListener("click", accept);
+      cancelBtn.addEventListener("click", reject);
+      window.addEventListener("keydown", onKey, true);
+      setTimeout(() => {
+        input2.focus();
+        input2.select();
+      }, 0);
+    });
+  }
+  mountUI();
+  shell2.setPrompt(state2.prompt);
+  loadDocuments();
+  const program = {
+    async consume() {
+    },
+    destroy() {
+      detachGlobalListeners();
+      closeContextMenu();
     }
   };
   shell2.enter(program);
@@ -30345,11 +31865,16 @@ var screen = document.querySelector("#screen");
 var db = window.db;
 if (!db) {
   if (!window.electronAPI) {
+    let normalizeWriterTitle = function(title) {
+      const trimmed = String(title ?? "").trim();
+      return trimmed || "Untitled Document";
+    };
     const DB_NAME = "console-journal";
-    const DB_VERSION = 3;
+    const DB_VERSION = 4;
     const STORE = "entries";
     const TEMPLATE_STORE = "templates";
     const SETTINGS_STORE = "settings";
+    const WRITER_STORE = "writer_docs";
     const openDB = () => new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
@@ -30365,6 +31890,12 @@ if (!db) {
         }
         if (!db2.objectStoreNames.contains(SETTINGS_STORE)) {
           db2.createObjectStore(SETTINGS_STORE, { keyPath: "key" });
+        }
+        if (!db2.objectStoreNames.contains(WRITER_STORE)) {
+          const w = db2.createObjectStore(WRITER_STORE, { keyPath: "id", autoIncrement: true });
+          w.createIndex("updated_at", "updated_at", { unique: false });
+          w.createIndex("folder_id", "folder_id", { unique: false });
+          w.createIndex("title_lower", "title_lower", { unique: false });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -30387,6 +31918,7 @@ if (!db) {
       });
     };
     const txRun = (mode, fn) => txRunStore(STORE, mode, fn);
+    const txRunWriter = (mode, fn) => txRunStore(WRITER_STORE, mode, fn);
     db = {
       async get(date) {
         return txRun("readonly", (store) => {
@@ -30543,6 +32075,132 @@ if (!db) {
             getReq.onerror = () => reject(getReq.error);
           });
         });
+      },
+      writer: {
+        async list() {
+          return txRunWriter("readonly", (store) => {
+            const idx = store.index("updated_at");
+            const out = [];
+            return new Promise((resolve, reject) => {
+              const cursor = idx.openCursor(null, "prev");
+              cursor.onsuccess = () => {
+                const cur = cursor.result;
+                if (!cur) return resolve(out);
+                out.push(cur.value);
+                cur.continue();
+              };
+              cursor.onerror = () => reject(cursor.error);
+            });
+          });
+        },
+        async get(id2) {
+          const key = Number(id2);
+          if (!Number.isFinite(key)) throw new Error("Writer document id required");
+          return txRunWriter("readonly", (store) => {
+            const req = store.get(key);
+            return new Promise((resolve, reject) => {
+              req.onsuccess = () => resolve(req.result || null);
+              req.onerror = () => reject(req.error);
+            });
+          });
+        },
+        async create({ title, content: content2 = "", folderId = null } = {}) {
+          const now = (/* @__PURE__ */ new Date()).toISOString();
+          const titleNormalized = normalizeWriterTitle(title);
+          const doc2 = {
+            title: titleNormalized,
+            title_lower: titleNormalized.toLowerCase(),
+            content: String(content2 ?? ""),
+            folder_id: folderId == null ? null : Number(folderId),
+            created_at: now,
+            updated_at: now
+          };
+          return txRunWriter("readwrite", (store) => {
+            const req = store.add(doc2);
+            return new Promise((resolve, reject) => {
+              req.onsuccess = () => resolve({ ...doc2, id: req.result });
+              req.onerror = () => reject(req.error);
+            });
+          });
+        },
+        async update({ id: id2, title, content: content2 = "", folderId = null } = {}) {
+          const key = Number(id2);
+          if (!Number.isFinite(key)) throw new Error("Writer document id required");
+          const now = (/* @__PURE__ */ new Date()).toISOString();
+          const titleNormalized = normalizeWriterTitle(title);
+          return txRunWriter("readwrite", (store) => {
+            const getReq = store.get(key);
+            return new Promise((resolve, reject) => {
+              getReq.onsuccess = () => {
+                const existing = getReq.result;
+                if (!existing) {
+                  reject(new Error("Document not found"));
+                  return;
+                }
+                const next = {
+                  ...existing,
+                  title: titleNormalized,
+                  title_lower: titleNormalized.toLowerCase(),
+                  content: String(content2 ?? ""),
+                  folder_id: folderId == null ? null : Number(folderId),
+                  updated_at: now
+                };
+                const putReq = store.put(next);
+                putReq.onsuccess = () => resolve(next);
+                putReq.onerror = () => reject(putReq.error);
+              };
+              getReq.onerror = () => reject(getReq.error);
+            });
+          });
+        },
+        async delete(id2) {
+          const key = Number(id2);
+          if (!Number.isFinite(key)) throw new Error("Writer document id required");
+          return txRunWriter("readwrite", (store) => {
+            const req = store.delete(key);
+            return new Promise((resolve, reject) => {
+              req.onsuccess = () => resolve({ deleted: 1 });
+              req.onerror = () => reject(req.error);
+            });
+          });
+        },
+        async duplicate(id2, { title, folderId = null } = {}) {
+          const source = await this.get(id2);
+          if (!source) throw new Error("Document not found");
+          const nextTitle = normalizeWriterTitle(title || `${source.title} Copy`);
+          return this.create({
+            title: nextTitle,
+            content: source.content ?? "",
+            folderId: folderId ?? source.folder_id ?? null
+          });
+        },
+        async rename(id2, title) {
+          const key = Number(id2);
+          if (!Number.isFinite(key)) throw new Error("Writer document id required");
+          const normalized = normalizeWriterTitle(title);
+          return txRunWriter("readwrite", (store) => {
+            const getReq = store.get(key);
+            return new Promise((resolve, reject) => {
+              getReq.onsuccess = () => {
+                const existing = getReq.result;
+                if (!existing) {
+                  reject(new Error("Document not found"));
+                  return;
+                }
+                const next = {
+                  ...existing,
+                  title: normalized,
+                  title_lower: normalized.toLowerCase(),
+                  updated_at: (/* @__PURE__ */ new Date()).toISOString()
+                };
+                const putReq = store.put(next);
+                putReq.onsuccess = () => resolve(next);
+                putReq.onerror = () => reject(putReq.error);
+              };
+              getReq.onerror = () => reject(getReq.error);
+            });
+          });
+        }
       }
     };
     window.db = db;
@@ -30604,7 +32262,16 @@ if (!db) {
           schedule: parseTemplateSchedule(row.schedule)
         }));
       },
-      deleteTemplate: (name2) => invoke("template:delete", name2)
+      deleteTemplate: (name2) => invoke("template:delete", name2),
+      writer: {
+        list: () => invoke("writer:list"),
+        get: (id2) => invoke("writer:get", id2),
+        create: (payload = {}) => invoke("writer:create", payload),
+        update: (payload = {}) => invoke("writer:update", payload),
+        delete: (id2) => invoke("writer:delete", id2),
+        duplicate: (id2, overrides2 = {}) => invoke("writer:duplicate", { id: id2, ...overrides2 }),
+        rename: (id2, title) => invoke("writer:rename", { id: id2, title })
+      }
     };
   }
 }
@@ -31204,6 +32871,17 @@ register("quit", async () => {
     print(`<div class="error">Quit failed: ${esc(msg)}</div>`);
   }
 }, "Close the application");
+register("write", async (argv = []) => {
+  if (argv && argv.length) {
+    print('<div class="warn">Writer ignores additional arguments.</div>');
+  }
+  try {
+    startWriter(shell);
+  } catch (err) {
+    const msg = err?.message || String(err);
+    print(`<div class="error">Unable to open Writer: ${esc(msg)}</div>`);
+  }
+}, "Open the Writer workspace");
 register("journal", async (argv = []) => {
   const args = argv.map((a) => String(a).trim()).filter((a) => a.length > 0);
   let templateName = null;

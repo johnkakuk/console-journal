@@ -1,12 +1,13 @@
 /* ==== editor.js — Minimal inline writer (subprogram) ======================= */
 import { EditorState, RangeSetBuilder, Transaction, EditorSelection } from '@codemirror/state';
 import { EditorView, keymap, drawSelection, highlightActiveLine, Decoration, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
-import { defaultKeymap, indentMore, indentLess, history, historyKeymap } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { indentOnInput, indentUnit, syntaxHighlighting, HighlightStyle } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import { search, searchKeymap, openSearchPanel, findNext, findPrevious } from '@codemirror/search';
 import { normalizeTemplateSchedule, cloneTemplateSchedule, isISODate } from './schedule.js';
+import { listLayoutPlugin, createListKeymap, listRenumberListener } from './listLayout.js';
 
 function hasPointerUserEvent(update) {
     if (!update || !Array.isArray(update.transactions)) return false;
@@ -47,12 +48,6 @@ const todoDecorationPlugin = ViewPlugin.fromClass(class {
     }
     buildDecorations(view) {
         const builder = new RangeSetBuilder();
-        const tabSize = view.state.tabSize ?? 4;
-        const measureColumns = (str) => {
-            let cols = 0;
-            for (const ch of str) cols += (ch === '\t') ? tabSize : 1;
-            return cols;
-        };
         for (let { from, to } of view.visibleRanges) {
             let startLine = view.state.doc.lineAt(from).number;
             let endLine = view.state.doc.lineAt(to).number;
@@ -61,11 +56,9 @@ const todoDecorationPlugin = ViewPlugin.fromClass(class {
                 const todoPrefixMatch = line.text.match(/^(\s*[-*]\s+\[( |x)\]\s*)/);
                 if (todoPrefixMatch) {
                     const isChecked = todoPrefixMatch[2] === 'x';
-                    const prefixLen = measureColumns(todoPrefixMatch[1] ?? '');
                     const lineClasses = ['todo-line'];
                     if (isChecked) lineClasses.push('completed');
                     const lineSpec = { class: lineClasses.join(' ') };
-                    lineSpec.attributes = { style: `--todo-prefix-ch:${prefixLen};` };
                     builder.add(
                         line.from,
                         line.from,
@@ -453,6 +446,10 @@ export function startEditor(shell, opts = {}) {
         // --- To-do clickable overlay style ---
         '.todo-click-target': {
             position: 'relative',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minWidth: '2ch',
             cursor: 'pointer',
             background: 'transparent',
             zIndex: 2,
@@ -467,7 +464,36 @@ export function startEditor(shell, opts = {}) {
             transition: 'opacity 0.1s',
             pointerEvents: 'none'
         },
-        '.todo-click-target:hover::after': { opacity: 1 }
+        '.todo-click-target:hover::after': { opacity: 1 },
+        '.cm-line.cm-list-line': {
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 'calc(var(--list-gap-ch, 0.5) * 1ch)'
+        },
+        '.cm-line.cm-list-line .cm-list-indent': {
+            flex: '0 0 calc(var(--list-indent-ch, 0) * 1ch)',
+            width: 'calc(var(--list-indent-ch, 0) * 1ch)',
+            whiteSpace: 'pre'
+        },
+        '.cm-line.cm-list-line .cm-list-marker': {
+            display: 'flex',
+            justifyContent: 'flex-end',
+            flex: '0 0 calc(var(--list-marker-ch, 2) * 1ch)',
+            width: 'calc(var(--list-marker-ch, 2) * 1ch)',
+            whiteSpace: 'pre',
+            textAlign: 'right',
+            fontVariantNumeric: 'tabular-nums lining-nums',
+            fontFeatureSettings: '"tnum" 1, "lnum" 1',
+            opacity: 0.85,
+            userSelect: 'none'
+        },
+        '.cm-line.cm-list-line .cm-list-content': {
+            flex: '1 1 auto',
+            minWidth: 0,
+            whiteSpace: 'pre-wrap',
+            lineHeight: '1.5',
+            wordBreak: 'break-word'
+        }
     }, { dark: true });
 
     // Syntax highlight accents for Markdown (conservative)
@@ -672,73 +698,8 @@ export function startEditor(shell, opts = {}) {
     });
 
     // --- Indentation config & smart Tab for Markdown lists/quotes -------------
-    const INDENT = '    '; // two spaces
+    const INDENT = '  '; // two spaces per nesting level
     const indentConfig = indentUnit.of(INDENT);
-
-    // Regex for Markdown list/quote starters: "- ", "* ", "+ ", "1. ", "> "
-    const LIST_START_RE = /^\s*(?:[-+*]\s|\d+\.\s|>\s)/;
-
-    function linesInSelection(state) {
-        const seen = new Set();
-        const out = [];
-        for (const r of state.selection.ranges) {
-            let line = state.doc.lineAt(r.from).number;
-            const endLine = state.doc.lineAt(r.to).number;
-            for (; line <= endLine; line++) {
-                if (!seen.has(line)) { seen.add(line); out.push(line); }
-            }
-        }
-        return out;
-    }
-
-    const smartListTabKeymap = keymap.of([
-        {
-            key: 'Tab',
-            preventDefault: true,
-            run: (view) => {
-                const { state } = view;
-                const lines = linesInSelection(state);
-                // If every selected line starts like a list/quote, indent by INDENT at BOL
-                if (lines.length && lines.every(n => LIST_START_RE.test(state.doc.line(n).text))) {
-                    const changes = lines.map(n => {
-                        const ln = state.doc.line(n);
-                        return { from: ln.from, to: ln.from, insert: INDENT };
-                    });
-                    view.dispatch({ changes, scrollIntoView: true });
-                    return true;
-                }
-                // Otherwise, defer to standard editor behavior
-                return indentMore(view);
-            }
-        },
-        {
-            key: 'Shift-Tab',
-            preventDefault: true,
-            run: (view) => {
-                const { state } = view;
-                const lines = linesInSelection(state);
-                if (!lines.length) return indentLess(view);
-                // If we’re on list/quote lines, try to outdent up to INDENT spaces
-                if (lines.every(n => /^\s+/.test(state.doc.line(n).text))) {
-                    const changes = [];
-                    for (const n of lines) {
-                        const ln = state.doc.line(n);
-                        const txt = ln.text;
-                        if (!LIST_START_RE.test(txt)) return indentLess(view);
-                        let remove = 0;
-                        for (let i = 0; i < INDENT.length && i < txt.length && txt[i] === ' '; i++) remove++;
-                        if (remove > 0) changes.push({ from: ln.from, to: ln.from + remove, insert: '' });
-                    }
-                    if (changes.length) {
-                        view.dispatch({ changes, scrollIntoView: true });
-                        return true;
-                    }
-                }
-                // Fallback to standard outdent when not on list blocks
-                return indentLess(view);
-            }
-        }
-    ]);
 
     // Dynamically maintain top/bottom padding in the CodeMirror scroller based on its height.
     function dynamicScrollerPadding() {
@@ -815,8 +776,10 @@ export function startEditor(shell, opts = {}) {
             unsavedTracker,
             history(),
             todoPlugin,
+            listLayoutPlugin,
+            listRenumberListener,
             indentConfig,
-            smartListTabKeymap,
+            createListKeymap(INDENT),
             keymap.of([
                 ...defaultKeymap,
                 ...historyKeymap,
@@ -1550,9 +1513,9 @@ export function startEditor(shell, opts = {}) {
         scroller.scrollTop = target;
 
         // Let one more frame render, then re-enable typewriter/snap behavior
-        requestAnimationFrame(() => {
-            INIT_SCROLL_SUPPRESS.delete(cmView);
-        });
+        // requestAnimationFrame(() => {
+        //     INIT_SCROLL_SUPPRESS.delete(cmView);
+        // });
     });
 
     // Start listening for hotkeys (capture=true to win against browser defaults)
