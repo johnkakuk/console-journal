@@ -1,4 +1,4 @@
-# 🧠 Console Journal
+# Console Journal
 
 A distraction-free journaling built with Node.js, CodeMirror 6, and SQLite — blending retro hacker aesthetics with modern usability. Packaged with Electron.
 
