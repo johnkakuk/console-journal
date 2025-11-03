@@ -1,49 +1,29 @@
 # 🧠 Console Journal
 
-A retro console journal built with Node.js, CodeMirror 6, and SQLite — blending 80s hacker aesthetics with modern usability. Packaged with Electron.
+A distraction-free journaling built with Node.js, CodeMirror 6, and SQLite — blending retro hacker aesthetics with modern usability. Packaged with Electron.
 
-Type, reflect, and organize your thoughts in a glowing green terminal that feels alive.
+Type, reflect, and organize your thoughts in a terminal setting that feels alive.
+
 
 ---- 
 
+
 ## ✨ Features
-- Retro Console Interface
-	- A black-and-green terminal-style shell with blinking cursor and command-based navigation.
-- Journal Command
-	- Opens a daily entry by date (YYYY-MM-DD)
-	- Auto-creates entries if they don’t exist
-	- Supports flags:
-		- -y → yesterday
-		- -t → tomorrow
-		- -help → usage guide
-		- MM-DD → opens the most recent past occurrence of that month/day
-- Writer Workspace
-	- Launch with the `write` command
-	- Dual-pane retro UI with file selector and live editor
-	- Create, duplicate, delete, and export documents to PDF
-	- Editable document titles with folder-ready storage model
-- Journal Markdown Editor
-	- Built with CodeMirror 6
-	- Basic Markdown highlighting
-	- To-do list support (- [ ]() and - [x]() with clickable toggles)
-	- Persistent save to SQLite (for now)
-	- Typewriter mode with adaptive scroll anchoring
-	- ⌘+S / CTRL+S to save, ⌘+Q / CTRL+Q to quit
-	- Unsaved change indicator (\* in banner)
-	- Animated save notification (toast in bottom-right corner)
-	- Undo-aware save indicator — removes * when state matches last save
-	- Smooth typewriter scroll — keeps active line centered dynamically during typing
-	- Built-in search (CMD+F, Enter/Shift+Enter to navigate)
+
+### ✍️ Journal Workspace
+- Runs through pseudo console for full keyboard control
+- "journal" creates a daily entry
+- Supports flags:
+	- -y → yesterday
+	- -t → tomorrow
+	- -help → usage guide
+	- MM-DD → opens the most recent past occurrence of that month/day
 - Entry Management
 	- view → browse latest 15 entries with arrow-key navigation, open/delete options
-	- delete YYYY-MM-DD, -t → deletes specific entries
+	- delete → deletes specific entries
 	- Deletes also available within view mode (arrow navigate + DEL with confirmation)
 	- search "term" → find entries by keyword
-	- Smooth keyboard-driven navigation between results
-	- Interactive lists remain navigable after delete operations
-	- SQLite Integration
-		- All journal entries are stored locally in a fast, file-based database located at:  
-			\~/Library/Application Support/console-journal/app.db
+	- Smooth keyboard-driven navigation between results (mouse works too)
 - Command History
 	- Recall previous commands using the ↑ / ↓ arrow keys.
 - Exporting
@@ -56,24 +36,45 @@ Type, reflect, and organize your thoughts in a glowing green terminal that feels
 		- YYYY-MM-DD → the entry from a given day
 		- ... -pdf → export as .pdf instead of .txt
 		- Theme can be edited in css/pdf.css
-- Theme Editor — Modify fonts and colors live inside the app, with restore-to-default option.
-- Browser-based web app
-	- Saves to local storage
-	- Automatic save and load from IndexedDB (Web) or SQLite (Desktop).
-	- Quit confirmation when unsaved changes are present.
+
+### 💻 Writer Workspace
+- For non-journal writing projects
+- Launch with the `write` command
+- Responsive GUI with file selector and live editor
+- Supports right click with contextual menus
+- Create, duplicate, delete, and export documents to PDF
+- Editable document titles with folder-ready storage model
+
+### 🔠 Markdown Editor Details
+- Built with CodeMirror 6
+- Basic Markdown highlighting
+- Clickable to-do list support
+- Persistent local save
+- Typewriter mode with adaptive scroll anchoring
+- ⌘+S / CTRL+S to save, ⌘+Q / CTRL+Q to quit
+- Animated save notification (toast in bottom-right corner)
+- Undo-aware save indicator — removes * when state matches last save
+- Built-in search (CMD+F, Enter/Shift+Enter to navigate)
+
+## ⚙️ Theme Editor
+- Modify fonts and colors live inside the app
+- Choose your own width for the editor (default 80 characters)
+- Restore to defaults at any time
+- Changes persist
+
+
+Try the browser-based web app at https://console-journal-api.onrender.com
+
 
 ---- 
 
 ## 🧩 Upcoming Features
-- Projects System — For long-form or creative writing:
-	- Nested folder structure (e.g., Book \> Drafts \> Manuscript)
-	- Chronological indexing for journal entries (YYYY/MM/entry.md)
-- Windows/Linux ports
-
-
+- Nested folder structure for Writer Workspace (e.g., Book \> Drafts \> Manuscript)
+- Mac/Windows/Linux desktop apps
 
 
 ---- 
+
 
 ## ⚙️ Tech Stack
 
@@ -96,9 +97,10 @@ git clone https://github.com/yourusername/console-journal.git
 cd console-journal
 ```
 
-### 2. Install dependencies
+### 2. Set up
 ```cs
 npm install
+npx electron-rebuild -f -w better-sqlite3
 ```
 
 ### 3. Run the app
@@ -107,34 +109,19 @@ npm run bundle
 npm run start:web:https
 ```
 
+Or:
+
+```cs
+npm run bundle
+npm run start:desktop
+```
+
 
 ---- 
+
 
 ## 🧠 Philosophy
 
 “I want the journaling app that I haven’t been able to find.”
 
-Console Journal is the minimalist, keyboard-first journaling environment I’ve always wanted. For hackers, writers, and thinkers who want to stay close to the metal.
-
----- 
-
-## 🧰 Keyboard Shortcuts
-
-| Shortcut              | Action                          |
-| --------------------- | ------------------------------- |
-| ⌘ + S                 | Save entry                      |
-| ⌘ + Q / CTRL + Q      | Quit editor                     |
-| ⌘ + Shift + N / CTRL + Shift + N | New writer document     |
-| ⌘ + F                 | Open search panel               |
-| Enter / Shift + Enter | Next / Previous match           |
-| ↑ / ↓                 | Navigate command history        |
-| ESC                   | Exit subprogram / cancel search |
-| DEL                   | Delete entry (in view mode)     |
-| Y / N                 | Confirm / Cancel actions        |
-
-
----- 
-
-## 🧑‍💻 Author
-
-John Kakuk
+Console Journal is the minimalist, keyboard-first journaling environment I’ve always wanted. For writers who want to stay close to the metal.
