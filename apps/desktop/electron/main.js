@@ -49,6 +49,14 @@ function normalizeWriterTitle(title) {
     return 'Untitled Document';
 }
 
+function normalizeWriterFolderName(name) {
+    if (typeof name === 'string') {
+        const trimmed = name.trim();
+        if (trimmed.length) return trimmed;
+    }
+    return 'New Folder';
+}
+
 
 process.on('unhandledRejection', (reason, promise) => {
     console.error('🚨 Unhandled Rejection:', reason);
@@ -113,6 +121,7 @@ function initDB() {
         CREATE TABLE IF NOT EXISTS writer_folders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
+            parent_id INTEGER,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
@@ -135,6 +144,16 @@ function initDB() {
     const templateColumns = db.prepare(`PRAGMA table_info(templates)`).all();
     if (!templateColumns.some(col => col.name === 'schedule')) {
         db.exec(`ALTER TABLE templates ADD COLUMN schedule TEXT`);
+    }
+
+    const folderColumns = db.prepare(`PRAGMA table_info(writer_folders)`).all();
+    if (!folderColumns.some(col => col.name === 'parent_id')) {
+        db.exec(`
+            ALTER TABLE writer_folders ADD COLUMN parent_id INTEGER;
+            CREATE INDEX IF NOT EXISTS idx_writer_folders_parent ON writer_folders(parent_id);
+        `);
+    } else {
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_writer_folders_parent ON writer_folders(parent_id);`);
     }
 
     // Prepared statements
@@ -235,6 +254,68 @@ function initDB() {
         WHERE id = @id
         RETURNING id, title, content, folder_id, created_at, updated_at
     `);
+    db._writerListFolders = db.prepare(`
+        SELECT id, name, parent_id, created_at, updated_at
+        FROM writer_folders
+        ORDER BY name COLLATE NOCASE
+    `);
+    db._writerGetFolder = db.prepare(`SELECT * FROM writer_folders WHERE id = ?`);
+    db._writerInsertFolder = db.prepare(`
+        INSERT INTO writer_folders (name, parent_id)
+        VALUES (@name, @parent_id)
+        RETURNING id, name, parent_id, created_at, updated_at
+    `);
+    db._writerRenameFolder = db.prepare(`
+        UPDATE writer_folders
+        SET name = @name,
+            updated_at = datetime('now')
+        WHERE id = @id
+        RETURNING id, name, parent_id, created_at, updated_at
+    `);
+    db._writerDeleteFolder = db.prepare(`DELETE FROM writer_folders WHERE id = ?`);
+    db._writerDocsClearFolder = db.prepare(`
+        UPDATE writer_documents
+        SET folder_id = NULL,
+            updated_at = datetime('now')
+        WHERE folder_id = @folder_id
+    `);
+}
+
+function folderNameKey(parentId, name) {
+    return `${parentId == null ? 'null' : parentId}::${String(name || '').toLowerCase()}`;
+}
+
+function ensureUniqueFolderName(baseName, parentId, existingKeys) {
+    const normalized = normalizeWriterFolderName(baseName);
+    let attempt = normalized;
+    let counter = 2;
+    while (existingKeys.has(folderNameKey(parentId, attempt))) {
+        attempt = `${normalized} ${counter++}`;
+    }
+    existingKeys.add(folderNameKey(parentId, attempt));
+    return attempt;
+}
+
+function buildFolderChildrenMap(folders) {
+    const map = new Map();
+    for (const folder of folders) {
+        const parent = folder.parent_id == null ? null : folder.parent_id;
+        if (!map.has(parent)) map.set(parent, []);
+        map.get(parent).push(folder);
+    }
+    return map;
+}
+
+function collectFolderDescendants(childrenMap, rootId) {
+    const out = [];
+    const stack = [rootId];
+    while (stack.length) {
+        const current = stack.pop();
+        out.push(current);
+        const kids = childrenMap.get(current) || [];
+        for (const child of kids) stack.push(child.id);
+    }
+    return out;
 }
 
 function createWindow() {
@@ -436,6 +517,104 @@ ipcMain.handle('writer:rename', (_evt, payload = {}) => {
     const row = db._writerRename.get({ id, title });
     if (!row) throw new Error('Document not found');
     return row;
+});
+
+ipcMain.handle('writer:list-folders', () => {
+    return db._writerListFolders.all().map(row => ({
+        ...row,
+        parent_id: row.parent_id == null ? null : row.parent_id
+    }));
+});
+
+ipcMain.handle('writer:create-folder', (_evt, payload = {}) => {
+    const parentId = payload.parentId == null ? null : Number(payload.parentId);
+    if (parentId != null && (!Number.isInteger(parentId) || parentId <= 0)) throw new Error('Bad folder parent id');
+    if (parentId != null) {
+        const parent = db._writerGetFolder.get(parentId);
+        if (!parent) throw new Error('Parent folder not found');
+    }
+    const folders = db._writerListFolders.all();
+    const existingKeys = new Set(folders.map(f => folderNameKey(f.parent_id, f.name)));
+    const desired = typeof payload.name === 'string' ? payload.name : 'New Folder';
+    const name = ensureUniqueFolderName(desired, parentId, existingKeys);
+    const row = db._writerInsertFolder.get({
+        name,
+        parent_id: parentId
+    });
+    return { ...row, parent_id: row.parent_id == null ? null : row.parent_id };
+});
+
+ipcMain.handle('writer:rename-folder', (_evt, payload = {}) => {
+    const id = Number(payload.id);
+    if (!Number.isInteger(id) || id <= 0) throw new Error('Bad folder id');
+    const folders = db._writerListFolders.all();
+    const target = folders.find(f => f.id === id);
+    if (!target) throw new Error('Folder not found');
+    const parentId = target.parent_id == null ? null : target.parent_id;
+    const normalized = normalizeWriterFolderName(payload.name);
+    const existingKeys = new Set(
+        folders
+            .filter(f => f.id !== id)
+            .map(f => folderNameKey(f.parent_id, f.name))
+    );
+    if (existingKeys.has(folderNameKey(parentId, normalized))) {
+        throw new Error('A folder with that name already exists.');
+    }
+    const row = db._writerRenameFolder.get({ id, name: normalized });
+    if (!row) throw new Error('Folder not found');
+    return { ...row, parent_id: row.parent_id == null ? null : row.parent_id };
+});
+
+ipcMain.handle('writer:delete-folder', (_evt, id) => {
+    const key = Number(id);
+    if (!Number.isInteger(key) || key <= 0) throw new Error('Bad folder id');
+    const folders = db._writerListFolders.all();
+    const target = folders.find(f => f.id === key);
+    if (!target) throw new Error('Folder not found');
+    const childrenMap = buildFolderChildrenMap(folders);
+    const cascade = collectFolderDescendants(childrenMap, key);
+    const txn = db.transaction(() => {
+        for (const folderId of cascade) {
+            db._writerDocsClearFolder.run({ folder_id: folderId });
+        }
+        for (let i = cascade.length - 1; i >= 0; i--) {
+            db._writerDeleteFolder.run(cascade[i]);
+        }
+    });
+    txn();
+    return { deleted: cascade.length };
+});
+
+ipcMain.handle('writer:duplicate-folder', (_evt, payload = {}) => {
+    const id = Number(payload.id);
+    if (!Number.isInteger(id) || id <= 0) throw new Error('Bad folder id');
+    const folders = db._writerListFolders.all();
+    const target = folders.find(f => f.id === id);
+    if (!target) throw new Error('Folder not found');
+    const parentId = target.parent_id == null ? null : target.parent_id;
+    const desired = typeof payload.name === 'string' && payload.name.trim().length
+        ? payload.name
+        : `${target.name} Copy`;
+    const existingKeys = new Set(folders.map(f => folderNameKey(f.parent_id, f.name)));
+    const childrenMap = buildFolderChildrenMap(folders);
+    const created = [];
+    const txn = db.transaction(() => {
+        const rootName = ensureUniqueFolderName(desired, parentId, existingKeys);
+        const createRecursive = (folder, newParentId, overrideName = null) => {
+            const nameToUse = overrideName || ensureUniqueFolderName(folder.name, newParentId, existingKeys);
+            const row = db._writerInsertFolder.get({ name: nameToUse, parent_id: newParentId });
+            created.push(row);
+            const children = childrenMap.get(folder.id) || [];
+            for (const child of children) {
+                createRecursive(child, row.id);
+            }
+        };
+        createRecursive(target, parentId, rootName);
+    });
+    txn();
+    if (!created.length) throw new Error('Unable to duplicate folder');
+    const root = created[0];
+    return { ...root, parent_id: root.parent_id == null ? null : root.parent_id };
 });
 
 ipcMain.handle('settings:get', (_evt, key) => {

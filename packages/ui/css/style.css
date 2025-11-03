@@ -198,8 +198,12 @@ body {
     max-width: calc(var(--editor-max-width) + 1ch);
 }
 
-.ͼ1 .cm-linene {
+.ͼ1 .cm-line {
     padding: 0;
+}
+
+.ͼo .cm-line.cm-list-line {
+    margin: 0.25rem 0;
 }
 
 .cm-content h1,
@@ -283,7 +287,8 @@ body {
 }
 
 .writer-root {
-    --writer-nav-width: 260px;
+    --folder-width: 220px;
+    --file-width: 260px;
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -297,41 +302,98 @@ body {
 .writer-main {
     flex: 1;
     display: grid;
-    grid-template-columns: var(--writer-nav-width) minmax(0, 1fr);
+    grid-template-columns: 0 minmax(0, 1fr);
     min-height: 0;
-    transition: grid-template-columns 0.25s ease;
+    transition: grid-template-columns 0.3s ease;
 }
 
-.writer-root.nav-collapsed .writer-main {
+.writer-root.files-open:not(.folders-open) .writer-main {
+    grid-template-columns: var(--file-width) minmax(0, 1fr);
+}
+
+.writer-root.folders-open:not(.files-open) .writer-main {
+    grid-template-columns: var(--folder-width) minmax(0, 1fr);
+}
+
+.writer-root.folders-open.files-open .writer-main {
+    grid-template-columns: calc(var(--folder-width) + var(--file-width)) minmax(0, 1fr);
+}
+
+.writer-root.panels-hidden .writer-main {
     grid-template-columns: 0 minmax(0, 1fr);
 }
 
 .writer-navigation {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    position: relative;
     min-width: 0;
     margin-left: -14px;
     border-radius: 0 0 0 10px;
     border-right: solid 1px var(--border);
-    transition: opacity 0.25s ease, transform 0.25s ease;
+    transition: opacity 0.25s ease;
+    height: 100%;
+    pointer-events: none;
+    width: 100%;
+    overflow: visible;
 }
 
-.writer-root.nav-collapsed .writer-navigation {
+.writer-navigation.collapsed {
     opacity: 0;
-    transform: translateX(-22px);
     pointer-events: none;
 }
 
+.writer-root.files-open .writer-navigation,
+.writer-root.folders-open .writer-navigation {
+    pointer-events: auto;
+}
+
+.writer-folders,
 .writer-files {
-    flex: 1;
+    position: absolute;
+    top: 0;
+    bottom: 0;
     display: flex;
     flex-direction: column;
     background: color-mix(in srgb, var(--panel) 88%, rgba(0,0,0,0.8));
     min-height: 0;
     border-radius: 10px;
+    box-sizing: border-box;
+    overflow: hidden;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+    opacity: 0;
+    pointer-events: none;
 }
 
+.writer-folders {
+    width: var(--folder-width);
+    left: 0;
+    transform: translateX(calc(-1 * var(--folder-width)));
+}
+
+.writer-files {
+    width: var(--file-width);
+    left: 0;
+    transform: translateX(calc(-1 * var(--file-width)));
+}
+
+.writer-root.files-open .writer-files {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
+}
+
+.writer-root.folders-open .writer-folders {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
+    border-right: 1px solid var(--border);
+    border-radius: 0 0 0 10px;
+}
+
+.writer-root.folders-open.files-open .writer-files {
+    transform: translateX(var(--folder-width));
+}
+
+.writer-folders-header,
 .writer-files-header {
     display: flex;
     align-items: center;
@@ -342,6 +404,7 @@ body {
     letter-spacing: 0.05em;
 }
 
+.writer-folder-create,
 .writer-create {
     background: transparent;
     border: 1px solid color-mix(in srgb, var(--muted) 70%, transparent);
@@ -358,14 +421,63 @@ body {
     background: var(--accent);
 }
 
+.writer-folder-create:hover,
 .writer-create:hover {
     border-color: color-mix(in srgb, var(--accent) 45%, transparent);
     transform: translateY(-1px);
 }
 
+.writer-folders-body,
 .writer-files-body {
     flex: 1;
     overflow: auto;
+    padding-right: 4px;
+    padding-top: 6px;
+}
+
+.writer-folder-tree,
+.writer-folder-tree ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.writer-folder-tree {
+    padding: 0 0 6px 0;
+}
+
+.writer-folder-item {
+    margin: 0;
+}
+
+.writer-folder-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.writer-folder-name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.writer-folder-item.active > .writer-folder-row {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    border-left-color: var(--accent);
+}
+
+.writer-folder-row:hover {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.writer-folder-item > ul {
+    margin-left: 14px;
 }
 
 .writer-file-list {
@@ -421,6 +533,7 @@ body {
     background: color-mix(in srgb, var(--panel) 90%, rgba(0,0,0,0.85));
     overflow: scroll;
     margin-right: -14px;
+    margin-left: -13px;
 }
 
 .writer-editor-pane {
@@ -511,7 +624,7 @@ body {
     .writer-navigation {
         transform-origin: top left;
     }
-    .writer-root.nav-collapsed .writer-navigation {
+    .writer-navigation.collapsed {
         transform: translateY(-18px);
     }
 }

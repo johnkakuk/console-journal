@@ -21,7 +21,12 @@ contextBridge.exposeInMainWorld('db', {
         update:    (payload = {}) => ipcRenderer.invoke('writer:update', payload),
         delete:    (id) => ipcRenderer.invoke('writer:delete', id),
         duplicate: (id, overrides = {}) => ipcRenderer.invoke('writer:duplicate', { id, ...overrides }),
-        rename:    (id, title) => ipcRenderer.invoke('writer:rename', { id, title })
+        rename:    (id, title) => ipcRenderer.invoke('writer:rename', { id, title }),
+        listFolders:    () => ipcRenderer.invoke('writer:list-folders'),
+        createFolder:   (payload = {}) => ipcRenderer.invoke('writer:create-folder', payload),
+        renameFolder:   (id, name) => ipcRenderer.invoke('writer:rename-folder', { id, name }),
+        deleteFolder:   (id) => ipcRenderer.invoke('writer:delete-folder', id),
+        duplicateFolder:(id, overrides = {}) => ipcRenderer.invoke('writer:duplicate-folder', { id, ...overrides })
     }
 });
 

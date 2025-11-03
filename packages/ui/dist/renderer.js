@@ -27689,6 +27689,12 @@ var MENU_ACTIONS = {
   EXPORT: "export",
   RENAME: "rename"
 };
+var FOLDER_ACTIONS = {
+  OPEN: "open",
+  DUPLICATE: "duplicate",
+  DELETE: "delete",
+  RENAME: "rename"
+};
 var INDENT = "  ";
 function hasPointerUserEvent2(update) {
   if (!update || !Array.isArray(update.transactions)) return false;
@@ -27921,6 +27927,15 @@ var activeRowPlugin = ViewPlugin.fromClass(class {
     container.appendChild(this.dom);
     this._onResize = () => this.schedule();
     window.addEventListener("resize", this._onResize, { passive: true });
+    this._onFocus = () => {
+      if (this.dom) this.dom.style.display = "block";
+      this.schedule();
+    };
+    this.view.dom.addEventListener("focus", this._onFocus, true);
+    this._onBlur = () => {
+      if (this.dom) this.dom.style.display = "none";
+    };
+    this.view.dom.addEventListener("blur", this._onBlur, true);
     this._scheduled = false;
     this._top = 0;
     this._height = 0;
@@ -27951,6 +27966,10 @@ var activeRowPlugin = ViewPlugin.fromClass(class {
           this.dom.style.display = "none";
           return;
         }
+        if (!this.view.hasFocus) {
+          this.dom.style.display = "none";
+          return;
+        }
         this.dom.style.display = "block";
         this.dom.style.top = `${this._top}px`;
         this.dom.style.height = `${this._height}px`;
@@ -27965,6 +27984,8 @@ var activeRowPlugin = ViewPlugin.fromClass(class {
   }
   destroy() {
     window.removeEventListener("resize", this._onResize);
+    this.view.dom.removeEventListener("focus", this._onFocus, true);
+    this.view.dom.removeEventListener("blur", this._onBlur, true);
     if (this.dom && this.dom.parentNode) this.dom.parentNode.removeChild(this.dom);
     this.dom = null;
   }
@@ -28093,20 +28114,53 @@ function startWriter(shell2, opts = {}) {
   const titlebar = document.querySelector(".titlebar");
   const state2 = {
     docs: [],
+    folders: [],
     current: null,
     dirty: false,
     savedSnapshot: "",
     cmView: null,
     rootEl: null,
+    navigationEl: null,
+    folderSectionEl: null,
+    folderListEl: null,
     listEl: null,
-    contextMenuEl: null,
+    fileContextMenuEl: null,
+    folderContextMenuEl: null,
     toggleBtn: null,
     titleHelpEl: null,
-    navCollapsed: false,
+    selectedFolderId: "all",
+    folderCollapsed: false,
+    fileCollapsed: true,
+    lastWindowWidth: window.innerWidth || 0,
     domSnapshot: null,
     titlebarInsertions: [],
     prompt: opts.prompt || "writer>"
   };
+  function updateSidebarClasses() {
+    const filesOpen = !state2.fileCollapsed;
+    const foldersOpen = !state2.folderCollapsed;
+    const hasAny = filesOpen || foldersOpen;
+    if (state2.rootEl) {
+      state2.rootEl.classList.toggle("files-open", filesOpen);
+      state2.rootEl.classList.toggle("folders-open", foldersOpen);
+      state2.rootEl.classList.toggle("panels-hidden", !hasAny);
+    }
+    if (state2.navigationEl) {
+      state2.navigationEl.classList.toggle("collapsed", !hasAny);
+    }
+    if (state2.toggleBtn) {
+      state2.toggleBtn.setAttribute("aria-pressed", !hasAny ? "true" : "false");
+    }
+  }
+  function setPanelVisibility(updates = {}) {
+    if (Object.prototype.hasOwnProperty.call(updates, "folder")) {
+      state2.folderCollapsed = !!updates.folder;
+    }
+    if (Object.prototype.hasOwnProperty.call(updates, "file")) {
+      state2.fileCollapsed = !!updates.file;
+    }
+    updateSidebarClasses();
+  }
   function esc2(str) {
     return String(str ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
   }
@@ -28129,9 +28183,9 @@ function startWriter(shell2, opts = {}) {
       const toggleBtn = document.createElement("button");
       toggleBtn.type = "button";
       toggleBtn.className = "writer-toggle";
-      toggleBtn.title = "Toggle file selector";
-      toggleBtn.setAttribute("aria-label", "Toggle file selector");
-      toggleBtn.setAttribute("aria-pressed", "false");
+      toggleBtn.title = "Toggle panels";
+      toggleBtn.setAttribute("aria-label", "Toggle panels");
+      toggleBtn.setAttribute("aria-pressed", state2.folderCollapsed && state2.fileCollapsed ? "true" : "false");
       toggleBtn.innerHTML = '<span class="writer-toggle-icon" aria-hidden="true"></span>';
       toggleBtn.addEventListener("click", toggleNavigation);
       titlebar.insertBefore(toggleBtn, titlebar.firstChild);
@@ -28162,12 +28216,17 @@ function startWriter(shell2, opts = {}) {
       });
       state2.titlebarInsertions = [];
     }
-    if (state2.contextMenuEl && state2.contextMenuEl.parentElement) {
-      state2.contextMenuEl.parentElement.removeChild(state2.contextMenuEl);
+    if (state2.fileContextMenuEl && state2.fileContextMenuEl.parentElement) {
+      state2.fileContextMenuEl.parentElement.removeChild(state2.fileContextMenuEl);
+      state2.fileContextMenuEl = null;
+    }
+    if (state2.folderContextMenuEl && state2.folderContextMenuEl.parentElement) {
+      state2.folderContextMenuEl.parentElement.removeChild(state2.folderContextMenuEl);
+      state2.folderContextMenuEl = null;
     }
   }
-  function ensureContextMenu() {
-    if (state2.contextMenuEl) return state2.contextMenuEl;
+  function ensureFileContextMenu() {
+    if (state2.fileContextMenuEl) return state2.fileContextMenuEl;
     const menu = document.createElement("div");
     menu.className = "writer-context-menu";
     menu.innerHTML = `
@@ -28178,11 +28237,26 @@ function startWriter(shell2, opts = {}) {
             <button data-action="${MENU_ACTIONS.DELETE}" class="danger">Delete</button>
         `;
     document.body.appendChild(menu);
-    state2.contextMenuEl = menu;
+    state2.fileContextMenuEl = menu;
+    return menu;
+  }
+  function ensureFolderContextMenu() {
+    if (state2.folderContextMenuEl) return state2.folderContextMenuEl;
+    const menu = document.createElement("div");
+    menu.className = "writer-context-menu";
+    menu.innerHTML = `
+            <button data-action="${FOLDER_ACTIONS.OPEN}">Open</button>
+            <button data-action="${FOLDER_ACTIONS.RENAME}">Rename</button>
+            <button data-action="${FOLDER_ACTIONS.DUPLICATE}">Duplicate</button>
+            <button data-action="${FOLDER_ACTIONS.DELETE}" class="danger">Delete</button>
+        `;
+    document.body.appendChild(menu);
+    state2.folderContextMenuEl = menu;
     return menu;
   }
   function closeContextMenu() {
-    if (state2.contextMenuEl) state2.contextMenuEl.classList.remove("visible");
+    if (state2.fileContextMenuEl) state2.fileContextMenuEl.classList.remove("visible");
+    if (state2.folderContextMenuEl) state2.folderContextMenuEl.classList.remove("visible");
   }
   function markDirty() {
     if (state2.dirty) return;
@@ -28280,17 +28354,34 @@ function startWriter(shell2, opts = {}) {
   function attachGlobalListeners() {
     window.addEventListener("click", closeContextMenu, true);
     window.addEventListener("contextmenu", (e) => {
-      if (!state2.listEl || !state2.listEl.contains(e.target)) {
+      const inFiles = state2.listEl && state2.listEl.contains(e.target);
+      const inFolders = state2.folderListEl && state2.folderListEl.contains(e.target);
+      if (!inFiles && !inFolders) {
         closeContextMenu();
       }
     });
     window.addEventListener("keydown", onHotkey, true);
+    window.addEventListener("resize", handleResponsivePanels, { passive: true });
   }
   function detachGlobalListeners() {
     window.removeEventListener("click", closeContextMenu, true);
     window.removeEventListener("keydown", onHotkey, true);
+    window.removeEventListener("resize", handleResponsivePanels, { passive: true });
   }
   function onHotkey(e) {
+    if (isMac) {
+      if (e.ctrlKey && !e.metaKey && (e.key === "x" || e.key === "X")) {
+        e.preventDefault();
+        requestExit();
+        return;
+      }
+    } else {
+      if (e.ctrlKey && (e.key === "q" || e.key === "Q")) {
+        e.preventDefault();
+        requestExit();
+        return;
+      }
+    }
     if (isMac && e.metaKey || !isMac && e.ctrlKey) {
       if (e.shiftKey && (e.key === "n" || e.key === "N")) {
         e.preventDefault();
@@ -28301,13 +28392,16 @@ function startWriter(shell2, opts = {}) {
     if (e.key === "Escape") closeContextMenu();
   }
   function toggleNavigation() {
-    state2.navCollapsed = !state2.navCollapsed;
-    if (state2.rootEl) {
-      if (state2.navCollapsed) state2.rootEl.classList.add("nav-collapsed");
-      else state2.rootEl.classList.remove("nav-collapsed");
-    }
-    if (state2.toggleBtn) {
-      state2.toggleBtn.setAttribute("aria-pressed", state2.navCollapsed ? "true" : "false");
+    if (state2.fileCollapsed && state2.folderCollapsed) {
+      setPanelVisibility({ file: false, folder: true });
+    } else if (!state2.fileCollapsed && state2.folderCollapsed) {
+      setPanelVisibility({ folder: false });
+    } else {
+      setPanelVisibility({ file: true, folder: true });
+      try {
+        state2.cmView && state2.cmView.dom && state2.cmView.dom.blur();
+      } catch (_) {
+      }
     }
   }
   function renderLayout() {
@@ -28319,6 +28413,15 @@ function startWriter(shell2, opts = {}) {
     const navigation = document.createElement("div");
     navigation.className = "writer-navigation";
     navigation.innerHTML = `
+            <div class="writer-folders">
+                <div class="writer-folders-header">
+                    <span>Folders</span>
+                    <button class="writer-folder-create" title="New folder" aria-label="New folder"></button>
+                </div>
+                <div class="writer-folders-body">
+                    <ul class="writer-folder-tree"></ul>
+                </div>
+            </div>
             <div class="writer-files">
                 <div class="writer-files-header">
                     <span>Files</span>
@@ -28338,15 +28441,31 @@ function startWriter(shell2, opts = {}) {
     main.appendChild(editor);
     root.appendChild(main);
     state2.rootEl = root;
+    state2.navigationEl = navigation;
+    state2.folderSectionEl = navigation.querySelector(".writer-folders");
+    state2.fileSectionEl = navigation.querySelector(".writer-files");
+    state2.folderListEl = navigation.querySelector(".writer-folder-tree");
     state2.listEl = navigation.querySelector(".writer-file-list");
     const createBtn = navigation.querySelector(".writer-create");
     if (createBtn) {
       createBtn.addEventListener("click", () => createNewDocument());
     }
+    const folderCreateBtn = navigation.querySelector(".writer-folder-create");
+    if (folderCreateBtn) {
+      folderCreateBtn.addEventListener("click", () => {
+        const parent = state2.selectedFolderId === "all" ? null : state2.selectedFolderId;
+        createFolder(parent);
+      });
+    }
+    if (state2.folderListEl) {
+      state2.folderListEl.addEventListener("click", onFolderClick);
+      state2.folderListEl.addEventListener("contextmenu", onFolderContextMenu);
+    }
     if (state2.listEl) {
       state2.listEl.addEventListener("click", onFileClick);
       state2.listEl.addEventListener("contextmenu", onFileContextMenu);
     }
+    updateSidebarClasses();
     return root;
   }
   function mountUI() {
@@ -28355,7 +28474,9 @@ function startWriter(shell2, opts = {}) {
     const parent = outputEl?.parentElement || screenEl;
     if (parent) parent.appendChild(renderLayout());
     attachGlobalListeners();
-    ensureContextMenu();
+    ensureFileContextMenu();
+    ensureFolderContextMenu();
+    handleResponsivePanels(true);
     const paneEl = document.getElementById("writerEditorPane");
     if (!paneEl) throw new Error("Writer editor pane missing");
     state2.cmView = new EditorView({
@@ -28368,8 +28489,9 @@ function startWriter(shell2, opts = {}) {
   }
   function redrawFileList() {
     if (!state2.listEl) return;
+    const docs = getFilteredDocs();
     state2.listEl.innerHTML = "";
-    for (const doc2 of state2.docs) {
+    for (const doc2 of docs) {
       const item = document.createElement("li");
       item.className = "writer-file-item";
       item.dataset.id = String(doc2.id);
@@ -28384,13 +28506,14 @@ function startWriter(shell2, opts = {}) {
     if (host) {
       const prevEmpty = host.querySelector(".writer-files-empty");
       if (prevEmpty) prevEmpty.remove();
-      if (!state2.docs.length) {
+      if (!docs.length) {
         const empty2 = document.createElement("div");
         empty2.className = "writer-files-empty muted";
-        empty2.textContent = "Create your first document with the + button.";
+        empty2.textContent = state2.selectedFolderId === "all" ? "Create your first document with the + button." : "This folder is empty.";
         host.appendChild(empty2);
       }
     }
+    if (state2.current) setActiveListItem(state2.current.id);
   }
   function setActiveListItem(id2) {
     if (!state2.listEl) return;
@@ -28409,16 +28532,290 @@ function startWriter(shell2, opts = {}) {
       return "";
     }
   }
+  function buildFolderChildrenMap(folders) {
+    const map = /* @__PURE__ */ new Map();
+    for (const folder of folders) {
+      const parent = folder.parent_id == null ? null : folder.parent_id;
+      if (!map.has(parent)) map.set(parent, []);
+      map.get(parent).push(folder);
+    }
+    for (const [, list2] of map) {
+      list2.sort((a, b) => (a.name_lower || "").localeCompare(b.name_lower || ""));
+    }
+    return map;
+  }
+  function renderFolderTree() {
+    if (!state2.folderListEl) return;
+    const folders = Array.isArray(state2.folders) ? state2.folders.slice() : [];
+    const childrenMap = buildFolderChildrenMap(folders);
+    const buildMarkup = (parentId) => {
+      const children = childrenMap.get(parentId == null ? null : parentId) || [];
+      if (!children.length) return "";
+      const items = children.map((child) => {
+        const subtree = buildMarkup(child.id);
+        return `
+                    <li class="writer-folder-item" data-folder-id="${child.id}">
+                        <div class="writer-folder-row">
+                            <span class="writer-folder-name">${esc2(child.name)}</span>
+                        </div>
+                        ${subtree}
+                    </li>
+                `;
+      });
+      return `<ul>${items.join("")}</ul>`;
+    };
+    const nested = buildMarkup(null);
+    state2.folderListEl.innerHTML = `
+            <li class="writer-folder-item" data-folder-id="all">
+                <div class="writer-folder-row">
+                    <span class="writer-folder-name">All Documents</span>
+                </div>
+                ${nested}
+            </li>
+        `;
+    highlightActiveFolder();
+  }
+  function highlightActiveFolder() {
+    if (!state2.folderListEl) return;
+    state2.folderListEl.querySelectorAll(".writer-folder-item").forEach((item) => item.classList.remove("active"));
+    const selector = state2.selectedFolderId === "all" ? '.writer-folder-item[data-folder-id="all"]' : `.writer-folder-item[data-folder-id="${state2.selectedFolderId}"]`;
+    const active = state2.folderListEl.querySelector(selector);
+    if (active) active.classList.add("active");
+  }
+  function resolveFolderId(value) {
+    if (value === "all") return "all";
+    if (value == null) return "all";
+    const num = Number(value);
+    return Number.isFinite(num) ? num : "all";
+  }
+  function getFilteredDocs() {
+    if (state2.selectedFolderId === "all") return state2.docs.slice();
+    return state2.docs.filter((doc2) => {
+      const folder = doc2.folder_id == null ? null : doc2.folder_id;
+      return folder === state2.selectedFolderId;
+    });
+  }
+  function setSelectedFolder(folderId, { fromDocument = false } = {}) {
+    const resolved = resolveFolderId(folderId);
+    if (resolved !== "all" && !state2.folders.some((folder) => folder.id === resolved)) {
+      state2.selectedFolderId = "all";
+    } else {
+      state2.selectedFolderId = resolved;
+    }
+    highlightActiveFolder();
+    redrawFileList();
+    if (fromDocument && state2.current) {
+      setActiveListItem(state2.current.id);
+    }
+  }
+  async function loadFolders() {
+    if (!writerAPI || typeof writerAPI.listFolders !== "function") {
+      state2.folders = [];
+      renderFolderTree();
+      return;
+    }
+    try {
+      const rows = await writerAPI.listFolders();
+      state2.folders = Array.isArray(rows) ? rows.map((row) => ({
+        ...row,
+        parent_id: row.parent_id == null ? null : Number(row.parent_id),
+        name_lower: (row.name || "").toLowerCase()
+      })) : [];
+      if (state2.selectedFolderId !== "all" && !state2.folders.some((f) => f.id === state2.selectedFolderId)) {
+        state2.selectedFolderId = "all";
+      }
+      renderFolderTree();
+    } catch (err) {
+      shell2.print(`<div class="error">Failed to load folders: ${esc2(err?.message || err)}</div>`);
+      state2.folders = [];
+      renderFolderTree();
+    }
+  }
+  function onFolderClick(e) {
+    const row = e.target.closest(".writer-folder-row");
+    if (!row) return;
+    const item = row.closest(".writer-folder-item");
+    if (!item) return;
+    const id2 = item.dataset.folderId;
+    if (id2 === "all") {
+      setSelectedFolder("all");
+      return;
+    }
+    const numeric = Number(id2);
+    if (!Number.isFinite(numeric)) return;
+    setSelectedFolder(numeric);
+  }
+  function onFolderContextMenu(e) {
+    const row = e.target.closest(".writer-folder-row");
+    if (!row) return;
+    const item = row.closest(".writer-folder-item");
+    if (!item) return;
+    const id2 = item.dataset.folderId;
+    if (id2 === "all") return;
+    const folderId = Number(id2);
+    if (!Number.isFinite(folderId)) return;
+    e.preventDefault();
+    closeContextMenu();
+    const menu = ensureFolderContextMenu();
+    menu.dataset.folderId = String(folderId);
+    menu.style.left = `${e.clientX}px`;
+    menu.style.top = `${e.clientY}px`;
+    menu.classList.add("visible");
+    menu.querySelectorAll("button").forEach((btn) => {
+      btn.onclick = () => {
+        const action = btn.dataset.action;
+        handleFolderContextAction(action, folderId);
+        closeContextMenu();
+      };
+    });
+  }
+  async function handleFolderContextAction(action, id2) {
+    switch (action) {
+      case FOLDER_ACTIONS.OPEN:
+        setSelectedFolder(id2);
+        break;
+      case FOLDER_ACTIONS.RENAME:
+        await renameFolder(id2);
+        break;
+      case FOLDER_ACTIONS.DUPLICATE:
+        await duplicateFolder(id2);
+        break;
+      case FOLDER_ACTIONS.DELETE:
+        await deleteFolder(id2);
+        break;
+      default:
+        break;
+    }
+  }
+  async function createFolder(parentId = null) {
+    if (!writerAPI || typeof writerAPI.createFolder !== "function") return null;
+    const result = await promptModal({
+      title: "New folder",
+      value: "New Folder",
+      confirmLabel: "Create",
+      cancelLabel: "Cancel"
+    });
+    if (result === null) return null;
+    const trimmed = String(result).trim();
+    if (!trimmed) return null;
+    try {
+      const folder = await writerAPI.createFolder({ name: trimmed, parentId });
+      await loadFolders();
+      if (folder && folder.id != null) {
+        setSelectedFolder(folder.id);
+      }
+      showToast("Folder created", "ok");
+      return folder;
+    } catch (err) {
+      showToast(err?.message || "Failed to create folder", "error", "writerToastError");
+      return null;
+    }
+  }
+  async function renameFolder(id2) {
+    if (!writerAPI || typeof writerAPI.renameFolder !== "function") return;
+    const folder = state2.folders.find((f) => f.id === id2);
+    if (!folder) return;
+    const result = await promptModal({
+      title: "Rename folder",
+      value: folder.name || "Folder",
+      confirmLabel: "Rename"
+    });
+    if (result === null) return;
+    const trimmed = String(result).trim();
+    if (!trimmed) return;
+    try {
+      await writerAPI.renameFolder(id2, trimmed);
+      await loadFolders();
+      setSelectedFolder(id2);
+      showToast("Folder renamed", "ok");
+    } catch (err) {
+      showToast(err?.message || "Failed to rename folder", "error", "writerToastError");
+    }
+  }
+  async function duplicateFolder(id2) {
+    if (!writerAPI || typeof writerAPI.duplicateFolder !== "function") return;
+    const folder = state2.folders.find((f) => f.id === id2);
+    if (!folder) return;
+    try {
+      const copy = await writerAPI.duplicateFolder(id2, {});
+      await loadFolders();
+      if (copy && copy.id != null) setSelectedFolder(copy.id);
+      showToast("Folder duplicated", "ok");
+    } catch (err) {
+      showToast(err?.message || "Failed to duplicate folder", "error", "writerToastError");
+    }
+  }
+  async function deleteFolder(id2) {
+    if (!writerAPI || typeof writerAPI.deleteFolder !== "function") return;
+    const folder = state2.folders.find((f) => f.id === id2);
+    if (!folder) return;
+    const result = await confirmModal({
+      title: "Delete folder?",
+      message: `This will remove "${folder.name}" and unfile its documents.`,
+      confirmLabel: "Delete",
+      cancelLabel: "Cancel",
+      danger: true
+    });
+    if (result !== "confirm") return;
+    try {
+      await writerAPI.deleteFolder(id2);
+      const nextSelection = "all";
+      await loadFolders();
+      setSelectedFolder(nextSelection);
+      await loadDocuments();
+      showToast("Folder deleted", "warn");
+    } catch (err) {
+      showToast(err?.message || "Failed to delete folder", "error", "writerToastError");
+    }
+  }
+  function handleResponsivePanels(force = false) {
+    const width = window.innerWidth || 0;
+    const applyForWidth = () => {
+      if (width >= 1024) {
+        setPanelVisibility({ file: false, folder: false });
+      } else if (width >= 768) {
+        setPanelVisibility({ file: false, folder: true });
+      } else {
+        setPanelVisibility({ file: true, folder: true });
+      }
+    };
+    if (force) {
+      applyForWidth();
+      state2.lastWindowWidth = width;
+      return;
+    }
+    const prev = state2.lastWindowWidth;
+    const prevBucket = prev >= 1024 ? "lg" : prev >= 768 ? "md" : "sm";
+    const curBucket = width >= 1024 ? "lg" : width >= 768 ? "md" : "sm";
+    if (prevBucket !== curBucket) {
+      applyForWidth();
+    }
+    state2.lastWindowWidth = width;
+  }
   async function loadDocuments() {
     try {
       const docs = await writerAPI.list();
       state2.docs = Array.isArray(docs) ? docs : [];
       redrawFileList();
-      if (state2.docs.length && (!state2.current || !state2.docs.some((d) => d.id === state2.current.id))) {
-        await openDocument(state2.docs[0].id, { force: true });
-      } else if (!state2.docs.length) {
+      if (!state2.docs.length) {
         setEditorContent("", "Untitled Document");
         state2.current = null;
+        return;
+      }
+      if (state2.current && state2.docs.some((d) => d.id === state2.current.id)) {
+        setActiveListItem(state2.current.id);
+        return;
+      }
+      let candidates = getFilteredDocs();
+      if (!candidates.length && state2.selectedFolderId !== "all") {
+        setSelectedFolder("all");
+        candidates = getFilteredDocs();
+      }
+      if (!candidates.length) {
+        candidates = state2.docs.slice();
+      }
+      if (candidates.length) {
+        await openDocument(candidates[0].id, { force: true });
       }
     } catch (err) {
       shell2.print(`<div class="error">Failed to load writer documents: ${esc2(err?.message || err)}</div>`);
@@ -28471,7 +28868,8 @@ function startWriter(shell2, opts = {}) {
       const doc2 = await writerAPI.get(id2);
       if (!doc2) return;
       state2.current = doc2;
-      setActiveListItem(id2);
+      const folderForDoc = doc2.folder_id == null ? "all" : doc2.folder_id;
+      setSelectedFolder(folderForDoc, { fromDocument: true });
       setEditorContent(doc2.content || "", doc2.title || "Untitled Document", doc2.content || "");
     } catch (err) {
       shell2.print(`<div class="error">Unable to open document: ${esc2(err?.message || err)}</div>`);
@@ -28490,7 +28888,8 @@ function startWriter(shell2, opts = {}) {
     e.preventDefault();
     const id2 = Number(li.dataset.id);
     if (!Number.isFinite(id2)) return;
-    const menu = ensureContextMenu();
+    closeContextMenu();
+    const menu = ensureFileContextMenu();
     menu.dataset.fileId = String(id2);
     menu.style.left = `${e.clientX}px`;
     menu.style.top = `${e.clientY}px`;
@@ -28583,7 +28982,8 @@ function startWriter(shell2, opts = {}) {
       title = `${desiredTitle} ${counter++}`;
     }
     try {
-      const doc2 = await writerAPI.create({ title, content: "" });
+      const folderId = state2.selectedFolderId === "all" ? null : state2.selectedFolderId;
+      const doc2 = await writerAPI.create({ title, content: "", folderId });
       await loadDocuments();
       await openDocument(doc2.id, { force: true });
       showToast("New document created", "ok");
@@ -28723,18 +29123,11 @@ function startWriter(shell2, opts = {}) {
   }
   function requestExit() {
     if (state2.dirty) {
-      confirmModal({
-        title: "Unsaved changes",
-        message: "Save current document before exiting?",
-        confirmLabel: "Save",
-        cancelLabel: "Discard"
-      }).then(async (result) => {
-        if (result === "confirm") {
-          const saved = await saveCurrentDocument();
-          if (!saved) return;
+      confirmExitWithoutSaving().then(async (result) => {
+        if (result === "yes") {
+          clearDirty();
+          performExit();
         }
-        clearDirty();
-        performExit();
       });
     } else {
       performExit();
@@ -28750,26 +29143,30 @@ function startWriter(shell2, opts = {}) {
     shell2.exit();
     shell2.print('<div class="muted">Exited Writer.</div>');
   }
-  function confirmModal({ title, message, confirmLabel = "OK", cancelLabel = "Cancel", danger = false } = {}) {
+  function confirmModal({ title = "Confirm", message = "", confirmLabel = "OK", cancelLabel = "Cancel", danger = false } = {}) {
     return new Promise((resolve) => {
+      const existing = document.getElementById("writerConfirmModal");
+      if (existing && existing.parentElement) existing.parentElement.removeChild(existing);
       const wrap = document.createElement("div");
+      wrap.id = "writerConfirmModal";
       wrap.className = "cj-modal-backdrop";
       wrap.innerHTML = `
-                <div class="cj-modal" role="dialog" aria-modal="true">
-                    <div class="cj-modal-title">${esc2(title)}</div>
+                <div class="cj-modal" role="dialog" aria-modal="true" aria-labelledby="writerConfirmTitle">
+                    <div id="writerConfirmTitle" class="cj-modal-title">${esc2(title)}</div>
                     <div class="cj-modal-body">${esc2(message)}</div>
                     <div class="cj-modal-actions">
-                        <button class="confirm ${danger ? "danger" : ""}">${confirmLabel}</button>
-                        <button class="cancel">${cancelLabel}</button>
+                        <button class="confirm ${danger ? "danger" : ""}">${esc2(confirmLabel)}</button>
+                        <button class="cancel">${esc2(cancelLabel)}</button>
                     </div>
+                    <div class="cj-modal-hint muted">Enter = ${esc2(confirmLabel)} \xB7 Esc = ${esc2(cancelLabel)}</div>
                 </div>
             `;
       document.body.appendChild(wrap);
       const confirmBtn = wrap.querySelector("button.confirm");
       const cancelBtn = wrap.querySelector("button.cancel");
       const cleanup = () => {
-        if (wrap && wrap.parentElement) wrap.parentElement.removeChild(wrap);
         window.removeEventListener("keydown", onKey, true);
+        if (wrap && wrap.parentElement) wrap.parentElement.removeChild(wrap);
       };
       const accept = () => {
         cleanup();
@@ -28779,20 +29176,91 @@ function startWriter(shell2, opts = {}) {
         cleanup();
         resolve("cancel");
       };
-      function onKey(e) {
+      const onKey = (e) => {
         if (e.key === "Escape") {
           e.preventDefault();
           reject();
-        }
-        if (e.key === "Enter") {
+        } else if (e.key === "Enter") {
           e.preventDefault();
           accept();
         }
-      }
+      };
       confirmBtn.addEventListener("click", accept);
       cancelBtn.addEventListener("click", reject);
       window.addEventListener("keydown", onKey, true);
-      setTimeout(() => confirmBtn.focus(), 0);
+      setTimeout(() => {
+        try {
+          confirmBtn.focus({ preventScroll: true });
+        } catch {
+          confirmBtn.focus();
+        }
+      }, 0);
+    });
+  }
+  function confirmExitWithoutSaving() {
+    return new Promise((resolve) => {
+      const existing = document.getElementById("writerConfirmExitModal");
+      if (existing && existing.parentElement) existing.parentElement.removeChild(existing);
+      const wrap = document.createElement("div");
+      wrap.id = "writerConfirmExitModal";
+      wrap.className = "cj-modal-backdrop";
+      wrap.innerHTML = `
+                <div class="cj-modal" role="dialog" aria-modal="true" aria-labelledby="writerConfirmExitTitle">
+                    <div id="writerConfirmExitTitle" class="cj-modal-title">Confirm</div>
+                    <div class="cj-modal-body">Exit without saving?</div>
+                    <div class="cj-modal-actions">
+                        <button class="confirm">Yes</button>
+                        <button class="cancel">No</button>
+                    </div>
+                    <div class="cj-modal-hint muted">y = yes &middot; n = no</div>
+                </div>
+            `;
+      document.body.appendChild(wrap);
+      const confirmBtn = wrap.querySelector("button.confirm");
+      const cancelBtn = wrap.querySelector("button.cancel");
+      let done = false;
+      const cleanup = () => {
+        window.removeEventListener("keydown", onKey, true);
+        if (wrap && wrap.parentElement) wrap.parentElement.removeChild(wrap);
+        done = true;
+      };
+      const accept = () => {
+        if (!done) {
+          cleanup();
+          resolve("yes");
+        }
+      };
+      const reject = () => {
+        if (!done) {
+          cleanup();
+          resolve("no");
+        }
+      };
+      const onKey = (e) => {
+        if (e.key === "y" || e.key === "Y") {
+          e.preventDefault();
+          accept();
+        } else if (e.key === "n" || e.key === "N") {
+          e.preventDefault();
+          reject();
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          accept();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          reject();
+        }
+      };
+      confirmBtn.addEventListener("click", accept);
+      cancelBtn.addEventListener("click", reject);
+      window.addEventListener("keydown", onKey, true);
+      setTimeout(() => {
+        try {
+          confirmBtn.focus({ preventScroll: true });
+        } catch {
+          confirmBtn.focus();
+        }
+      }, 0);
     });
   }
   function promptModal({ title, value = "", confirmLabel = "OK", cancelLabel = "Cancel" } = {}) {
@@ -28848,7 +29316,8 @@ function startWriter(shell2, opts = {}) {
   }
   mountUI();
   shell2.setPrompt(state2.prompt);
-  loadDocuments();
+  loadFolders().catch(() => {
+  }).then(() => loadDocuments());
   const program = {
     async consume() {
     },
@@ -31868,13 +32337,46 @@ if (!db) {
     let normalizeWriterTitle = function(title) {
       const trimmed = String(title ?? "").trim();
       return trimmed || "Untitled Document";
+    }, normalizeWriterFolderName = function(name2) {
+      const trimmed = String(name2 ?? "").trim();
+      return trimmed || "New Folder";
+    }, folderNameKey = function(parentId, name2) {
+      return `${parentId == null ? "null" : parentId}::${String(name2 || "").toLowerCase()}`;
+    }, ensureUniqueFolderName = function(baseName, parentId, existingKeys) {
+      const normalized = normalizeWriterFolderName(baseName);
+      let attempt = normalized;
+      let counter = 2;
+      while (existingKeys.has(folderNameKey(parentId, attempt))) {
+        attempt = `${normalized} ${counter++}`;
+      }
+      existingKeys.add(folderNameKey(parentId, attempt));
+      return attempt;
+    }, buildFolderChildrenMap = function(folders) {
+      const map = /* @__PURE__ */ new Map();
+      for (const folder of folders) {
+        const parent = folder.parent_id == null ? null : folder.parent_id;
+        if (!map.has(parent)) map.set(parent, []);
+        map.get(parent).push(folder);
+      }
+      return map;
+    }, collectFolderDescendants = function(childrenMap, rootId) {
+      const out = [];
+      const stack = [rootId];
+      while (stack.length) {
+        const current = stack.pop();
+        out.push(current);
+        const children = childrenMap.get(current) || [];
+        for (const child of children) stack.push(child.id);
+      }
+      return out;
     };
     const DB_NAME = "console-journal";
-    const DB_VERSION = 4;
+    const DB_VERSION = 5;
     const STORE = "entries";
     const TEMPLATE_STORE = "templates";
     const SETTINGS_STORE = "settings";
     const WRITER_STORE = "writer_docs";
+    const WRITER_FOLDER_STORE = "writer_folders";
     const openDB = () => new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
@@ -31896,6 +32398,12 @@ if (!db) {
           w.createIndex("updated_at", "updated_at", { unique: false });
           w.createIndex("folder_id", "folder_id", { unique: false });
           w.createIndex("title_lower", "title_lower", { unique: false });
+        }
+        if (!db2.objectStoreNames.contains(WRITER_FOLDER_STORE)) {
+          const f = db2.createObjectStore(WRITER_FOLDER_STORE, { keyPath: "id", autoIncrement: true });
+          f.createIndex("parent_id", "parent_id", { unique: false });
+          f.createIndex("parent_name", ["parent_id", "name_lower"], { unique: true });
+          f.createIndex("name_lower", "name_lower", { unique: false });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -31919,6 +32427,29 @@ if (!db) {
     };
     const txRun = (mode, fn) => txRunStore(STORE, mode, fn);
     const txRunWriter = (mode, fn) => txRunStore(WRITER_STORE, mode, fn);
+    const txRunFolders = (mode, fn) => txRunStore(WRITER_FOLDER_STORE, mode, fn);
+    async function clearDocsForFolder(folderId) {
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      return txRunWriter("readwrite", (store) => {
+        return new Promise((resolve, reject) => {
+          const index = store.index("folder_id");
+          const range = IDBKeyRange.only(folderId);
+          const cursor = index.openCursor(range);
+          cursor.onsuccess = () => {
+            const cur = cursor.result;
+            if (!cur) {
+              resolve({ cleared: true });
+              return;
+            }
+            const value = { ...cur.value, folder_id: null, updated_at: now };
+            const updateReq = cur.update(value);
+            updateReq.onsuccess = () => cur.continue();
+            updateReq.onerror = () => reject(updateReq.error);
+          };
+          cursor.onerror = () => reject(cursor.error);
+        });
+      });
+    }
     db = {
       async get(date) {
         return txRun("readonly", (store) => {
@@ -32200,6 +32731,138 @@ if (!db) {
               getReq.onerror = () => reject(getReq.error);
             });
           });
+        },
+        async listFolders() {
+          return txRunFolders("readonly", (store) => {
+            const req = store.getAll();
+            return new Promise((resolve, reject) => {
+              req.onsuccess = () => {
+                const rows = (req.result || []).map((row) => ({
+                  ...row,
+                  parent_id: row.parent_id == null ? null : row.parent_id
+                }));
+                rows.sort((a, b) => a.name_lower.localeCompare(b.name_lower));
+                resolve(rows);
+              };
+              req.onerror = () => reject(req.error);
+            });
+          });
+        },
+        async getFolder(id2) {
+          const key = Number(id2);
+          if (!Number.isFinite(key)) throw new Error("Folder id required");
+          return txRunFolders("readonly", (store) => {
+            const req = store.get(key);
+            return new Promise((resolve, reject) => {
+              req.onsuccess = () => {
+                const row = req.result;
+                if (!row) resolve(null);
+                else resolve({ ...row, parent_id: row.parent_id == null ? null : row.parent_id });
+              };
+              req.onerror = () => reject(req.error);
+            });
+          });
+        },
+        async createFolder({ name: name2, parentId = null } = {}) {
+          const parentKey = parentId == null ? null : Number(parentId);
+          if (parentKey != null && !Number.isInteger(parentKey)) throw new Error("Folder id required");
+          if (parentKey != null) {
+            const parent = await this.getFolder(parentKey);
+            if (!parent) throw new Error("Parent folder not found");
+          }
+          const existing = await this.listFolders();
+          const existingKeys = new Set(existing.map((f) => folderNameKey(f.parent_id, f.name)));
+          const finalName = ensureUniqueFolderName(name2, parentKey, existingKeys);
+          const now = (/* @__PURE__ */ new Date()).toISOString();
+          return txRunFolders("readwrite", (store) => {
+            const doc2 = {
+              name: finalName,
+              name_lower: finalName.toLowerCase(),
+              parent_id: parentKey == null ? null : parentKey,
+              created_at: now,
+              updated_at: now
+            };
+            const req = store.add(doc2);
+            return new Promise((resolve, reject) => {
+              req.onsuccess = () => resolve({ ...doc2, id: req.result });
+              req.onerror = () => reject(req.error);
+            });
+          });
+        },
+        async renameFolder(id2, name2) {
+          const key = Number(id2);
+          if (!Number.isFinite(key)) throw new Error("Folder id required");
+          const folder = await this.getFolder(key);
+          if (!folder) throw new Error("Folder not found");
+          const normalized = normalizeWriterFolderName(name2);
+          const existing = await this.listFolders();
+          const existingKeys = new Set(
+            existing.filter((f) => f.id !== key).map((f) => folderNameKey(f.parent_id, f.name))
+          );
+          if (existingKeys.has(folderNameKey(folder.parent_id, normalized))) {
+            throw new Error("A folder with that name already exists.");
+          }
+          const now = (/* @__PURE__ */ new Date()).toISOString();
+          return txRunFolders("readwrite", (store) => {
+            const req = store.get(key);
+            return new Promise((resolve, reject) => {
+              req.onsuccess = () => {
+                const existingRow = req.result;
+                if (!existingRow) {
+                  reject(new Error("Folder not found"));
+                  return;
+                }
+                const next = {
+                  ...existingRow,
+                  name: normalized,
+                  name_lower: normalized.toLowerCase(),
+                  updated_at: now
+                };
+                const putReq = store.put(next);
+                putReq.onsuccess = () => resolve({ ...next, parent_id: next.parent_id == null ? null : next.parent_id });
+                putReq.onerror = () => reject(putReq.error);
+              };
+              req.onerror = () => reject(req.error);
+            });
+          });
+        },
+        async deleteFolder(id2) {
+          const key = Number(id2);
+          if (!Number.isFinite(key)) throw new Error("Folder id required");
+          const folders = await this.listFolders();
+          const target = folders.find((f) => f.id === key);
+          if (!target) throw new Error("Folder not found");
+          const childrenMap = buildFolderChildrenMap(folders);
+          const cascade = collectFolderDescendants(childrenMap, key);
+          for (const folderId of cascade) {
+            await clearDocsForFolder(folderId);
+          }
+          await txRunFolders("readwrite", (store) => {
+            cascade.forEach((folderId) => store.delete(folderId));
+            return cascade.length;
+          });
+          return { deleted: cascade.length };
+        },
+        async duplicateFolder(id2, { name: name2 } = {}) {
+          const key = Number(id2);
+          if (!Number.isFinite(key)) throw new Error("Folder id required");
+          const folders = await this.listFolders();
+          const target = folders.find((f) => f.id === key);
+          if (!target) throw new Error("Folder not found");
+          const parentId = target.parent_id == null ? null : target.parent_id;
+          const rootName = name2 ? name2 : `${target.name} Copy`;
+          const createdRoot = await this.createFolder({ name: rootName, parentId });
+          const childrenMap = buildFolderChildrenMap(folders);
+          const queue = (childrenMap.get(target.id) || []).map((child) => ({ folder: child, parentId: createdRoot.id }));
+          while (queue.length) {
+            const { folder: child, parentId: destParent } = queue.shift();
+            const childCreated = await this.createFolder({ name: child.name, parentId: destParent });
+            const grandchildren = childrenMap.get(child.id) || [];
+            for (const grandChild of grandchildren) {
+              queue.push({ folder: grandChild, parentId: childCreated.id });
+            }
+          }
+          return createdRoot;
         }
       }
     };
@@ -32270,7 +32933,12 @@ if (!db) {
         update: (payload = {}) => invoke("writer:update", payload),
         delete: (id2) => invoke("writer:delete", id2),
         duplicate: (id2, overrides2 = {}) => invoke("writer:duplicate", { id: id2, ...overrides2 }),
-        rename: (id2, title) => invoke("writer:rename", { id: id2, title })
+        rename: (id2, title) => invoke("writer:rename", { id: id2, title }),
+        listFolders: () => invoke("writer:list-folders"),
+        createFolder: (payload = {}) => invoke("writer:create-folder", payload),
+        renameFolder: (id2, name2) => invoke("writer:rename-folder", { id: id2, name: name2 }),
+        deleteFolder: (id2) => invoke("writer:delete-folder", id2),
+        duplicateFolder: (id2, overrides2 = {}) => invoke("writer:duplicate-folder", { id: id2, ...overrides2 })
       }
     };
   }

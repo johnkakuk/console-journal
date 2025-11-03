@@ -117,11 +117,12 @@ if (!db) {
     if (!window.electronAPI) {
         // ===== Minimal IndexedDB adapter for PWA =====
         const DB_NAME = 'console-journal';
-        const DB_VERSION = 4;
+        const DB_VERSION = 5;
         const STORE = 'entries';
         const TEMPLATE_STORE = 'templates';
         const SETTINGS_STORE = 'settings';
         const WRITER_STORE = 'writer_docs';
+        const WRITER_FOLDER_STORE = 'writer_folders';
 
         const openDB = () => new Promise((resolve, reject) => {
             const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -145,6 +146,12 @@ if (!db) {
                     w.createIndex('folder_id', 'folder_id', { unique: false });
                     w.createIndex('title_lower', 'title_lower', { unique: false });
                 }
+                if (!db.objectStoreNames.contains(WRITER_FOLDER_STORE)) {
+                    const f = db.createObjectStore(WRITER_FOLDER_STORE, { keyPath: 'id', autoIncrement: true });
+                    f.createIndex('parent_id', 'parent_id', { unique: false });
+                    f.createIndex('parent_name', ['parent_id', 'name_lower'], { unique: true });
+                    f.createIndex('name_lower', 'name_lower', { unique: false });
+                }
             };
             req.onsuccess = () => resolve(req.result);
             req.onerror = () => reject(req.error);
@@ -163,10 +170,76 @@ if (!db) {
         };
         const txRun = (mode, fn) => txRunStore(STORE, mode, fn);
         const txRunWriter = (mode, fn) => txRunStore(WRITER_STORE, mode, fn);
+        const txRunFolders = (mode, fn) => txRunStore(WRITER_FOLDER_STORE, mode, fn);
 
         function normalizeWriterTitle(title) {
             const trimmed = String(title ?? '').trim();
             return trimmed || 'Untitled Document';
+        }
+
+        function normalizeWriterFolderName(name) {
+            const trimmed = String(name ?? '').trim();
+            return trimmed || 'New Folder';
+        }
+
+        function folderNameKey(parentId, name) {
+            return `${parentId == null ? 'null' : parentId}::${String(name || '').toLowerCase()}`;
+        }
+
+        function ensureUniqueFolderName(baseName, parentId, existingKeys) {
+            const normalized = normalizeWriterFolderName(baseName);
+            let attempt = normalized;
+            let counter = 2;
+            while (existingKeys.has(folderNameKey(parentId, attempt))) {
+                attempt = `${normalized} ${counter++}`;
+            }
+            existingKeys.add(folderNameKey(parentId, attempt));
+            return attempt;
+        }
+
+        function buildFolderChildrenMap(folders) {
+            const map = new Map();
+            for (const folder of folders) {
+                const parent = folder.parent_id == null ? null : folder.parent_id;
+                if (!map.has(parent)) map.set(parent, []);
+                map.get(parent).push(folder);
+            }
+            return map;
+        }
+
+        function collectFolderDescendants(childrenMap, rootId) {
+            const out = [];
+            const stack = [rootId];
+            while (stack.length) {
+                const current = stack.pop();
+                out.push(current);
+                const children = childrenMap.get(current) || [];
+                for (const child of children) stack.push(child.id);
+            }
+            return out;
+        }
+
+        async function clearDocsForFolder(folderId) {
+            const now = new Date().toISOString();
+            return txRunWriter('readwrite', store => {
+                return new Promise((resolve, reject) => {
+                    const index = store.index('folder_id');
+                    const range = IDBKeyRange.only(folderId);
+                    const cursor = index.openCursor(range);
+                    cursor.onsuccess = () => {
+                        const cur = cursor.result;
+                        if (!cur) {
+                            resolve({ cleared: true });
+                            return;
+                        }
+                        const value = { ...cur.value, folder_id: null, updated_at: now };
+                        const updateReq = cur.update(value);
+                        updateReq.onsuccess = () => cur.continue();
+                        updateReq.onerror = () => reject(updateReq.error);
+                    };
+                    cursor.onerror = () => reject(cursor.error);
+                });
+            });
         }
 
         db = {
@@ -450,6 +523,140 @@ if (!db) {
                             getReq.onerror = () => reject(getReq.error);
                         });
                     });
+                },
+                async listFolders() {
+                    return txRunFolders('readonly', store => {
+                        const req = store.getAll();
+                        return new Promise((resolve, reject) => {
+                            req.onsuccess = () => {
+                                const rows = (req.result || []).map(row => ({
+                                    ...row,
+                                    parent_id: row.parent_id == null ? null : row.parent_id
+                                }));
+                                rows.sort((a, b) => a.name_lower.localeCompare(b.name_lower));
+                                resolve(rows);
+                            };
+                            req.onerror = () => reject(req.error);
+                        });
+                    });
+                },
+                async getFolder(id) {
+                    const key = Number(id);
+                    if (!Number.isFinite(key)) throw new Error('Folder id required');
+                    return txRunFolders('readonly', store => {
+                        const req = store.get(key);
+                        return new Promise((resolve, reject) => {
+                            req.onsuccess = () => {
+                                const row = req.result;
+                                if (!row) resolve(null);
+                                else resolve({ ...row, parent_id: row.parent_id == null ? null : row.parent_id });
+                            };
+                            req.onerror = () => reject(req.error);
+                        });
+                    });
+                },
+                async createFolder({ name, parentId = null } = {}) {
+                    const parentKey = parentId == null ? null : Number(parentId);
+                    if (parentKey != null && !Number.isInteger(parentKey)) throw new Error('Folder id required');
+                    if (parentKey != null) {
+                        const parent = await this.getFolder(parentKey);
+                        if (!parent) throw new Error('Parent folder not found');
+                    }
+                    const existing = await this.listFolders();
+                    const existingKeys = new Set(existing.map(f => folderNameKey(f.parent_id, f.name)));
+                    const finalName = ensureUniqueFolderName(name, parentKey, existingKeys);
+                    const now = new Date().toISOString();
+                    return txRunFolders('readwrite', store => {
+                        const doc = {
+                            name: finalName,
+                            name_lower: finalName.toLowerCase(),
+                            parent_id: parentKey == null ? null : parentKey,
+                            created_at: now,
+                            updated_at: now
+                        };
+                        const req = store.add(doc);
+                        return new Promise((resolve, reject) => {
+                            req.onsuccess = () => resolve({ ...doc, id: req.result });
+                            req.onerror = () => reject(req.error);
+                        });
+                    });
+                },
+                async renameFolder(id, name) {
+                    const key = Number(id);
+                    if (!Number.isFinite(key)) throw new Error('Folder id required');
+                    const folder = await this.getFolder(key);
+                    if (!folder) throw new Error('Folder not found');
+                    const normalized = normalizeWriterFolderName(name);
+                    const existing = await this.listFolders();
+                    const existingKeys = new Set(
+                        existing
+                            .filter(f => f.id !== key)
+                            .map(f => folderNameKey(f.parent_id, f.name))
+                    );
+                    if (existingKeys.has(folderNameKey(folder.parent_id, normalized))) {
+                        throw new Error('A folder with that name already exists.');
+                    }
+                    const now = new Date().toISOString();
+                    return txRunFolders('readwrite', store => {
+                        const req = store.get(key);
+                        return new Promise((resolve, reject) => {
+                            req.onsuccess = () => {
+                                const existingRow = req.result;
+                                if (!existingRow) {
+                                    reject(new Error('Folder not found'));
+                                    return;
+                                }
+                                const next = {
+                                    ...existingRow,
+                                    name: normalized,
+                                    name_lower: normalized.toLowerCase(),
+                                    updated_at: now
+                                };
+                                const putReq = store.put(next);
+                                putReq.onsuccess = () => resolve({ ...next, parent_id: next.parent_id == null ? null : next.parent_id });
+                                putReq.onerror = () => reject(putReq.error);
+                            };
+                            req.onerror = () => reject(req.error);
+                        });
+                    });
+                },
+                async deleteFolder(id) {
+                    const key = Number(id);
+                    if (!Number.isFinite(key)) throw new Error('Folder id required');
+                    const folders = await this.listFolders();
+                    const target = folders.find(f => f.id === key);
+                    if (!target) throw new Error('Folder not found');
+                    const childrenMap = buildFolderChildrenMap(folders);
+                    const cascade = collectFolderDescendants(childrenMap, key);
+                    for (const folderId of cascade) {
+                        await clearDocsForFolder(folderId);
+                    }
+                    await txRunFolders('readwrite', store => {
+                        cascade.forEach(folderId => store.delete(folderId));
+                        return cascade.length;
+                    });
+                    return { deleted: cascade.length };
+                },
+                async duplicateFolder(id, { name } = {}) {
+                    const key = Number(id);
+                    if (!Number.isFinite(key)) throw new Error('Folder id required');
+                    const folders = await this.listFolders();
+                    const target = folders.find(f => f.id === key);
+                    if (!target) throw new Error('Folder not found');
+                    const parentId = target.parent_id == null ? null : target.parent_id;
+                    const rootName = name ? name : `${target.name} Copy`;
+                    const createdRoot = await this.createFolder({ name: rootName, parentId });
+                    const childrenMap = buildFolderChildrenMap(folders);
+                    const queue = (childrenMap.get(target.id) || []).map(child => ({ folder: child, parentId: createdRoot.id }));
+                    while (queue.length) {
+                        const { folder: child, parentId: destParent } = queue.shift();
+                        const childCreated = await this.createFolder({ name: child.name, parentId: destParent });
+                        const grandchildren = childrenMap.get(child.id) || [];
+                        for (const grandChild of grandchildren) {
+                            queue.push({ folder: grandChild, parentId: childCreated.id });
+                        }
+                    }
+                    return createdRoot;
                 }
             }
         };
@@ -527,7 +734,12 @@ if (!db) {
                 update:    (payload = {}) => invoke('writer:update', payload),
                 delete:    (id) => invoke('writer:delete', id),
                 duplicate: (id, overrides = {}) => invoke('writer:duplicate', { id, ...overrides }),
-                rename:    (id, title) => invoke('writer:rename', { id, title })
+                rename:    (id, title) => invoke('writer:rename', { id, title }),
+                listFolders:    () => invoke('writer:list-folders'),
+                createFolder:   (payload = {}) => invoke('writer:create-folder', payload),
+                renameFolder:   (id, name) => invoke('writer:rename-folder', { id, name }),
+                deleteFolder:   (id) => invoke('writer:delete-folder', id),
+                duplicateFolder:(id, overrides = {}) => invoke('writer:duplicate-folder', { id, ...overrides })
             }
         };
     }

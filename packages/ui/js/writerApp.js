@@ -15,6 +15,13 @@ const MENU_ACTIONS = {
     RENAME: 'rename',
 };
 
+const FOLDER_ACTIONS = {
+    OPEN: 'open',
+    DUPLICATE: 'duplicate',
+    DELETE: 'delete',
+    RENAME: 'rename'
+};
+
 const INDENT = '  '; // two spaces per nesting level
 
 function hasPointerUserEvent(update) {
@@ -270,6 +277,17 @@ const activeRowPlugin = ViewPlugin.fromClass(class {
         container.appendChild(this.dom);
         this._onResize = () => this.schedule();
         window.addEventListener('resize', this._onResize, { passive: true });
+        // Add focus event listener to editor's DOM element
+        this._onFocus = () => {
+            if (this.dom) this.dom.style.display = 'block';
+            this.schedule();
+        };
+        this.view.dom.addEventListener('focus', this._onFocus, true);
+        // Add blur event listener to hide the active row when focus leaves the editor
+        this._onBlur = () => {
+            if (this.dom) this.dom.style.display = 'none';
+        };
+        this.view.dom.addEventListener('blur', this._onBlur, true);
         this._scheduled = false;
         this._top = 0;
         this._height = 0;
@@ -300,6 +318,11 @@ const activeRowPlugin = ViewPlugin.fromClass(class {
                     this.dom.style.display = 'none';
                     return;
                 }
+                // Only show the active row when the editor pane is focused
+                if (!this.view.hasFocus) {
+                    this.dom.style.display = 'none';
+                    return;
+                }
                 this.dom.style.display = 'block';
                 this.dom.style.top = `${this._top}px`;
                 this.dom.style.height = `${this._height}px`;
@@ -314,6 +337,10 @@ const activeRowPlugin = ViewPlugin.fromClass(class {
     }
     destroy() {
         window.removeEventListener('resize', this._onResize);
+        // Remove focus event listener from editor's DOM element
+        this.view.dom.removeEventListener('focus', this._onFocus, true);
+        // Remove blur event listener from editor's DOM element
+        this.view.dom.removeEventListener('blur', this._onBlur, true);
         if (this.dom && this.dom.parentNode) this.dom.parentNode.removeChild(this.dom);
         this.dom = null;
     }
@@ -445,20 +472,55 @@ export function startWriter(shell, opts = {}) {
 
     const state = {
         docs: [],
+        folders: [],
         current: null,
         dirty: false,
         savedSnapshot: '',
         cmView: null,
         rootEl: null,
+        navigationEl: null,
+        folderSectionEl: null,
+        folderListEl: null,
         listEl: null,
-        contextMenuEl: null,
+        fileContextMenuEl: null,
+        folderContextMenuEl: null,
         toggleBtn: null,
         titleHelpEl: null,
-        navCollapsed: false,
+        selectedFolderId: 'all',
+        folderCollapsed: false,
+        fileCollapsed: true,
+        lastWindowWidth: window.innerWidth || 0,
         domSnapshot: null,
         titlebarInsertions: [],
         prompt: opts.prompt || 'writer>',
     };
+
+    function updateSidebarClasses() {
+        const filesOpen = !state.fileCollapsed;
+        const foldersOpen = !state.folderCollapsed;
+        const hasAny = filesOpen || foldersOpen;
+        if (state.rootEl) {
+            state.rootEl.classList.toggle('files-open', filesOpen);
+            state.rootEl.classList.toggle('folders-open', foldersOpen);
+            state.rootEl.classList.toggle('panels-hidden', !hasAny);
+        }
+        if (state.navigationEl) {
+            state.navigationEl.classList.toggle('collapsed', !hasAny);
+        }
+        if (state.toggleBtn) {
+            state.toggleBtn.setAttribute('aria-pressed', !hasAny ? 'true' : 'false');
+        }
+    }
+
+    function setPanelVisibility(updates = {}) {
+        if (Object.prototype.hasOwnProperty.call(updates, 'folder')) {
+            state.folderCollapsed = !!updates.folder;
+        }
+        if (Object.prototype.hasOwnProperty.call(updates, 'file')) {
+            state.fileCollapsed = !!updates.file;
+        }
+        updateSidebarClasses();
+    }
 
     function esc(str) {
         return String(str ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -485,9 +547,9 @@ export function startWriter(shell, opts = {}) {
             const toggleBtn = document.createElement('button');
             toggleBtn.type = 'button';
             toggleBtn.className = 'writer-toggle';
-            toggleBtn.title = 'Toggle file selector';
-            toggleBtn.setAttribute('aria-label', 'Toggle file selector');
-            toggleBtn.setAttribute('aria-pressed', 'false');
+            toggleBtn.title = 'Toggle panels';
+            toggleBtn.setAttribute('aria-label', 'Toggle panels');
+            toggleBtn.setAttribute('aria-pressed', state.folderCollapsed && state.fileCollapsed ? 'true' : 'false');
             toggleBtn.innerHTML = '<span class="writer-toggle-icon" aria-hidden="true"></span>';
             toggleBtn.addEventListener('click', toggleNavigation);
             titlebar.insertBefore(toggleBtn, titlebar.firstChild);
@@ -521,13 +583,18 @@ export function startWriter(shell, opts = {}) {
             });
             state.titlebarInsertions = [];
         }
-        if (state.contextMenuEl && state.contextMenuEl.parentElement) {
-            state.contextMenuEl.parentElement.removeChild(state.contextMenuEl);
+        if (state.fileContextMenuEl && state.fileContextMenuEl.parentElement) {
+            state.fileContextMenuEl.parentElement.removeChild(state.fileContextMenuEl);
+            state.fileContextMenuEl = null;
+        }
+        if (state.folderContextMenuEl && state.folderContextMenuEl.parentElement) {
+            state.folderContextMenuEl.parentElement.removeChild(state.folderContextMenuEl);
+            state.folderContextMenuEl = null;
         }
     }
 
-    function ensureContextMenu() {
-        if (state.contextMenuEl) return state.contextMenuEl;
+    function ensureFileContextMenu() {
+        if (state.fileContextMenuEl) return state.fileContextMenuEl;
         const menu = document.createElement('div');
         menu.className = 'writer-context-menu';
         menu.innerHTML = `
@@ -538,12 +605,28 @@ export function startWriter(shell, opts = {}) {
             <button data-action="${MENU_ACTIONS.DELETE}" class="danger">Delete</button>
         `;
         document.body.appendChild(menu);
-        state.contextMenuEl = menu;
+        state.fileContextMenuEl = menu;
+        return menu;
+    }
+
+    function ensureFolderContextMenu() {
+        if (state.folderContextMenuEl) return state.folderContextMenuEl;
+        const menu = document.createElement('div');
+        menu.className = 'writer-context-menu';
+        menu.innerHTML = `
+            <button data-action="${FOLDER_ACTIONS.OPEN}">Open</button>
+            <button data-action="${FOLDER_ACTIONS.RENAME}">Rename</button>
+            <button data-action="${FOLDER_ACTIONS.DUPLICATE}">Duplicate</button>
+            <button data-action="${FOLDER_ACTIONS.DELETE}" class="danger">Delete</button>
+        `;
+        document.body.appendChild(menu);
+        state.folderContextMenuEl = menu;
         return menu;
     }
 
     function closeContextMenu() {
-        if (state.contextMenuEl) state.contextMenuEl.classList.remove('visible');
+        if (state.fileContextMenuEl) state.fileContextMenuEl.classList.remove('visible');
+        if (state.folderContextMenuEl) state.folderContextMenuEl.classList.remove('visible');
     }
 
     function markDirty() {
@@ -647,19 +730,37 @@ export function startWriter(shell, opts = {}) {
     function attachGlobalListeners() {
         window.addEventListener('click', closeContextMenu, true);
         window.addEventListener('contextmenu', (e) => {
-            if (!state.listEl || !state.listEl.contains(e.target)) {
+            const inFiles = state.listEl && state.listEl.contains(e.target);
+            const inFolders = state.folderListEl && state.folderListEl.contains(e.target);
+            if (!inFiles && !inFolders) {
                 closeContextMenu();
             }
         });
         window.addEventListener('keydown', onHotkey, true);
+        window.addEventListener('resize', handleResponsivePanels, { passive: true });
     }
 
     function detachGlobalListeners() {
         window.removeEventListener('click', closeContextMenu, true);
         window.removeEventListener('keydown', onHotkey, true);
+        window.removeEventListener('resize', handleResponsivePanels, { passive: true });
     }
 
     function onHotkey(e) {
+        // Global quit shortcut: Ctrl+X on macOS, Ctrl+Q on Windows/Linux
+        if (isMac) {
+            if (e.ctrlKey && !e.metaKey && (e.key === 'x' || e.key === 'X')) {
+                e.preventDefault();
+                requestExit();
+                return;
+            }
+        } else {
+            if (e.ctrlKey && (e.key === 'q' || e.key === 'Q')) {
+                e.preventDefault();
+                requestExit();
+                return;
+            }
+        }
         if ((isMac && e.metaKey) || (!isMac && e.ctrlKey)) {
             if (e.shiftKey && (e.key === 'n' || e.key === 'N')) {
                 e.preventDefault();
@@ -671,13 +772,14 @@ export function startWriter(shell, opts = {}) {
     }
 
     function toggleNavigation() {
-        state.navCollapsed = !state.navCollapsed;
-        if (state.rootEl) {
-            if (state.navCollapsed) state.rootEl.classList.add('nav-collapsed');
-            else state.rootEl.classList.remove('nav-collapsed');
-        }
-        if (state.toggleBtn) {
-            state.toggleBtn.setAttribute('aria-pressed', state.navCollapsed ? 'true' : 'false');
+        if (state.fileCollapsed && state.folderCollapsed) {
+            setPanelVisibility({ file: false, folder: true });
+        } else if (!state.fileCollapsed && state.folderCollapsed) {
+            setPanelVisibility({ folder: false });
+        } else {
+            setPanelVisibility({ file: true, folder: true });
+            // De-focus editor so auto-focus logic re-triggers on next user click
+            try { state.cmView && state.cmView.dom && state.cmView.dom.blur(); } catch (_) {}
         }
     }
 
@@ -692,6 +794,15 @@ export function startWriter(shell, opts = {}) {
         const navigation = document.createElement('div');
         navigation.className = 'writer-navigation';
         navigation.innerHTML = `
+            <div class="writer-folders">
+                <div class="writer-folders-header">
+                    <span>Folders</span>
+                    <button class="writer-folder-create" title="New folder" aria-label="New folder"></button>
+                </div>
+                <div class="writer-folders-body">
+                    <ul class="writer-folder-tree"></ul>
+                </div>
+            </div>
             <div class="writer-files">
                 <div class="writer-files-header">
                     <span>Files</span>
@@ -714,16 +825,35 @@ export function startWriter(shell, opts = {}) {
         root.appendChild(main);
 
         state.rootEl = root;
+        state.navigationEl = navigation;
+        state.folderSectionEl = navigation.querySelector('.writer-folders');
+        state.fileSectionEl = navigation.querySelector('.writer-files');
+        state.folderListEl = navigation.querySelector('.writer-folder-tree');
         state.listEl = navigation.querySelector('.writer-file-list');
         const createBtn = navigation.querySelector('.writer-create');
         if (createBtn) {
             createBtn.addEventListener('click', () => createNewDocument());
         }
 
+        const folderCreateBtn = navigation.querySelector('.writer-folder-create');
+        if (folderCreateBtn) {
+            folderCreateBtn.addEventListener('click', () => {
+                const parent = state.selectedFolderId === 'all' ? null : state.selectedFolderId;
+                createFolder(parent);
+            });
+        }
+
+        if (state.folderListEl) {
+            state.folderListEl.addEventListener('click', onFolderClick);
+            state.folderListEl.addEventListener('contextmenu', onFolderContextMenu);
+        }
+
         if (state.listEl) {
             state.listEl.addEventListener('click', onFileClick);
             state.listEl.addEventListener('contextmenu', onFileContextMenu);
         }
+
+        updateSidebarClasses();
 
         return root;
     }
@@ -735,7 +865,9 @@ export function startWriter(shell, opts = {}) {
         const parent = outputEl?.parentElement || screenEl;
         if (parent) parent.appendChild(renderLayout());
         attachGlobalListeners();
-        ensureContextMenu();
+        ensureFileContextMenu();
+        ensureFolderContextMenu();
+        handleResponsivePanels(true);
 
         const paneEl = document.getElementById('writerEditorPane');
         if (!paneEl) throw new Error('Writer editor pane missing');
@@ -751,8 +883,9 @@ export function startWriter(shell, opts = {}) {
 
     function redrawFileList() {
         if (!state.listEl) return;
+        const docs = getFilteredDocs();
         state.listEl.innerHTML = '';
-        for (const doc of state.docs) {
+        for (const doc of docs) {
             const item = document.createElement('li');
             item.className = 'writer-file-item';
             item.dataset.id = String(doc.id);
@@ -767,13 +900,16 @@ export function startWriter(shell, opts = {}) {
         if (host) {
             const prevEmpty = host.querySelector('.writer-files-empty');
             if (prevEmpty) prevEmpty.remove();
-            if (!state.docs.length) {
+            if (!docs.length) {
                 const empty = document.createElement('div');
                 empty.className = 'writer-files-empty muted';
-                empty.textContent = 'Create your first document with the + button.';
+                empty.textContent = state.selectedFolderId === 'all'
+                    ? 'Create your first document with the + button.'
+                    : 'This folder is empty.';
                 host.appendChild(empty);
             }
         }
+        if (state.current) setActiveListItem(state.current.id);
     }
 
     function setActiveListItem(id) {
@@ -795,16 +931,319 @@ export function startWriter(shell, opts = {}) {
         }
     }
 
+    function buildFolderChildrenMap(folders) {
+        const map = new Map();
+        for (const folder of folders) {
+            const parent = folder.parent_id == null ? null : folder.parent_id;
+            if (!map.has(parent)) map.set(parent, []);
+            map.get(parent).push(folder);
+        }
+        for (const [, list] of map) {
+            list.sort((a, b) => (a.name_lower || '').localeCompare(b.name_lower || ''));
+        }
+        return map;
+    }
+
+    function renderFolderTree() {
+        if (!state.folderListEl) return;
+        const folders = Array.isArray(state.folders) ? state.folders.slice() : [];
+        const childrenMap = buildFolderChildrenMap(folders);
+        const buildMarkup = (parentId) => {
+            const children = childrenMap.get(parentId == null ? null : parentId) || [];
+            if (!children.length) return '';
+            const items = children.map(child => {
+                const subtree = buildMarkup(child.id);
+                return `
+                    <li class="writer-folder-item" data-folder-id="${child.id}">
+                        <div class="writer-folder-row">
+                            <span class="writer-folder-name">${esc(child.name)}</span>
+                        </div>
+                        ${subtree}
+                    </li>
+                `;
+            });
+            return `<ul>${items.join('')}</ul>`;
+        };
+        const nested = buildMarkup(null);
+        state.folderListEl.innerHTML = `
+            <li class="writer-folder-item" data-folder-id="all">
+                <div class="writer-folder-row">
+                    <span class="writer-folder-name">All Documents</span>
+                </div>
+                ${nested}
+            </li>
+        `;
+        highlightActiveFolder();
+    }
+
+    function highlightActiveFolder() {
+        if (!state.folderListEl) return;
+        state.folderListEl.querySelectorAll('.writer-folder-item').forEach(item => item.classList.remove('active'));
+        const selector = state.selectedFolderId === 'all'
+            ? '.writer-folder-item[data-folder-id="all"]'
+            : `.writer-folder-item[data-folder-id="${state.selectedFolderId}"]`;
+        const active = state.folderListEl.querySelector(selector);
+        if (active) active.classList.add('active');
+    }
+
+    function resolveFolderId(value) {
+        if (value === 'all') return 'all';
+        if (value == null) return 'all';
+        const num = Number(value);
+        return Number.isFinite(num) ? num : 'all';
+    }
+
+    function getFilteredDocs() {
+        if (state.selectedFolderId === 'all') return state.docs.slice();
+        return state.docs.filter(doc => {
+            const folder = doc.folder_id == null ? null : doc.folder_id;
+            return folder === state.selectedFolderId;
+        });
+    }
+
+    function setSelectedFolder(folderId, { fromDocument = false } = {}) {
+        const resolved = resolveFolderId(folderId);
+        if (resolved !== 'all' && !state.folders.some(folder => folder.id === resolved)) {
+            state.selectedFolderId = 'all';
+        } else {
+            state.selectedFolderId = resolved;
+        }
+        highlightActiveFolder();
+        redrawFileList();
+        if (fromDocument && state.current) {
+            setActiveListItem(state.current.id);
+        }
+    }
+
+    async function loadFolders() {
+        if (!writerAPI || typeof writerAPI.listFolders !== 'function') {
+            state.folders = [];
+            renderFolderTree();
+            return;
+        }
+        try {
+            const rows = await writerAPI.listFolders();
+            state.folders = Array.isArray(rows)
+                ? rows.map(row => ({
+                    ...row,
+                    parent_id: row.parent_id == null ? null : Number(row.parent_id),
+                    name_lower: (row.name || '').toLowerCase()
+                }))
+                : [];
+            if (state.selectedFolderId !== 'all' && !state.folders.some(f => f.id === state.selectedFolderId)) {
+                state.selectedFolderId = 'all';
+            }
+            renderFolderTree();
+        } catch (err) {
+            shell.print(`<div class="error">Failed to load folders: ${esc(err?.message || err)}</div>`);
+            state.folders = [];
+            renderFolderTree();
+        }
+    }
+
+    function onFolderClick(e) {
+        const row = e.target.closest('.writer-folder-row');
+        if (!row) return;
+        const item = row.closest('.writer-folder-item');
+        if (!item) return;
+        const id = item.dataset.folderId;
+        if (id === 'all') {
+            setSelectedFolder('all');
+            return;
+        }
+        const numeric = Number(id);
+        if (!Number.isFinite(numeric)) return;
+        setSelectedFolder(numeric);
+    }
+
+    function onFolderContextMenu(e) {
+        const row = e.target.closest('.writer-folder-row');
+        if (!row) return;
+        const item = row.closest('.writer-folder-item');
+        if (!item) return;
+        const id = item.dataset.folderId;
+        if (id === 'all') return; // root has no context menu
+        const folderId = Number(id);
+        if (!Number.isFinite(folderId)) return;
+        e.preventDefault();
+        closeContextMenu();
+        const menu = ensureFolderContextMenu();
+        menu.dataset.folderId = String(folderId);
+        menu.style.left = `${e.clientX}px`;
+        menu.style.top = `${e.clientY}px`;
+        menu.classList.add('visible');
+        menu.querySelectorAll('button').forEach(btn => {
+            btn.onclick = () => {
+                const action = btn.dataset.action;
+                handleFolderContextAction(action, folderId);
+                closeContextMenu();
+            };
+        });
+    }
+
+    async function handleFolderContextAction(action, id) {
+        switch (action) {
+            case FOLDER_ACTIONS.OPEN:
+                setSelectedFolder(id);
+                break;
+            case FOLDER_ACTIONS.RENAME:
+                await renameFolder(id);
+                break;
+            case FOLDER_ACTIONS.DUPLICATE:
+                await duplicateFolder(id);
+                break;
+            case FOLDER_ACTIONS.DELETE:
+                await deleteFolder(id);
+                break;
+            default:
+                break;
+        }
+    }
+
+    async function createFolder(parentId = null) {
+        if (!writerAPI || typeof writerAPI.createFolder !== 'function') return null;
+        const result = await promptModal({
+            title: 'New folder',
+            value: 'New Folder',
+            confirmLabel: 'Create',
+            cancelLabel: 'Cancel'
+        });
+        if (result === null) return null;
+        const trimmed = String(result).trim();
+        if (!trimmed) return null;
+        try {
+            const folder = await writerAPI.createFolder({ name: trimmed, parentId });
+            await loadFolders();
+            if (folder && folder.id != null) {
+                setSelectedFolder(folder.id);
+            }
+            showToast('Folder created', 'ok');
+            return folder;
+        } catch (err) {
+            showToast(err?.message || 'Failed to create folder', 'error', 'writerToastError');
+            return null;
+        }
+    }
+
+    async function renameFolder(id) {
+        if (!writerAPI || typeof writerAPI.renameFolder !== 'function') return;
+        const folder = state.folders.find(f => f.id === id);
+        if (!folder) return;
+        const result = await promptModal({
+            title: 'Rename folder',
+            value: folder.name || 'Folder',
+            confirmLabel: 'Rename'
+        });
+        if (result === null) return;
+        const trimmed = String(result).trim();
+        if (!trimmed) return;
+        try {
+            await writerAPI.renameFolder(id, trimmed);
+            await loadFolders();
+            setSelectedFolder(id);
+            showToast('Folder renamed', 'ok');
+        } catch (err) {
+            showToast(err?.message || 'Failed to rename folder', 'error', 'writerToastError');
+        }
+    }
+
+    async function duplicateFolder(id) {
+        if (!writerAPI || typeof writerAPI.duplicateFolder !== 'function') return;
+        const folder = state.folders.find(f => f.id === id);
+        if (!folder) return;
+        try {
+            const copy = await writerAPI.duplicateFolder(id, {});
+            await loadFolders();
+            if (copy && copy.id != null) setSelectedFolder(copy.id);
+            showToast('Folder duplicated', 'ok');
+        } catch (err) {
+            showToast(err?.message || 'Failed to duplicate folder', 'error', 'writerToastError');
+        }
+    }
+
+    async function deleteFolder(id) {
+        if (!writerAPI || typeof writerAPI.deleteFolder !== 'function') return;
+        const folder = state.folders.find(f => f.id === id);
+        if (!folder) return;
+        const result = await confirmModal({
+            title: 'Delete folder?',
+            message: `This will remove "${folder.name}" and unfile its documents.`,
+            confirmLabel: 'Delete',
+            cancelLabel: 'Cancel',
+            danger: true
+        });
+        if (result !== 'confirm') return;
+        try {
+            await writerAPI.deleteFolder(id);
+            const nextSelection = 'all';
+            await loadFolders();
+            setSelectedFolder(nextSelection);
+            await loadDocuments();
+            showToast('Folder deleted', 'warn');
+        } catch (err) {
+            showToast(err?.message || 'Failed to delete folder', 'error', 'writerToastError');
+        }
+    }
+
+    function handleResponsivePanels(force = false) {
+        const width = window.innerWidth || 0;
+
+        // Helper to apply the correct default visibility for each breakpoint
+        const applyForWidth = () => {
+            if (width >= 1024) {
+                // ≥1024px: open BOTH (Folder + File)
+                setPanelVisibility({ file: false, folder: false });
+            } else if (width >= 768) {
+                // 768–1023px: open File only; keep Folder collapsed
+                setPanelVisibility({ file: false, folder: true });
+            } else {
+                // <768px: collapse BOTH
+                setPanelVisibility({ file: true, folder: true });
+            }
+        };
+
+        if (force) {
+            applyForWidth();
+            state.lastWindowWidth = width;
+            return;
+        }
+
+        const prev = state.lastWindowWidth;
+        // Determine breakpoint buckets to reapply defaults only when crossing a breakpoint
+        const prevBucket = prev >= 1024 ? 'lg' : prev >= 768 ? 'md' : 'sm';
+        const curBucket = width >= 1024 ? 'lg' : width >= 768 ? 'md' : 'sm';
+
+        if (prevBucket !== curBucket) {
+            applyForWidth();
+        }
+
+        state.lastWindowWidth = width;
+    }
+
     async function loadDocuments() {
         try {
             const docs = await writerAPI.list();
             state.docs = Array.isArray(docs) ? docs : [];
             redrawFileList();
-            if (state.docs.length && (!state.current || !state.docs.some(d => d.id === state.current.id))) {
-                await openDocument(state.docs[0].id, { force: true });
-            } else if (!state.docs.length) {
+            if (!state.docs.length) {
                 setEditorContent('', 'Untitled Document');
                 state.current = null;
+                return;
+            }
+            if (state.current && state.docs.some(d => d.id === state.current.id)) {
+                setActiveListItem(state.current.id);
+                return;
+            }
+            let candidates = getFilteredDocs();
+            if (!candidates.length && state.selectedFolderId !== 'all') {
+                setSelectedFolder('all');
+                candidates = getFilteredDocs();
+            }
+            if (!candidates.length) {
+                candidates = state.docs.slice();
+            }
+            if (candidates.length) {
+                await openDocument(candidates[0].id, { force: true });
             }
         } catch (err) {
             shell.print(`<div class="error">Failed to load writer documents: ${esc(err?.message || err)}</div>`);
@@ -859,7 +1298,8 @@ export function startWriter(shell, opts = {}) {
             const doc = await writerAPI.get(id);
             if (!doc) return;
             state.current = doc;
-            setActiveListItem(id);
+            const folderForDoc = doc.folder_id == null ? 'all' : doc.folder_id;
+            setSelectedFolder(folderForDoc, { fromDocument: true });
             setEditorContent(doc.content || '', doc.title || 'Untitled Document', doc.content || '');
         } catch (err) {
             shell.print(`<div class="error">Unable to open document: ${esc(err?.message || err)}</div>`);
@@ -880,7 +1320,8 @@ export function startWriter(shell, opts = {}) {
         e.preventDefault();
         const id = Number(li.dataset.id);
         if (!Number.isFinite(id)) return;
-        const menu = ensureContextMenu();
+        closeContextMenu();
+        const menu = ensureFileContextMenu();
         menu.dataset.fileId = String(id);
         menu.style.left = `${e.clientX}px`;
         menu.style.top = `${e.clientY}px`;
@@ -976,7 +1417,8 @@ export function startWriter(shell, opts = {}) {
             title = `${desiredTitle} ${counter++}`;
         }
         try {
-            const doc = await writerAPI.create({ title, content: '' });
+            const folderId = state.selectedFolderId === 'all' ? null : state.selectedFolderId;
+            const doc = await writerAPI.create({ title, content: '', folderId });
             await loadDocuments();
             await openDocument(doc.id, { force: true });
             showToast('New document created', 'ok');
@@ -1119,18 +1561,12 @@ export function startWriter(shell, opts = {}) {
 
     function requestExit() {
         if (state.dirty) {
-            confirmModal({
-                title: 'Unsaved changes',
-                message: 'Save current document before exiting?',
-                confirmLabel: 'Save',
-                cancelLabel: 'Discard'
-            }).then(async (result) => {
-                if (result === 'confirm') {
-                    const saved = await saveCurrentDocument();
-                    if (!saved) return;
+            confirmExitWithoutSaving().then(async (result) => {
+                if (result === 'yes') {
+                    clearDirty();
+                    performExit();
                 }
-                clearDirty();
-                performExit();
+                // else: do nothing, stay in editor
             });
         } else {
             performExit();
@@ -1148,43 +1584,103 @@ export function startWriter(shell, opts = {}) {
         shell.print('<div class="muted">Exited Writer.</div>');
     }
 
-    function confirmModal({ title, message, confirmLabel = 'OK', cancelLabel = 'Cancel', danger = false } = {}) {
+
+    function confirmModal({ title = 'Confirm', message = '', confirmLabel = 'OK', cancelLabel = 'Cancel', danger = false } = {}) {
         return new Promise((resolve) => {
+            const existing = document.getElementById('writerConfirmModal');
+            if (existing && existing.parentElement) existing.parentElement.removeChild(existing);
             const wrap = document.createElement('div');
+            wrap.id = 'writerConfirmModal';
             wrap.className = 'cj-modal-backdrop';
             wrap.innerHTML = `
-                <div class="cj-modal" role="dialog" aria-modal="true">
-                    <div class="cj-modal-title">${esc(title)}</div>
+                <div class="cj-modal" role="dialog" aria-modal="true" aria-labelledby="writerConfirmTitle">
+                    <div id="writerConfirmTitle" class="cj-modal-title">${esc(title)}</div>
                     <div class="cj-modal-body">${esc(message)}</div>
                     <div class="cj-modal-actions">
-                        <button class="confirm ${danger ? 'danger' : ''}">${confirmLabel}</button>
-                        <button class="cancel">${cancelLabel}</button>
+                        <button class="confirm ${danger ? 'danger' : ''}">${esc(confirmLabel)}</button>
+                        <button class="cancel">${esc(cancelLabel)}</button>
                     </div>
+                    <div class="cj-modal-hint muted">Enter = ${esc(confirmLabel)} · Esc = ${esc(cancelLabel)}</div>
                 </div>
             `;
             document.body.appendChild(wrap);
             const confirmBtn = wrap.querySelector('button.confirm');
             const cancelBtn = wrap.querySelector('button.cancel');
             const cleanup = () => {
-                if (wrap && wrap.parentElement) wrap.parentElement.removeChild(wrap);
                 window.removeEventListener('keydown', onKey, true);
+                if (wrap && wrap.parentElement) wrap.parentElement.removeChild(wrap);
             };
             const accept = () => { cleanup(); resolve('confirm'); };
             const reject = () => { cleanup(); resolve('cancel'); };
-            function onKey(e) {
+            const onKey = (e) => {
                 if (e.key === 'Escape') {
                     e.preventDefault();
                     reject();
-                }
-                if (e.key === 'Enter') {
+                } else if (e.key === 'Enter') {
                     e.preventDefault();
                     accept();
                 }
-            }
+            };
             confirmBtn.addEventListener('click', accept);
             cancelBtn.addEventListener('click', reject);
             window.addEventListener('keydown', onKey, true);
-            setTimeout(() => confirmBtn.focus(), 0);
+            setTimeout(() => {
+                try { confirmBtn.focus({ preventScroll: true }); } catch { confirmBtn.focus(); }
+            }, 0);
+        });
+    }
+
+    // Custom modal for confirming exit without saving
+    function confirmExitWithoutSaving() {
+        return new Promise((resolve) => {
+            const existing = document.getElementById('writerConfirmExitModal');
+            if (existing && existing.parentElement) existing.parentElement.removeChild(existing);
+            const wrap = document.createElement('div');
+            wrap.id = 'writerConfirmExitModal';
+            wrap.className = 'cj-modal-backdrop';
+            wrap.innerHTML = `
+                <div class="cj-modal" role="dialog" aria-modal="true" aria-labelledby="writerConfirmExitTitle">
+                    <div id="writerConfirmExitTitle" class="cj-modal-title">Confirm</div>
+                    <div class="cj-modal-body">Exit without saving?</div>
+                    <div class="cj-modal-actions">
+                        <button class="confirm">Yes</button>
+                        <button class="cancel">No</button>
+                    </div>
+                    <div class="cj-modal-hint muted">y = yes &middot; n = no</div>
+                </div>
+            `;
+            document.body.appendChild(wrap);
+            const confirmBtn = wrap.querySelector('button.confirm');
+            const cancelBtn = wrap.querySelector('button.cancel');
+            let done = false;
+            const cleanup = () => {
+                window.removeEventListener('keydown', onKey, true);
+                if (wrap && wrap.parentElement) wrap.parentElement.removeChild(wrap);
+                done = true;
+            };
+            const accept = () => { if (!done) { cleanup(); resolve('yes'); } };
+            const reject = () => { if (!done) { cleanup(); resolve('no'); } };
+            const onKey = (e) => {
+                if (e.key === 'y' || e.key === 'Y') {
+                    e.preventDefault();
+                    accept();
+                } else if (e.key === 'n' || e.key === 'N') {
+                    e.preventDefault();
+                    reject();
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    accept();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    reject();
+                }
+            };
+            confirmBtn.addEventListener('click', accept);
+            cancelBtn.addEventListener('click', reject);
+            window.addEventListener('keydown', onKey, true);
+            setTimeout(() => {
+                try { confirmBtn.focus({ preventScroll: true }); } catch { confirmBtn.focus(); }
+            }, 0);
         });
     }
 
@@ -1236,7 +1732,9 @@ export function startWriter(shell, opts = {}) {
 
     mountUI();
     shell.setPrompt(state.prompt);
-    loadDocuments();
+    loadFolders()
+        .catch(() => {})
+        .then(() => loadDocuments());
 
     const program = {
         async consume() {},
