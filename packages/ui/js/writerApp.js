@@ -5,7 +5,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { indentUnit, indentOnInput, syntaxHighlighting, HighlightStyle } from '@codemirror/language';
 import { search, searchKeymap, openSearchPanel, findNext, findPrevious } from '@codemirror/search';
 import { tags as t } from '@lezer/highlight';
-import { listLayoutPlugin, createListKeymap, listRenumberListener } from './listLayout.js';
+import { listLayoutPlugin, createListKeymap, listRenumberListener, listTodoAutoComplete } from './listLayout.js';
 
 const MENU_ACTIONS = {
     OPEN: 'open',
@@ -185,20 +185,20 @@ const retroTheme = EditorView.theme({
     },
     '.todo-click-target:hover::after': { opacity: 1 },
     '.cm-line.cm-list-line': {
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 'calc(var(--list-gap-ch, 0.5) * 1ch)'
+        display: 'grid',
+        gridTemplateColumns: 'calc(var(--list-indent-ch, 0) * 1ch) calc(var(--list-marker-ch, 2) * 1ch) minmax(0, 1fr)',
+        columnGap: 'calc(var(--list-gap-ch, 0.5) * 1ch)',
+        alignItems: 'start'
     },
     '.cm-line.cm-list-line .cm-list-indent': {
-        flex: '0 0 calc(var(--list-indent-ch, 0) * 1ch)',
-        width: 'calc(var(--list-indent-ch, 0) * 1ch)',
+        gridColumn: '1',
+        display: 'block',
         whiteSpace: 'pre'
     },
     '.cm-line.cm-list-line .cm-list-marker': {
-        display: 'flex',
-        justifyContent: 'flex-end',
-        flex: '0 0 calc(var(--list-marker-ch, 2) * 1ch)',
-        width: 'calc(var(--list-marker-ch, 2) * 1ch)',
+        gridColumn: '2',
+        display: 'block',
+        justifySelf: 'end',
         whiteSpace: 'pre',
         textAlign: 'right',
         fontVariantNumeric: 'tabular-nums lining-nums',
@@ -207,11 +207,18 @@ const retroTheme = EditorView.theme({
         userSelect: 'none'
     },
     '.cm-line.cm-list-line .cm-list-content': {
-        flex: '1 1 auto',
+        gridColumn: '3',
         minWidth: 0,
         whiteSpace: 'pre-wrap',
         lineHeight: '1.5',
         wordBreak: 'break-word'
+    },
+    '.cm-line.cm-list-line[data-list-empty="true"]::after': {
+        content: '""',
+        display: 'block',
+        gridColumn: '3',
+        minHeight: '1.2em',
+        pointerEvents: 'none'
     }
 }, { dark: true });
 
@@ -709,6 +716,7 @@ export function startWriter(shell, opts = {}) {
             todoPlugin,
             listLayoutPlugin,
             listRenumberListener,
+            listTodoAutoComplete,
             indentUnit.of(INDENT),
             createListKeymap(INDENT),
             keymap.of([

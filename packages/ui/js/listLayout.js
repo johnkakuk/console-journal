@@ -6,6 +6,9 @@ const ORDERED_LIST_RE = /^(\s*)(\d+)([.)])(\s+)(.*)$/;
 const TODO_LIST_RE = /^(\s*)([-*])(\s+)\[( |x|X)\](\s*)(.*)$/;
 const UNORDERED_LIST_RE = /^(\s*)([-+*])(\s+)(.*)$/;
 const LIST_GAP_CH = 0.5;
+const TODO_AUTOCOMPLETE_PREFIX_RE = /^\s*[-*]\s+\[$/;
+const TODO_AUTOCOMPLETE_SUFFIX_RE = /^\s*\]/;
+const todoAutoCompleteAnnotation = Annotation.define();
 
 function countLeadingSpaces(text) {
     const match = text.match(/^\s*/);
@@ -37,9 +40,11 @@ function parseListLine(text) {
         const bullet = todo[2];
         const gap = todo[3] || ' ';
         const mark = todo[4] || ' ';
-        const after = todo[5] && todo[5].length ? todo[5] : ' ';
+        const after = todo[5] ?? '';
         const rest = todo[6] ?? '';
-        const prefix = indent + bullet + gap + `[${mark}]` + after;
+        const markerCore = `${bullet}${gap}[${mark}]`;
+        const markerLength = markerCore.length;
+        const markerEnd = indent.length + markerLength;
         return {
             type: 'todo',
             indent,
@@ -49,8 +54,9 @@ function parseListLine(text) {
             checked: mark.toLowerCase() === 'x',
             afterBracket: after,
             content: rest,
-            contentStart: prefix.length,
-            markerLength: prefix.length - indent.length
+            contentStart: markerEnd + after.length,
+            markerLength,
+            markerEnd
         };
     }
 
@@ -62,6 +68,8 @@ function parseListLine(text) {
         const gap = ordered[4] || ' ';
         const rest = ordered[5] ?? '';
         const prefix = indent + numberText + markerChar + gap;
+        const markerLength = prefix.length - indent.length;
+        const markerEnd = indent.length + markerLength;
         return {
             type: 'ordered',
             indent,
@@ -72,7 +80,8 @@ function parseListLine(text) {
             spacing: gap,
             content: rest,
             contentStart: prefix.length,
-            markerLength: prefix.length - indent.length
+            markerLength,
+            markerEnd
         };
     }
 
@@ -83,6 +92,8 @@ function parseListLine(text) {
         const gap = unordered[3] || ' ';
         const rest = unordered[4] ?? '';
         const prefix = indent + bullet + gap;
+        const markerLength = prefix.length - indent.length;
+        const markerEnd = indent.length + markerLength;
         return {
             type: 'unordered',
             indent,
@@ -91,7 +102,8 @@ function parseListLine(text) {
             spacing: gap,
             content: rest,
             contentStart: prefix.length,
-            markerLength: prefix.length - indent.length
+            markerLength,
+            markerEnd
         };
     }
 
@@ -113,7 +125,7 @@ function makeListPrefix(parsed, overrides = {}) {
         }
         case 'todo': {
             const spacing = parsed.spacing && parsed.spacing.length ? parsed.spacing : ' ';
-            const afterBracket = parsed.afterBracket && parsed.afterBracket.length ? parsed.afterBracket : ' ';
+            const afterBracket = overrides.afterBracket ?? (parsed.afterBracket && parsed.afterBracket.length ? parsed.afterBracket : ' ');
             const bullet = overrides.bullet ?? parsed.bullet;
             const checked = overrides.checked === true ? 'x' : ' ';
             return `${indent}${bullet}${spacing}[${checked}]${afterBracket}`;
@@ -124,7 +136,7 @@ function makeListPrefix(parsed, overrides = {}) {
 }
 
 function continuationIndent(parsed) {
-    return ' '.repeat(parsed.indentLength + parsed.markerLength);
+    return ' '.repeat(parsed.contentStart);
 }
 
 function listEnterCommandFactory(indentString) {
@@ -295,6 +307,7 @@ function analyzeListStructure(state) {
 
     const ensureLevel = (parsed) => {
         const indent = parsed.indentLength;
+        const markerWidthCh = Math.max(parsed.contentStart - parsed.indentLength, parsed.markerLength);
         while (levels.length && indent < levels[levels.length - 1].indent) {
             levels.pop();
         }
@@ -305,7 +318,7 @@ function analyzeListStructure(state) {
                 type: parsed.type,
                 counter: 0,
                 maxDigits: 0,
-                markerWidth: parsed.markerLength,
+                markerWidth: markerWidthCh,
                 spacingWidth: parsed.spacing ? parsed.spacing.length : 1
             };
             levels.push(level);
@@ -318,7 +331,7 @@ function analyzeListStructure(state) {
                 type: parsed.type,
                 counter: 0,
                 maxDigits: 0,
-                markerWidth: parsed.markerLength,
+                markerWidth: markerWidthCh,
                 spacingWidth: parsed.spacing ? parsed.spacing.length : 1
             };
             levels[levels.length - 1] = level;
@@ -326,7 +339,7 @@ function analyzeListStructure(state) {
             return level;
         }
         if (indent === level.indent) {
-            level.markerWidth = Math.max(level.markerWidth, parsed.markerLength);
+            level.markerWidth = Math.max(level.markerWidth, markerWidthCh);
             level.spacingWidth = Math.max(level.spacingWidth, parsed.spacing ? parsed.spacing.length : 1);
             return level;
         }
@@ -343,7 +356,8 @@ function analyzeListStructure(state) {
                 const expected = level.counter;
                 const expectedText = String(expected);
                 level.maxDigits = Math.max(level.maxDigits, expectedText.length);
-                level.markerWidth = Math.max(level.markerWidth, parsed.markerLength);
+                const markerWidthCh = Math.max(parsed.contentStart - parsed.indentLength, parsed.markerLength);
+                level.markerWidth = Math.max(level.markerWidth, markerWidthCh);
                 if (parsed.number !== expected) {
                     const numberFrom = line.from + parsed.indentLength;
                     const numberTo = numberFrom + parsed.numberText.length;
@@ -351,7 +365,8 @@ function analyzeListStructure(state) {
                 }
                 lineInfos.push({ line, parsed, level });
             } else {
-                level.markerWidth = Math.max(level.markerWidth, parsed.markerLength);
+                const markerWidthCh = Math.max(parsed.contentStart - parsed.indentLength, parsed.markerLength);
+                level.markerWidth = Math.max(level.markerWidth, markerWidthCh);
                 lineInfos.push({ line, parsed, level });
             }
         } else {
@@ -385,9 +400,13 @@ function analyzeListStructure(state) {
             `--list-marker-ch:${level.markerWidth}`,
             `--list-gap-ch:${LIST_GAP_CH}`
         ];
+        const markerFrom = line.from + parsed.indentLength;
+        const markerTo = line.from + parsed.contentStart;
+        const hasContent = markerTo < line.to;
         const attributes = {
             style: styleParts.join(';'),
-            'data-list-type': parsed.type
+            'data-list-type': parsed.type,
+            'data-list-empty': hasContent ? 'false' : 'true'
         };
         builder.add(
             line.from,
@@ -398,14 +417,36 @@ function analyzeListStructure(state) {
             builder.add(
                 line.from,
                 line.from + parsed.indentLength,
-                Decoration.mark({ class: 'cm-list-indent' })
+                Decoration.mark({
+                    class: 'cm-list-indent',
+                    inclusiveStart: true,
+                    inclusiveEnd: false
+                })
             );
         }
-        const markerFrom = line.from + parsed.indentLength;
-        const markerTo = line.from + parsed.contentStart;
-        builder.add(markerFrom, markerTo, Decoration.mark({ class: 'cm-list-marker' }));
-        if (markerTo < line.to) {
-            builder.add(markerTo, line.to, Decoration.mark({ class: 'cm-list-content' }));
+        builder.add(
+            markerFrom,
+            markerTo,
+            Decoration.mark({
+                class: 'cm-list-marker',
+                inclusiveStart: false,
+                inclusiveEnd: false
+            })
+        );
+        if (hasContent) {
+            builder.add(
+                markerTo,
+                line.to,
+                Decoration.mark({
+                    class: 'cm-list-content',
+                    inclusiveStart: true,
+                    inclusiveEnd: true,
+                    attributes: {
+                        'data-list-type': parsed.type,
+                        'data-list-empty': 'false'
+                    }
+                })
+            );
         }
     }
 
@@ -416,6 +457,43 @@ function analyzeListStructure(state) {
 }
 
 const autoNumberAnnotation = Annotation.define();
+
+const todoAutoCompletePlugin = EditorView.updateListener.of((update) => {
+    if (!update.docChanged) return;
+    if (update.transactions.some(tr => tr.annotation(todoAutoCompleteAnnotation))) return;
+
+    for (const tr of update.transactions) {
+        const userEvent = tr.annotation(Transaction.userEvent);
+        if (userEvent && typeof userEvent === 'string' && !userEvent.startsWith('input')) continue;
+
+        let handled = false;
+        tr.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
+            if (handled) return;
+            if (inserted.length !== 1) return;
+            const char = inserted.sliceString(0);
+            if (char !== '[') return;
+
+            const cursor = toB;
+            const line = update.state.doc.lineAt(cursor);
+            const prefix = update.state.doc.sliceString(line.from, cursor);
+            if (!TODO_AUTOCOMPLETE_PREFIX_RE.test(prefix)) return;
+            const suffix = update.state.doc.sliceString(cursor, line.to);
+            if (TODO_AUTOCOMPLETE_SUFFIX_RE.test(suffix)) return;
+
+            handled = true;
+            update.view.dispatch({
+                changes: { from: cursor, to: cursor, insert: ' ] ' },
+                selection: EditorSelection.cursor(cursor + 3),
+                annotations: [
+                    todoAutoCompleteAnnotation.of(true),
+                    Transaction.userEvent.of('input')
+                ],
+                scrollIntoView: false
+            });
+        });
+        if (handled) break;
+    }
+});
 
 export const listLayoutPlugin = ViewPlugin.fromClass(class {
     constructor(view) {
@@ -441,3 +519,5 @@ export const listRenumberListener = EditorView.updateListener.of((update) => {
         annotations: [autoNumberAnnotation.of(true), Transaction.addToHistory.of(false)]
     });
 });
+
+export const listTodoAutoComplete = todoAutoCompletePlugin;

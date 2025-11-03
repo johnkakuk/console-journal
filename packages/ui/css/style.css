@@ -198,9 +198,13 @@ body {
     max-width: calc(var(--editor-max-width) + 1ch);
 }
 
+.ͼv .cm-line.cm-list-line {
+    column-gap: 0 !important;
+}
+/* 
 .ͼ1 .cm-line {
     padding: 0;
-}
+} */
 
 .ͼo .cm-line.cm-list-line {
     margin: 0.25rem 0;
