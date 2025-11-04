@@ -201,6 +201,11 @@ body {
 .ͼv .cm-line.cm-list-line {
     column-gap: 0 !important;
 }
+
+.cm-line.cm-list-line .cm-list-marker {
+    margin-right: -0.5ch;
+}
+
 /* 
 .ͼ1 .cm-line {
     padding: 0;
