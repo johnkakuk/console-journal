@@ -158,59 +158,6 @@ body {
     }
 }
 
-/* Hacky shit */
-#screen.locked {
-    overflow: hidden !important;
-    padding: 0 15px !important;
-}
-
-.cm-scroller {
-    overflow: visible !important;   /* let the parent handle scrolling */
-    height: auto !important;        /* don't be a scroll container */
-}
-
-#writerStatus {
-    position: absolute;
-}
-
-#writerRoot {
-    height: 100% !important;        /* match parent; no artificial growth */
-    margin-bottom: -15px;
-    padding: 0 !important;
-}
-
-#writerPane {
-    height: 100%;                   /* fill parent */
-    margin-top: 0 auto;
-    overflow-y: auto;               /* sole scroll container for editor */
-}
-
-.cm-editor {
-    max-width: calc(var(--editor-max-width) + 1ch + 60px);
-    margin: 0 auto -15px auto!important;
-    padding: 30px !important;
-    overflow: visible;              /* prevent inner scroll */
-    height: auto;                   /* size to content; parent scrolls */
-}
-
-.cm-content {
-    margin: 50px auto !important;
-    max-width: calc(var(--editor-max-width) + 1ch);
-}
-
-.ͼv .cm-line.cm-list-line {
-    column-gap: 0 !important;
-}
-
-.cm-line.cm-list-line .cm-list-marker {
-    margin-right: -0.5ch;
-}
-
-/* 
-.ͼ1 .cm-line {
-    padding: 0;
-} */
-
 .ͼo .cm-line.cm-list-line {
     margin: 0.25rem 0;
 }
@@ -1244,4 +1191,56 @@ body {
 .cj-modal button:focus {
     outline: none !important;
     box-shadow: 0 0 0 2px var(--text, #55df63);
+}
+
+/* Punchlist stuff */
+#screen.locked {
+    overflow: hidden !important;
+    padding: 0 15px !important;
+}
+
+.cm-scroller {
+    overflow: visible !important;   /* let the parent handle scrolling */
+    height: auto !important;        /* don't be a scroll container */
+}
+
+#writerStatus {
+    position: absolute;
+}
+
+#writerRoot {
+    height: 100% !important;        /* match parent; no artificial growth */
+    margin-bottom: -15px;
+    padding: 0 !important;
+}
+
+#writerPane {
+    height: 100%;                   /* fill parent */
+    margin-top: 0 auto;
+    overflow-y: auto;               /* sole scroll container for editor */
+}
+
+.cm-editor {
+    max-width: calc(var(--editor-max-width) + 1ch + 60px);
+    margin: 0 auto -15px auto!important;
+    padding: 30px !important;
+    overflow: visible;              /* prevent inner scroll */
+    height: auto;                   /* size to content; parent scrolls */
+}
+
+.cm-content {
+    margin: 50px auto !important;
+    max-width: calc(var(--editor-max-width) + 1ch);
+}
+
+.ͼv .cm-line.cm-list-line {
+    column-gap: 0 !important;
+}
+
+.cm-line.cm-list-line .cm-list-marker {
+    margin-right: -0.5ch;
+}
+
+#writerEmptyOverlay {
+    height: 100%;
 }
