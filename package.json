@@ -61,6 +61,7 @@
             "apps/desktop/icon/**/*",
             "packages/ui/index.html",
             "packages/ui/css/**/*",
+            "packages/ui/img/**/*",
             "packages/ui/dist/**/*",
             "packages/ui/pdf.css",
             "packages/ui/style.css",
