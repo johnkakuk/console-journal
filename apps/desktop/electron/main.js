@@ -115,6 +115,7 @@ function initDB() {
             title TEXT NOT NULL,
             content TEXT NOT NULL,
             folder_id INTEGER,
+            order_index INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
@@ -122,6 +123,7 @@ function initDB() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
             parent_id INTEGER,
+            order_index INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
@@ -147,6 +149,23 @@ function initDB() {
     }
 
     const folderColumns = db.prepare(`PRAGMA table_info(writer_folders)`).all();
+    const folderSchemaInfo = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='writer_folders'`).get();
+    if (folderSchemaInfo && folderSchemaInfo.sql && folderSchemaInfo.sql.includes('UNIQUE')) {
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS writer_folders_tmp (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                parent_id INTEGER,
+                order_index INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            INSERT INTO writer_folders_tmp (id, name, parent_id, order_index, created_at, updated_at)
+            SELECT id, name, parent_id, COALESCE(order_index, 0), created_at, updated_at FROM writer_folders;
+            DROP TABLE writer_folders;
+            ALTER TABLE writer_folders_tmp RENAME TO writer_folders;
+        `);
+    }
     if (!folderColumns.some(col => col.name === 'parent_id')) {
         db.exec(`
             ALTER TABLE writer_folders ADD COLUMN parent_id INTEGER;
@@ -155,6 +174,20 @@ function initDB() {
     } else {
         db.exec(`CREATE INDEX IF NOT EXISTS idx_writer_folders_parent ON writer_folders(parent_id);`);
     }
+    if (!folderColumns.some(col => col.name === 'order_index')) {
+        db.exec(`ALTER TABLE writer_folders ADD COLUMN order_index INTEGER NOT NULL DEFAULT 0;`);
+        db.exec(`UPDATE writer_folders SET order_index = id WHERE order_index = 0;`);
+    }
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_writer_folders_parent_order ON writer_folders(parent_id, order_index);`);
+
+    const docColumns = db.prepare(`PRAGMA table_info(writer_documents)`).all();
+    if (!docColumns.some(col => col.name === 'order_index')) {
+        db.exec(`
+            ALTER TABLE writer_documents ADD COLUMN order_index INTEGER NOT NULL DEFAULT 0;
+        `);
+        db.exec(`UPDATE writer_documents SET order_index = id WHERE order_index = 0;`);
+    }
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_writer_documents_folder_order ON writer_documents(folder_id, order_index);`);
 
     // Prepared statements
     db._upsertEntry = db.prepare(`
@@ -226,16 +259,22 @@ function initDB() {
             substr(content, 1, 200) AS preview,
             content,
             folder_id,
+            order_index,
             created_at,
             updated_at
         FROM writer_documents
-        ORDER BY datetime(updated_at) DESC, id DESC
+        ORDER BY
+            (folder_id IS NULL) DESC,
+            folder_id,
+            order_index,
+            datetime(updated_at) DESC,
+            id DESC
     `);
     db._writerGet = db.prepare(`SELECT * FROM writer_documents WHERE id = ?`);
     db._writerInsert = db.prepare(`
-        INSERT INTO writer_documents (title, content, folder_id)
-        VALUES (@title, @content, @folder_id)
-        RETURNING id, title, content, folder_id, created_at, updated_at
+        INSERT INTO writer_documents (title, content, folder_id, order_index)
+        VALUES (@title, @content, @folder_id, @order_index)
+        RETURNING id, title, content, folder_id, order_index, created_at, updated_at
     `);
     db._writerUpdate = db.prepare(`
         UPDATE writer_documents
@@ -244,7 +283,7 @@ function initDB() {
             folder_id = @folder_id,
             updated_at = datetime('now')
         WHERE id = @id
-        RETURNING id, title, content, folder_id, created_at, updated_at
+        RETURNING id, title, content, folder_id, order_index, created_at, updated_at
     `);
     db._writerDelete = db.prepare(`DELETE FROM writer_documents WHERE id = ?`);
     db._writerRename = db.prepare(`
@@ -252,32 +291,55 @@ function initDB() {
         SET title = @title,
             updated_at = datetime('now')
         WHERE id = @id
-        RETURNING id, title, content, folder_id, created_at, updated_at
+        RETURNING id, title, content, folder_id, order_index, created_at, updated_at
     `);
     db._writerListFolders = db.prepare(`
-        SELECT id, name, parent_id, created_at, updated_at
+        SELECT id, name, parent_id, order_index, created_at, updated_at
         FROM writer_folders
-        ORDER BY name COLLATE NOCASE
+        ORDER BY
+            (parent_id IS NULL) DESC,
+            parent_id,
+            order_index,
+            name COLLATE NOCASE
     `);
     db._writerGetFolder = db.prepare(`SELECT * FROM writer_folders WHERE id = ?`);
     db._writerInsertFolder = db.prepare(`
-        INSERT INTO writer_folders (name, parent_id)
-        VALUES (@name, @parent_id)
-        RETURNING id, name, parent_id, created_at, updated_at
+        INSERT INTO writer_folders (name, parent_id, order_index)
+        VALUES (@name, @parent_id, @order_index)
+        RETURNING id, name, parent_id, order_index, created_at, updated_at
     `);
     db._writerRenameFolder = db.prepare(`
         UPDATE writer_folders
         SET name = @name,
             updated_at = datetime('now')
         WHERE id = @id
-        RETURNING id, name, parent_id, created_at, updated_at
+        RETURNING id, name, parent_id, order_index, created_at, updated_at
     `);
     db._writerDeleteFolder = db.prepare(`DELETE FROM writer_folders WHERE id = ?`);
-    db._writerDocsClearFolder = db.prepare(`
+    db._writerDeleteDocsInFolder = db.prepare(`DELETE FROM writer_documents WHERE folder_id = ?`);
+    db._writerMaxOrder = db.prepare(`
+        SELECT COALESCE(MAX(order_index), -1) AS max_order
+        FROM writer_documents
+        WHERE (@folder_id IS NULL AND folder_id IS NULL) OR folder_id = @folder_id
+    `);
+    db._writerReorder = db.prepare(`
         UPDATE writer_documents
-        SET folder_id = NULL,
+        SET folder_id = @folder_id,
+            order_index = @order_index,
             updated_at = datetime('now')
-        WHERE folder_id = @folder_id
+        WHERE id = @id
+    `);
+    db._writerMaxFolderOrder = db.prepare(`
+        SELECT COALESCE(MAX(order_index), -1) AS max_order
+        FROM writer_folders
+        WHERE (@parent_id IS NULL AND parent_id IS NULL) OR parent_id = @parent_id
+    `);
+    db._writerReorderFolders = db.prepare(`
+        UPDATE writer_folders
+        SET parent_id = @parent_id,
+            order_index = @order_index,
+            updated_at = datetime('now')
+        WHERE id = @id
     `);
 }
 
@@ -316,6 +378,27 @@ function collectFolderDescendants(childrenMap, rootId) {
         for (const child of kids) stack.push(child.id);
     }
     return out;
+}
+
+function normalizeDocRow(row) {
+    if (!row) return null;
+    return {
+        ...row,
+        folder_id: row.folder_id == null ? null : row.folder_id,
+        order_index: row.order_index == null ? 0 : row.order_index
+    };
+}
+
+function nextFolderOrder(db, cache, parentId) {
+    const key = parentId == null ? 'null' : String(parentId);
+    if (!cache.has(key)) {
+        const row = db._writerMaxFolderOrder.get({ parent_id: parentId });
+        const base = row && Number.isFinite(row.max_order) ? Number(row.max_order) : -1;
+        cache.set(key, base + 1);
+    } else {
+        cache.set(key, cache.get(key) + 1);
+    }
+    return cache.get(key);
 }
 
 function createWindow() {
@@ -446,17 +529,15 @@ ipcMain.handle('template:delete', (_evt, name) => {
 });
 
 ipcMain.handle('writer:list', () => {
-    return db._writerList.all().map(row => ({
-        ...row,
-        folder_id: row.folder_id == null ? null : row.folder_id
-    }));
+    return db._writerList.all().map(normalizeDocRow).filter(Boolean);
 });
 
 ipcMain.handle('writer:get', (_evt, id) => {
     const key = Number(id);
     if (!Number.isInteger(key) || key <= 0) throw new Error('Bad writer document id');
     const row = db._writerGet.get(key);
-    return row || null;
+    if (!row) return null;
+    return normalizeDocRow(row);
 });
 
 ipcMain.handle('writer:create', (_evt, payload = {}) => {
@@ -464,11 +545,16 @@ ipcMain.handle('writer:create', (_evt, payload = {}) => {
     const content = typeof payload.content === 'string' ? payload.content : '';
     const folderId = payload.folderId == null ? null : Number(payload.folderId);
     if (folderId != null && !Number.isInteger(folderId)) throw new Error('Bad folder id');
-    return db._writerInsert.get({
+    const maxRow = db._writerMaxOrder.get({ folder_id: folderId });
+    const baseOrder = maxRow && Number.isFinite(maxRow.max_order) ? Number(maxRow.max_order) : -1;
+    const nextOrder = baseOrder + 1;
+    const row = db._writerInsert.get({
         title,
         content,
-        folder_id: folderId
+        folder_id: folderId,
+        order_index: nextOrder
     });
+    return normalizeDocRow(row);
 });
 
 ipcMain.handle('writer:update', (_evt, payload = {}) => {
@@ -485,13 +571,57 @@ ipcMain.handle('writer:update', (_evt, payload = {}) => {
         folder_id: folderId
     });
     if (!row) throw new Error('Writer document not found');
-    return row;
+    return normalizeDocRow(row);
 });
 
 ipcMain.handle('writer:delete', (_evt, id) => {
     const key = Number(id);
     if (!Number.isInteger(key) || key <= 0) throw new Error('Bad writer document id');
     return { deleted: db._writerDelete.run(key).changes };
+});
+
+ipcMain.handle('writer:reorder-docs', (_evt, payload = {}) => {
+    const moves = Array.isArray(payload.moves) ? payload.moves : [];
+    if (!moves.length) return { updated: 0 };
+    const txn = db.transaction(() => {
+        for (const move of moves) {
+            const id = Number(move.id);
+            if (!Number.isInteger(id) || id <= 0) throw new Error('Bad writer document id');
+            const folderId = move.folderId == null ? null : Number(move.folderId);
+            if (folderId != null && !Number.isInteger(folderId)) throw new Error('Bad folder id');
+            const orderIndex = Number(move.order);
+            if (!Number.isFinite(orderIndex)) throw new Error('Bad order index');
+            db._writerReorder.run({
+                id,
+                folder_id: folderId,
+                order_index: orderIndex
+            });
+        }
+    });
+    txn();
+    return { updated: moves.length };
+});
+
+ipcMain.handle('writer:reorder-folders', (_evt, payload = {}) => {
+    const moves = Array.isArray(payload.moves) ? payload.moves : [];
+    if (!moves.length) return { updated: 0 };
+    const txn = db.transaction(() => {
+        for (const move of moves) {
+            const id = Number(move.id);
+            if (!Number.isInteger(id) || id <= 0) throw new Error('Bad folder id');
+            const parentId = move.parentId == null ? null : Number(move.parentId);
+            if (parentId != null && !Number.isInteger(parentId)) throw new Error('Bad folder parent id');
+            const orderIndex = Number(move.order);
+            if (!Number.isFinite(orderIndex)) throw new Error('Bad folder order index');
+            db._writerReorderFolders.run({
+                id,
+                parent_id: parentId,
+                order_index: orderIndex
+            });
+        }
+    });
+    txn();
+    return { updated: moves.length };
 });
 
 ipcMain.handle('writer:duplicate', (_evt, payload = {}) => {
@@ -503,11 +633,15 @@ ipcMain.handle('writer:duplicate', (_evt, payload = {}) => {
     const title = normalizeWriterTitle(desiredTitle || `${source.title} Copy`);
     const folderId = payload.folderId == null ? source.folder_id ?? null : Number(payload.folderId);
     if (folderId != null && !Number.isInteger(folderId)) throw new Error('Bad folder id');
-    return db._writerInsert.get({
+    const maxRow = db._writerMaxOrder.get({ folder_id: folderId });
+    const nextOrder = (maxRow && Number.isFinite(maxRow.max_order) ? Number(maxRow.max_order) : -1) + 1;
+    const row = db._writerInsert.get({
         title,
         content: source.content || '',
-        folder_id: folderId
+        folder_id: folderId,
+        order_index: nextOrder
     });
+    return normalizeDocRow(row);
 });
 
 ipcMain.handle('writer:rename', (_evt, payload = {}) => {
@@ -516,13 +650,14 @@ ipcMain.handle('writer:rename', (_evt, payload = {}) => {
     const title = normalizeWriterTitle(payload.title);
     const row = db._writerRename.get({ id, title });
     if (!row) throw new Error('Document not found');
-    return row;
+    return normalizeDocRow(row);
 });
 
 ipcMain.handle('writer:list-folders', () => {
     return db._writerListFolders.all().map(row => ({
         ...row,
-        parent_id: row.parent_id == null ? null : row.parent_id
+        parent_id: row.parent_id == null ? null : row.parent_id,
+        order_index: row.order_index == null ? 0 : row.order_index
     }));
 });
 
@@ -537,9 +672,12 @@ ipcMain.handle('writer:create-folder', (_evt, payload = {}) => {
     const existingKeys = new Set(folders.map(f => folderNameKey(f.parent_id, f.name)));
     const desired = typeof payload.name === 'string' ? payload.name : 'New Folder';
     const name = ensureUniqueFolderName(desired, parentId, existingKeys);
+    const maxRow = db._writerMaxFolderOrder.get({ parent_id: parentId });
+    const nextOrder = (maxRow && Number.isFinite(maxRow.max_order) ? Number(maxRow.max_order) : -1) + 1;
     const row = db._writerInsertFolder.get({
         name,
-        parent_id: parentId
+        parent_id: parentId,
+        order_index: nextOrder
     });
     return { ...row, parent_id: row.parent_id == null ? null : row.parent_id };
 });
@@ -575,7 +713,7 @@ ipcMain.handle('writer:delete-folder', (_evt, id) => {
     const cascade = collectFolderDescendants(childrenMap, key);
     const txn = db.transaction(() => {
         for (const folderId of cascade) {
-            db._writerDocsClearFolder.run({ folder_id: folderId });
+            db._writerDeleteDocsInFolder.run(folderId);
         }
         for (let i = cascade.length - 1; i >= 0; i--) {
             db._writerDeleteFolder.run(cascade[i]);
@@ -598,18 +736,57 @@ ipcMain.handle('writer:duplicate-folder', (_evt, payload = {}) => {
     const existingKeys = new Set(folders.map(f => folderNameKey(f.parent_id, f.name)));
     const childrenMap = buildFolderChildrenMap(folders);
     const created = [];
+    const orderCache = new Map();
+    const writerDocs = db._writerList.all();
+    const docsByFolder = new Map();
+    for (const doc of writerDocs) {
+        if (doc.folder_id == null) continue;
+        const key = Number(doc.folder_id);
+        if (!docsByFolder.has(key)) docsByFolder.set(key, []);
+        docsByFolder.get(key).push({
+            ...doc,
+            order_index: Number.isFinite(doc.order_index) ? doc.order_index : Number(doc.order_index)
+        });
+    }
+    const copyDocsIntoFolder = (sourceFolderId, destinationFolderId) => {
+        const docs = docsByFolder.get(sourceFolderId);
+        if (!docs || !docs.length) return;
+        const sorted = docs.slice().sort((a, b) => {
+            const orderDiff = (Number(a.order_index) || 0) - (Number(b.order_index) || 0);
+            if (orderDiff !== 0) return orderDiff;
+            return (a.id || 0) - (b.id || 0);
+        });
+        sorted.forEach((doc, idx) => {
+            const orderIndex = Number.isFinite(doc.order_index) ? Number(doc.order_index) : idx;
+            db._writerInsert.get({
+                title: doc.title,
+                content: doc.content || '',
+                folder_id: destinationFolderId,
+                order_index: orderIndex
+            });
+        });
+    };
     const txn = db.transaction(() => {
         const rootName = ensureUniqueFolderName(desired, parentId, existingKeys);
-        const createRecursive = (folder, newParentId, overrideName = null) => {
-            const nameToUse = overrideName || ensureUniqueFolderName(folder.name, newParentId, existingKeys);
-            const row = db._writerInsertFolder.get({ name: nameToUse, parent_id: newParentId });
+        const createRecursive = (folder, newParentId, { forcedName = null, preserveChildNames = false } = {}) => {
+            const nameToUse = forcedName != null
+                ? forcedName
+                : preserveChildNames
+                    ? folder.name
+                    : ensureUniqueFolderName(folder.name, newParentId, existingKeys);
+            if (forcedName != null || preserveChildNames) {
+                existingKeys.add(folderNameKey(newParentId, nameToUse));
+            }
+            const orderIndex = nextFolderOrder(db, orderCache, newParentId);
+            const row = db._writerInsertFolder.get({ name: nameToUse, parent_id: newParentId, order_index: orderIndex });
             created.push(row);
+            copyDocsIntoFolder(folder.id, row.id);
             const children = childrenMap.get(folder.id) || [];
             for (const child of children) {
-                createRecursive(child, row.id);
+                createRecursive(child, row.id, { preserveChildNames: true });
             }
         };
-        createRecursive(target, parentId, rootName);
+        createRecursive(target, parentId, { forcedName: rootName });
     });
     txn();
     if (!created.length) throw new Error('Unable to duplicate folder');

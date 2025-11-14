@@ -26,7 +26,9 @@ contextBridge.exposeInMainWorld('db', {
         createFolder:   (payload = {}) => ipcRenderer.invoke('writer:create-folder', payload),
         renameFolder:   (id, name) => ipcRenderer.invoke('writer:rename-folder', { id, name }),
         deleteFolder:   (id) => ipcRenderer.invoke('writer:delete-folder', id),
-        duplicateFolder:(id, overrides = {}) => ipcRenderer.invoke('writer:duplicate-folder', { id, ...overrides })
+        duplicateFolder:(id, overrides = {}) => ipcRenderer.invoke('writer:duplicate-folder', { id, ...overrides }),
+        reorderDocuments:(moves = []) => ipcRenderer.invoke('writer:reorder-docs', { moves }),
+        reorderFolders:(moves = []) => ipcRenderer.invoke('writer:reorder-folders', { moves })
     }
 });
 

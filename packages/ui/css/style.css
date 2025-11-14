@@ -23,7 +23,7 @@ body {
 .terminal {
     border-radius: 10px;
     box-shadow: 0 10px 40px #00000080, inset 0 0 0 1px var(--muted);
-    background: repeating-linear-gradient(0deg, #00000014 0 2px, #00000000 2px 4px), var(--panel);
+    background: repeating-linear-gradient(0deg, #00000008 0 2px, #00000000 2px 4px), var(--panel);
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -34,10 +34,11 @@ body {
     gap: 8px;
     align-items: center;
     padding: 10px 15px;
-    border-bottom: 1px solid var(--muted);
+    border: 1px solid var(--muted);
     background: #00000033;
     user-select: none;
     margin-bottom: 1px;
+    border-radius: 10px 10px 0 0;
 }
 
 .title {
@@ -53,6 +54,7 @@ body {
     padding: 15px;
     position: relative;
     margin-bottom: 1px;
+    border-radius: 0 0 10px 10px;
 }
 
 #output {
@@ -158,59 +160,6 @@ body {
     }
 }
 
-/* Hacky shit */
-#screen.locked {
-    overflow: hidden !important;
-    padding: 0 15px !important;
-}
-
-.cm-scroller {
-    overflow: visible !important;   /* let the parent handle scrolling */
-    height: auto !important;        /* don't be a scroll container */
-}
-
-#writerStatus {
-    position: absolute;
-}
-
-#writerRoot {
-    height: 100% !important;        /* match parent; no artificial growth */
-    margin-bottom: -15px;
-    padding: 0 !important;
-}
-
-#writerPane {
-    height: 100%;                   /* fill parent */
-    margin-top: 0 auto;
-    overflow-y: auto;               /* sole scroll container for editor */
-}
-
-.cm-editor {
-    max-width: calc(var(--editor-max-width) + 1ch + 60px);
-    margin: 0 auto -15px auto!important;
-    padding: 30px !important;
-    overflow: visible;              /* prevent inner scroll */
-    height: auto;                   /* size to content; parent scrolls */
-}
-
-.cm-content {
-    margin: 50px auto !important;
-    max-width: calc(var(--editor-max-width) + 1ch);
-}
-
-.ͼv .cm-line.cm-list-line {
-    column-gap: 0 !important;
-}
-
-.cm-line.cm-list-line .cm-list-marker {
-    margin-right: -0.5ch;
-}
-
-/* 
-.ͼ1 .cm-line {
-    padding: 0;
-} */
-
 .ͼo .cm-line.cm-list-line {
     margin: 0.25rem 0;
 }
@@ -295,6 +244,20 @@ body {
     letter-spacing: 0.04em;
 }
 
+.writer-word-count {
+    font-size: 0.78em;
+    margin-left: 12px;
+    letter-spacing: 0.04em;
+    color: var(--muted, rgba(255,255,255,0.7));
+}
+
+.writer-word-count {
+    font-size: 0.78em;
+    letter-spacing: 0.04em;
+    margin-left: 12px;
+    color: var(--muted, rgba(255,255,255,0.7));
+}
+
 .writer-root {
     --folder-width: 220px;
     --file-width: 260px;
@@ -364,7 +327,6 @@ body {
     flex-direction: column;
     background: color-mix(in srgb, var(--panel) 88%, rgba(0,0,0,0.8));
     min-height: 0;
-    border-radius: 10px;
     box-sizing: border-box;
     overflow: hidden;
     transition: transform 0.3s ease, opacity 0.3s ease;
@@ -481,12 +443,94 @@ body {
     border-left-color: var(--accent);
 }
 
+.writer-folder-row {
+    position: relative;
+}
+
+.writer-folder-row {
+    cursor: default;
+}
+
+.writer-folder-row.dragging {
+    opacity: 0.6;
+}
+
 .writer-folder-row:hover {
     background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
+.writer-folder-row.drag-over {
+    background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
 .writer-folder-item > ul {
     margin-left: 14px;
+}
+
+.writer-folder-item.collapsed > ul {
+    display: none;
+}
+
+.writer-folder-caret {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+    border: none;
+    background: none;
+    appearance: none;
+    -webkit-appearance: none;
+    color: color-mix(in srgb, var(--muted) 80%, transparent);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: default;
+    position: relative;
+    transition: color 0.15s ease;
+}
+
+.writer-folder-caret::before {
+    content: '';
+    display: block;
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: 5px 0 5px 7px;
+    border-color: transparent transparent transparent currentColor;
+    transform: rotate(0deg);
+    transform-origin: 25% 50%;
+    transition: transform 0.15s ease;
+}
+
+.writer-folder-caret-toggle {
+    cursor: pointer;
+}
+
+.writer-folder-caret:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.writer-folder-row:hover .writer-folder-caret-toggle {
+    color: color-mix(in srgb, var(--accent) 65%, transparent);
+}
+
+.writer-folder-item.expanded > .writer-folder-row .writer-folder-caret::before {
+    transform: rotate(90deg);
+}
+
+.writer-folder-item.collapsed > .writer-folder-row .writer-folder-caret::before {
+    transform: rotate(0deg);
+}
+
+.writer-folder-caret--spacer {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.cm-md-indicator {
+    opacity: 0.25;
+    font-weight: inherit;
 }
 
 .writer-file-list {
@@ -498,8 +542,9 @@ body {
 .writer-file-item {
     padding: 10px 14px;
     border-left: 3px solid transparent;
-    cursor: pointer;
+    cursor: default;
     transition: background 0.15s, border-color 0.15s;
+    position: relative;
 }
 
 .writer-file-item:hover {
@@ -510,6 +555,29 @@ body {
 .writer-file-item.active {
     background: color-mix(in srgb, var(--accent) 22%, transparent);
     border-left-color: var(--accent);
+}
+
+.writer-file-item.dragging {
+    opacity: 0.45;
+}
+
+.writer-file-item.drag-over-before::before,
+.writer-file-item.drag-over-after::after {
+    content: '';
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+}
+
+.writer-file-item.drag-over-before::before {
+    top: 2px;
+}
+
+.writer-file-item.drag-over-after::after {
+    bottom: 2px;
 }
 
 .writer-file-item.dirty .writer-file-title::after {
@@ -1244,4 +1312,78 @@ body {
 .cj-modal button:focus {
     outline: none !important;
     box-shadow: 0 0 0 2px var(--text, #55df63);
+}
+
+/* Punchlist stuff */
+#screen.locked {
+    overflow: hidden !important;
+    padding: 0 15px !important;
+}
+
+.cm-scroller {
+    overflow: visible !important;   /* let the parent handle scrolling */
+    height: auto !important;        /* don't be a scroll container */
+}
+
+#writerStatus {
+    position: absolute;
+}
+
+#writerRoot {
+    height: 100% !important;        /* match parent; no artificial growth */
+    margin-bottom: -15px;
+    padding: 0 !important;
+}
+
+#writerPane {
+    height: 100%;                   /* fill parent */
+    margin-top: 0 auto;
+    overflow-y: auto;               /* sole scroll container for editor */
+}
+
+.cm-editor {
+    max-width: calc(var(--editor-max-width) + 1ch + 60px);
+    margin: 0 auto -15px auto!important;
+    padding: 30px !important;
+    overflow: visible;              /* prevent inner scroll */
+    height: auto;                   /* size to content; parent scrolls */
+}
+
+.cm-content {
+    margin: 50px auto !important;
+    max-width: calc(var(--editor-max-width) + 1ch);
+}
+
+.ͼv .cm-line.cm-list-line {
+    column-gap: 0 !important;
+}
+
+.cm-line.cm-list-line .cm-list-marker {
+    margin-right: -0.5ch;
+}
+
+#writerEmptyOverlay {
+    height: 100%;
+}
+.writer-folder-row.drag-over-before::before,
+.writer-folder-row.drag-over-after::after {
+    content: '';
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+}
+
+.writer-folder-row.drag-over-before::before {
+    top: 2px;
+}
+
+.writer-folder-row.drag-over-after::after {
+    bottom: 2px;
+}
+
+.writer-folder-row.drag-over-target {
+    background: color-mix(in srgb, var(--accent) 25%, transparent);
 }

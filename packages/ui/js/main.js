@@ -219,6 +219,28 @@ if (!db) {
             return out;
         }
 
+        async function listDocsForFolder(folderId) {
+            const key = folderId == null ? null : Number(folderId);
+            return txRunWriter('readonly', store => {
+                const docs = [];
+                return new Promise((resolve, reject) => {
+                    const index = store.index('folder_id');
+                    const range = IDBKeyRange.only(key);
+                    const cursor = index.openCursor(range);
+                    cursor.onsuccess = () => {
+                        const cur = cursor.result;
+                        if (!cur) {
+                            resolve(docs);
+                            return;
+                        }
+                        docs.push(cur.value);
+                        cur.continue();
+                    };
+                    cursor.onerror = () => reject(cursor.error);
+                });
+            });
+        }
+
         async function clearDocsForFolder(folderId) {
             const now = new Date().toISOString();
             return txRunWriter('readwrite', store => {
@@ -648,9 +670,21 @@ if (!db) {
                     const createdRoot = await this.createFolder({ name: rootName, parentId });
                     const childrenMap = buildFolderChildrenMap(folders);
                     const queue = (childrenMap.get(target.id) || []).map(child => ({ folder: child, parentId: createdRoot.id }));
+                    const copyDocsForFolder = async (sourceFolderId, destFolderId) => {
+                        const docs = await listDocsForFolder(sourceFolderId);
+                        for (const doc of docs) {
+                            await this.create({
+                                title: doc.title,
+                                content: doc.content ?? '',
+                                folderId: destFolderId
+                            });
+                        }
+                    };
+                    await copyDocsForFolder(target.id, createdRoot.id);
                     while (queue.length) {
                         const { folder: child, parentId: destParent } = queue.shift();
                         const childCreated = await this.createFolder({ name: child.name, parentId: destParent });
+                        await copyDocsForFolder(child.id, childCreated.id);
                         const grandchildren = childrenMap.get(child.id) || [];
                         for (const grandChild of grandchildren) {
                             queue.push({ folder: grandChild, parentId: childCreated.id });
@@ -748,6 +782,31 @@ if (!db) {
 const bootTheme = await ensureActiveTheme();
 applyTheme(bootTheme);
 
+const AUTOSAVE_SETTING_KEY = 'autosave_enabled';
+let autosaveEnabled = false;
+
+async function loadAutosavePreference() {
+    try {
+        if (window.settings && typeof window.settings.get === 'function') {
+            const stored = await window.settings.get(AUTOSAVE_SETTING_KEY);
+            if (stored != null) {
+                autosaveEnabled = stored === true || stored === '1' || stored === 'true';
+                return;
+            }
+        }
+    } catch (_) {}
+    try {
+        const stored = window.localStorage?.getItem?.(AUTOSAVE_SETTING_KEY);
+        if (stored != null) {
+            autosaveEnabled = stored === '1' || stored === 'true';
+            return;
+        }
+    } catch (_) {}
+    autosaveEnabled = false;
+}
+
+await loadAutosavePreference();
+
 // Whether a subprogram (team.js) is currently consuming input
 let inputState = false;
 let activeProgram = null; // holds an active subprogram (if any)
@@ -757,6 +816,31 @@ const state = {
     prompt: 'user:~$',
     commands: {},
 };
+
+async function persistAutosavePreference(enabled) {
+    const value = enabled ? '1' : '0';
+    try {
+        if (window.settings && typeof window.settings.set === 'function') {
+            await window.settings.set(AUTOSAVE_SETTING_KEY, value);
+            return;
+        }
+    } catch (_) {}
+    try {
+        window.localStorage?.setItem?.(AUTOSAVE_SETTING_KEY, value);
+    } catch (_) {}
+}
+
+async function setAutosavePreference(enabled, { announce = true } = {}) {
+    autosaveEnabled = !!enabled;
+    await persistAutosavePreference(autosaveEnabled);
+    if (activeProgram && typeof activeProgram.setAutosave === 'function') {
+        try { activeProgram.setAutosave(autosaveEnabled); } catch (_) {}
+    }
+    if (announce) {
+        const status = autosaveEnabled ? 'on' : 'off';
+        print(`<div class="soft">autosave: ${status}</div>`);
+    }
+}
 
 // Command history
 const history = [];
@@ -1065,7 +1149,8 @@ function createListUI(title, items, opts = {}) {
             startEditor(shell, {
                 id: row?.id ?? key,
                 date: key,
-                initialContent: row?.content ?? ''
+                initialContent: row?.content ?? '',
+                autosave: autosaveEnabled
             });
         },
         onDelete = async (item) => {
@@ -1293,6 +1378,32 @@ register('theme', async (argv = []) => {
     print('<div class="error">Usage: <span class="kbd">theme</span> or <span class="kbd">theme reset</span></div>');
 }, 'Customize fonts and colors');
 
+register('autosave', async (argv = []) => {
+    if (!argv.length) {
+        const status = autosaveEnabled ? 'on' : 'off';
+        print(`<div class="soft">autosave: ${status}</div>`);
+        return;
+    }
+    const arg = String(argv[0]).trim().toLowerCase();
+    if (['1', 'on', 'true', 'enable', 'enabled'].includes(arg)) {
+        if (autosaveEnabled) {
+            print('<div class="soft">autosave: on</div>');
+            return;
+        }
+        await setAutosavePreference(true);
+        return;
+    }
+    if (['0', 'off', 'false', 'disable', 'disabled'].includes(arg)) {
+        if (!autosaveEnabled) {
+            print('<div class="soft">autosave: off</div>');
+            return;
+        }
+        await setAutosavePreference(false);
+        return;
+    }
+    print('<div class="error">Usage: <span class="kbd">autosave</span>, <span class="kbd">autosave 1</span>, or <span class="kbd">autosave 0</span></div>');
+}, 'Toggle automatic saving for Writer and Journal');
+
 register('clear', () => {
     output.innerHTML = '';
     banner();
@@ -1400,7 +1511,7 @@ register('write', async (argv = []) => {
         print('<div class="warn">Writer ignores additional arguments.</div>');
     }
     try {
-        startWriter(shell);
+        startWriter(shell, { autosave: autosaveEnabled });
     } catch (err) {
         const msg = err?.message || String(err);
         print(`<div class="error">Unable to open Writer: ${esc(msg)}</div>`);
@@ -1494,7 +1605,8 @@ register('journal', async (argv = []) => {
             startEditor(shell, {
                 id: row.id ?? date,
                 date: row.date ?? date,
-                initialContent: row.content ?? (template.content ?? '')
+                initialContent: row.content ?? (template.content ?? ''),
+                autosave: autosaveEnabled
             });
             return;
         }
@@ -1524,7 +1636,8 @@ register('journal', async (argv = []) => {
         startEditor(shell, {
             id: row.id ?? date,
             date: row.date ?? date,
-            initialContent: row.content ?? ''
+            initialContent: row.content ?? '',
+            autosave: autosaveEnabled
         });
     } catch (err) {
         const msg = err?.message || String(err);
@@ -1584,7 +1697,8 @@ register('view', async (argv = []) => {
                     id: item.name,
                     initialContent: record.content ?? '',
                     templateSchedule: record.schedule ?? null,
-                    title: `Template: ${item.name}`
+                    title: `Template: ${item.name}`,
+                    autosave: false
                 });
             },
             onDelete: async (item) => {
