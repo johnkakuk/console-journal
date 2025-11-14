@@ -758,36 +758,25 @@ export function startWriter(shell, opts = {}) {
         persistDocOrder(Array.from(affected));
     }
 
-    function applyFolderReorder(folderId, targetId, before) {
-        if (isInboxFolder(folderId) || isInboxFolder(targetId)) return;
-        const folder = state.folders.find(f => f.id === folderId);
-        if (!folder) return;
-        const parentId = normalizeFolderId(folder.parent_id);
-        const siblings = foldersOrderedForParent(parentId, folderId);
-        const targetIndex = siblings.findIndex(f => f.id === targetId);
-        if (targetIndex === -1) return;
-        const insertIndex = before ? targetIndex : targetIndex + 1;
-        siblings.splice(insertIndex, 0, folder);
-        siblings.forEach((f, idx) => { f.order_index = idx; });
-        persistFolderOrder([parentId]);
-        renderFolderTree();
-    }
-
-    function applyFolderMove(folderId, destinationParentId) {
+    function moveFolderWithOrdering(folderId, destinationParentId, anchorId = null, before = true) {
         if (isInboxFolder(folderId)) return;
         const folder = state.folders.find(f => f.id === folderId);
         if (!folder) return;
-        const sourceParent = normalizeFolderId(folder.parent_id);
         const destParent = normalizeFolderId(destinationParentId);
         if (destParent === folderId) return;
         if (destParent != null && isInboxFolder(destParent)) return;
-        if (isDescendantFolder(folderId, destParent)) return;
+        if (destParent != null && isDescendantFolder(folderId, destParent)) return;
+        const sourceParent = normalizeFolderId(folder.parent_id);
         folder.parent_id = destParent;
         const affected = new Set([sourceParent, destParent]);
         const sourceSiblings = foldersOrderedForParent(sourceParent, folderId);
         sourceSiblings.forEach((f, idx) => { f.order_index = idx; });
         const destSiblings = foldersOrderedForParent(destParent, folderId);
-        const insertIndex = clamp(destSiblings.length, 0, destSiblings.length);
+        let insertIndex = destSiblings.length;
+        if (anchorId != null) {
+            const anchorIdx = destSiblings.findIndex(f => f.id === anchorId);
+            if (anchorIdx >= 0) insertIndex = before ? anchorIdx : anchorIdx + 1;
+        }
         destSiblings.splice(insertIndex, 0, folder);
         destSiblings.forEach((f, idx) => { f.order_index = idx; });
         persistFolderOrder(Array.from(affected));
@@ -1968,31 +1957,34 @@ export function startWriter(shell, opts = {}) {
         }
         if (!folderDragging) return;
         if (targetId === state.draggingFolderId) return;
-        if (targetId != null && isInboxFolder(targetId)) return;
         if (targetId != null && isDescendantFolder(state.draggingFolderId, targetId)) return;
-        const parentOfDragging = getFolderParentId(state.draggingFolderId);
-        const parentOfTarget = targetId == null ? null : getFolderParentId(targetId);
-        const rect = row ? row.getBoundingClientRect() : null;
         let intent = null;
-        if (row && targetId != null && parentOfTarget === parentOfDragging) {
+        if (row && targetId != null) {
+            const parentOfTarget = getFolderParentId(targetId);
+            const rect = row.getBoundingClientRect();
             const offset = (e.clientY - rect.top) / rect.height;
-            if (offset < 0.25) intent = { type: 'reorder', targetId, before: true, row };
-            else if (offset > 0.75) intent = { type: 'reorder', targetId, before: false, row };
-        }
-        if (!intent && row) {
-            intent = { type: 'into', targetId, row };
+            if (offset < 0.3) {
+                intent = { type: 'position', parentId: parentOfTarget, targetId, before: true, row };
+            } else if (offset > 0.7) {
+                intent = { type: 'position', parentId: parentOfTarget, targetId, before: false, row };
+            } else if (!isInboxFolder(targetId)) {
+                intent = { type: 'into', parentId: targetId, row };
+            }
         }
         if (!intent && !row) {
-            intent = { type: 'move-root', targetId: null, row: null };
+            intent = { type: 'position', parentId: null, targetId: null, before: false, row: null };
         }
         if (!intent) return;
+        if (intent.parentId != null && isInboxFolder(intent.parentId)) return;
+        if (intent.parentId === state.draggingFolderId) return;
+        if (intent.parentId != null && isDescendantFolder(intent.parentId, state.draggingFolderId)) return;
         e.preventDefault();
         clearFolderDropIndicators();
         state.folderDragIntent = intent;
         if (!row) return;
-        if (intent.type === 'reorder') {
+        if (intent.type === 'position') {
             row.classList.add(intent.before ? 'drag-over-before' : 'drag-over-after');
-        } else {
+        } else if (intent.type === 'into') {
             row.classList.add('drag-over-target');
         }
     }
@@ -2017,11 +2009,10 @@ export function startWriter(shell, opts = {}) {
             return;
         }
         e.preventDefault();
-        if (intent.type === 'reorder') {
-            applyFolderReorder(folderId, intent.targetId, intent.before);
-        } else {
-            const targetParent = intent.type === 'move-root' ? null : intent.targetId;
-            applyFolderMove(folderId, targetParent);
+        if (intent.type === 'position') {
+            moveFolderWithOrdering(folderId, intent.parentId, intent.targetId, intent.before);
+        } else if (intent.type === 'into') {
+            moveFolderWithOrdering(folderId, intent.parentId, null, false);
         }
         clearFolderDropIndicators();
         state.draggingFolderId = null;

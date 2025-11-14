@@ -219,6 +219,28 @@ if (!db) {
             return out;
         }
 
+        async function listDocsForFolder(folderId) {
+            const key = folderId == null ? null : Number(folderId);
+            return txRunWriter('readonly', store => {
+                const docs = [];
+                return new Promise((resolve, reject) => {
+                    const index = store.index('folder_id');
+                    const range = IDBKeyRange.only(key);
+                    const cursor = index.openCursor(range);
+                    cursor.onsuccess = () => {
+                        const cur = cursor.result;
+                        if (!cur) {
+                            resolve(docs);
+                            return;
+                        }
+                        docs.push(cur.value);
+                        cur.continue();
+                    };
+                    cursor.onerror = () => reject(cursor.error);
+                });
+            });
+        }
+
         async function clearDocsForFolder(folderId) {
             const now = new Date().toISOString();
             return txRunWriter('readwrite', store => {
@@ -648,9 +670,21 @@ if (!db) {
                     const createdRoot = await this.createFolder({ name: rootName, parentId });
                     const childrenMap = buildFolderChildrenMap(folders);
                     const queue = (childrenMap.get(target.id) || []).map(child => ({ folder: child, parentId: createdRoot.id }));
+                    const copyDocsForFolder = async (sourceFolderId, destFolderId) => {
+                        const docs = await listDocsForFolder(sourceFolderId);
+                        for (const doc of docs) {
+                            await this.create({
+                                title: doc.title,
+                                content: doc.content ?? '',
+                                folderId: destFolderId
+                            });
+                        }
+                    };
+                    await copyDocsForFolder(target.id, createdRoot.id);
                     while (queue.length) {
                         const { folder: child, parentId: destParent } = queue.shift();
                         const childCreated = await this.createFolder({ name: child.name, parentId: destParent });
+                        await copyDocsForFolder(child.id, childCreated.id);
                         const grandchildren = childrenMap.get(child.id) || [];
                         for (const grandChild of grandchildren) {
                             queue.push({ folder: grandChild, parentId: childCreated.id });
