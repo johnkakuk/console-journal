@@ -7,10 +7,11 @@ import { indentOnInput, indentUnit, syntaxHighlighting, HighlightStyle } from '@
 import { tags as t } from '@lezer/highlight';
 import { search, searchKeymap, openSearchPanel, findNext, findPrevious } from '@codemirror/search';
 import { normalizeTemplateSchedule, cloneTemplateSchedule, isISODate } from './schedule.js';
-import { listLayoutPlugin, createListKeymap, listRenumberListener, listTodoAutoComplete, listTodoLineFixer, listTodoBlankGuard } from './listLayout.js';
+import { listLayoutPlugin, createListKeymap, listRenumberListener, listTodoAutoComplete } from './listLayout.js';
 
 const SELECTION_BG = 'var(--editor-selection-bg, color-mix(in srgb, var(--editor-fg, #000) 25%, var(--editor-bg, #fff)))';
 const SELECTION_FG = 'var(--editor-selection-fg, var(--editor-fg, #000))';
+const CUSTOM_DEFAULT_KEYMAP = defaultKeymap.filter(binding => binding.key !== 'Mod-b' && binding.key !== 'Mod-i');
 
 function hasPointerUserEvent(update) {
     if (!update || !Array.isArray(update.transactions)) return false;
@@ -221,6 +222,99 @@ const todoPlugin = [
     })
 ];
 
+function collectEmphasisMarkers(text) {
+    const markers = [];
+    const len = text.length;
+    let i = 0;
+    while (i < len) {
+        if (text[i] !== '*') {
+            i++;
+            continue;
+        }
+        let markerLen = 1;
+        if (text.startsWith('***', i)) markerLen = 3;
+        else if (i + 1 < len && text[i + 1] === '*') markerLen = 2;
+        const marker = markerLen === 3 ? '***' : markerLen === 2 ? '**' : '*';
+        const nextChar = text[i + markerLen] || '';
+        const isLineStart = /^\s*$/.test(text.slice(0, i));
+        if (markerLen === 1 && isLineStart && nextChar === ' ') {
+            i += markerLen;
+            continue;
+        }
+        if (!nextChar || !nextChar.trim()) {
+            i += markerLen;
+            continue;
+        }
+        let searchFrom = i + markerLen;
+        let closingIndex = -1;
+        while (true) {
+            const idx = text.indexOf(marker, searchFrom);
+            if (idx === -1) break;
+            if (idx === i + markerLen) {
+                searchFrom = idx + markerLen;
+                continue;
+            }
+            const beforeClose = text[idx - 1];
+            if (!beforeClose || !beforeClose.trim()) {
+                searchFrom = idx + markerLen;
+                continue;
+            }
+            closingIndex = idx;
+            break;
+        }
+        if (closingIndex !== -1) {
+            markers.push({ from: i, to: i + markerLen });
+            markers.push({ from: closingIndex, to: closingIndex + markerLen });
+            i = closingIndex + markerLen;
+        } else {
+            i += markerLen;
+        }
+    }
+    return markers;
+}
+
+const markdownIndicatorPlugin = ViewPlugin.fromClass(class {
+    constructor(view) {
+        this.decorations = this.build(view);
+    }
+    update(update) {
+        if (update.docChanged || update.viewportChanged)
+            this.decorations = this.build(update.view);
+    }
+    build(view) {
+        const builder = new RangeSetBuilder();
+        for (const { from, to } of view.visibleRanges) {
+            let pos = from;
+            while (pos <= to) {
+                const line = view.state.doc.lineAt(pos);
+                this.decorateLine(line, builder);
+                pos = line.to + 1;
+                if (line.to >= to) break;
+            }
+        }
+        return builder.finish();
+    }
+    decorateLine(line, builder) {
+        const text = line.text;
+        const headingMatch = text.match(/^\s*(#{1,6})\s+/);
+        if (headingMatch) {
+            const prefix = headingMatch[1];
+            const offset = text.indexOf(prefix);
+            for (let i = 0; i < prefix.length; i++) {
+                builder.add(line.from + offset + i, line.from + offset + i + 1, Decoration.mark({ class: 'cm-md-indicator' }));
+            }
+        }
+        if (text.includes('*')) {
+            const markers = collectEmphasisMarkers(text);
+            markers.forEach(({ from, to }) => {
+                builder.add(line.from + from, line.from + to, Decoration.mark({ class: 'cm-md-indicator' }));
+            });
+        }
+    }
+}, {
+    decorations: v => v.decorations
+});
+
 export function startEditor(shell, opts = {}) {
     const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent || '');
     const mode = opts.mode === 'template' ? 'template' : 'entry';
@@ -377,6 +471,54 @@ export function startEditor(shell, opts = {}) {
             unsaved = false;
         }
         cancelAutosaveTimer();
+    }
+
+    function createMarkerCommand(marker) {
+        const length = marker.length;
+        return (view) => {
+            const spec = view.state.changeByRange(range => {
+                if (range.empty) {
+                    return {
+                        changes: { from: range.from, to: range.to, insert: marker },
+                        range: EditorSelection.cursor(range.from + length)
+                    };
+                }
+                const doc = view.state.doc;
+                const before = range.from >= length ? doc.sliceString(range.from - length, range.from) : '';
+                const after = doc.sliceString(range.to, range.to + length);
+                const selected = doc.sliceString(range.from, range.to);
+                if (before === marker && after === marker) {
+                    return {
+                        changes: [
+                            { from: range.to, to: range.to + length, insert: '' },
+                            { from: range.from - length, to: range.from, insert: '' }
+                        ],
+                        range: EditorSelection.range(range.from - length, range.to - length)
+                    };
+                }
+                if (selected.length >= length * 2 && selected.startsWith(marker) && selected.endsWith(marker)) {
+                    return {
+                        changes: [
+                            { from: range.to - length, to: range.to, insert: '' },
+                            { from: range.from, to: range.from + length, insert: '' }
+                        ],
+                        range: EditorSelection.range(range.from, range.to - length * 2)
+                    };
+                }
+                return {
+                    changes: [
+                        { from: range.from, to: range.from, insert: marker },
+                        { from: range.to, to: range.to, insert: marker }
+                    ],
+                    range: EditorSelection.range(range.from + length, range.to + length)
+                };
+            });
+            view.dispatch(view.state.update(spec, {
+                scrollIntoView: true,
+                userEvent: 'input'
+            }));
+            return true;
+        };
     }
 
     function cancelAutosaveTimer() {
@@ -808,6 +950,8 @@ export function startEditor(shell, opts = {}) {
     }
 
     function buildExtensions() {
+        const applyBold = createMarkerCommand('**');
+        const applyItalic = createMarkerCommand('*');
         const insertTodo = (view) => {
             const spec = view.state.changeByRange(range => {
                 const insertBase = '- [ ] ';
@@ -854,25 +998,26 @@ export function startEditor(shell, opts = {}) {
             unsavedTracker,
             history(),
             todoPlugin,
+            markdownIndicatorPlugin,
             listLayoutPlugin,
             listRenumberListener,
             listTodoAutoComplete,
-            listTodoLineFixer,
-            listTodoBlankGuard,
             indentConfig,
             createListKeymap(INDENT),
             keymap.of([
-                ...defaultKeymap,
+                ...CUSTOM_DEFAULT_KEYMAP,
                 ...historyKeymap,
                 ...searchKeymap,
                 { key: 'Mod-f', preventDefault: true, run: openSearchPanel },
+                { key: 'Mod-b', preventDefault: true, run: applyBold },
+                { key: 'Mod-i', preventDefault: true, run: applyItalic },
                 { key: 'Enter', run: findNext },
                 { key: 'Shift-Enter', run: findPrevious }
             ]),
             search({ top: true }),
             saveExitKeymap,
             indentOnInput(),
-            markdown(),
+            markdown({ addKeymap: false }),
             syntaxHighlighting(retroHighlight),
             EditorView.lineWrapping,
         ];

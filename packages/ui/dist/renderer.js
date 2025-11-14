@@ -25958,9 +25958,7 @@ var UNORDERED_LIST_RE = /^(\s*)([-+*])(\s+)(.*)$/;
 var LIST_GAP_CH = 0.5;
 var TODO_AUTOCOMPLETE_PREFIX_RE = /^\s*[-*]\s+$/;
 var TODO_AUTOCOMPLETE_SUFFIX_RE = /^\s*\]/;
-var TODO_BRACKET_LINE_RE = /^\s*\[/;
 var todoAutoCompleteAnnotation = Annotation.define();
-var todoLineFixAnnotation = Annotation.define();
 function countLeadingSpaces(text) {
   const match = text.match(/^\s*/);
   return match ? match[0].length : 0;
@@ -26368,23 +26366,6 @@ ${suffix}` : "[ ] ";
     });
     return true;
   }
-  if (from === line.from && line.number > 1 && TODO_BRACKET_LINE_RE.test(line.text)) {
-    const prev = state2.doc.line(line.number - 1);
-    if (TODO_AUTOCOMPLETE_PREFIX_RE.test(prev.text)) {
-      const leadingSpaces = (line.text.match(/^\s*/) || [""])[0].length;
-      const joinFrom = prev.to;
-      const joinTo = line.from + leadingSpaces;
-      const spacing = prev.text.endsWith(" ") ? "" : " ";
-      const insertText = spacing + "[ ] ";
-      view.dispatch({
-        changes: { from: joinFrom, to: joinTo, insert: insertText },
-        selection: EditorSelection.cursor(joinFrom + insertText.length),
-        annotations: todoAutoCompleteAnnotation.of(true),
-        scrollIntoView: false
-      });
-      return true;
-    }
-  }
   return false;
 });
 var listLayoutPlugin = ViewPlugin.fromClass(class {
@@ -26410,42 +26391,12 @@ var listRenumberListener = EditorView.updateListener.of((update) => {
     annotations: [autoNumberAnnotation.of(true), Transaction.addToHistory.of(false)]
   });
 });
-var todoLineFixer = EditorView.updateListener.of((update) => {
-  if (!update.docChanged) return;
-  if (update.transactions.some((tr) => tr.annotation(todoAutoCompleteAnnotation) || tr.annotation(todoLineFixAnnotation))) return;
-  const { state: state2, view } = update;
-  const main = state2.selection.main;
-  if (!main.empty) return;
-  const line = state2.doc.lineAt(main.head);
-  if (line.number <= 1) return;
-  if (!TODO_BRACKET_LINE_RE.test(line.text)) return;
-  const prev = state2.doc.line(line.number - 1);
-  if (!TODO_AUTOCOMPLETE_PREFIX_RE.test(prev.text)) return;
-  const leadingSpaces = (line.text.match(/^\s*/) || [""])[0].length;
-  const rest = line.text.slice(leadingSpaces);
-  if (!rest.startsWith("[")) return;
-  const remainder = rest.slice(1);
-  const trailing = state2.doc.sliceString(line.to, line.to + 1) === "\n" ? "\n" : "\n";
-  const from = prev.to;
-  const to = line.to;
-  const needsSpace = prev.text.endsWith(" ") ? "" : " ";
-  const insert2 = `${needsSpace}[ ] ${remainder}${trailing}`;
-  const caret3 = from + needsSpace.length + 4;
-  view.dispatch({
-    changes: { from, to, insert: insert2 },
-    selection: EditorSelection.cursor(caret3),
-    scrollIntoView: false,
-    annotations: todoLineFixAnnotation.of(true)
-  });
-});
-var listTodoAutoComplete = todoAutoCompleteHandler;
-var listTodoLineFixer = todoLineFixer;
-var listTodoBlankGuard = EditorView.updateListener.of(() => {
-});
+var listTodoAutoComplete = Prec.highest(todoAutoCompleteHandler);
 
 // packages/ui/js/editor.js
 var SELECTION_BG = "var(--editor-selection-bg, color-mix(in srgb, var(--editor-fg, #000) 25%, var(--editor-bg, #fff)))";
 var SELECTION_FG = "var(--editor-selection-fg, var(--editor-fg, #000))";
+var CUSTOM_DEFAULT_KEYMAP = defaultKeymap.filter((binding) => binding.key !== "Mod-b" && binding.key !== "Mod-i");
 function hasPointerUserEvent(update) {
   if (!update || !Array.isArray(update.transactions)) return false;
   return update.transactions.some((tr) => {
@@ -26602,6 +26553,97 @@ var todoPlugin = [
     }
   })
 ];
+function collectEmphasisMarkers(text) {
+  const markers = [];
+  const len = text.length;
+  let i = 0;
+  while (i < len) {
+    if (text[i] !== "*") {
+      i++;
+      continue;
+    }
+    let markerLen = 1;
+    if (text.startsWith("***", i)) markerLen = 3;
+    else if (i + 1 < len && text[i + 1] === "*") markerLen = 2;
+    const marker = markerLen === 3 ? "***" : markerLen === 2 ? "**" : "*";
+    const nextChar = text[i + markerLen] || "";
+    const isLineStart = /^\s*$/.test(text.slice(0, i));
+    if (markerLen === 1 && isLineStart && nextChar === " ") {
+      i += markerLen;
+      continue;
+    }
+    if (!nextChar || !nextChar.trim()) {
+      i += markerLen;
+      continue;
+    }
+    let searchFrom = i + markerLen;
+    let closingIndex = -1;
+    while (true) {
+      const idx = text.indexOf(marker, searchFrom);
+      if (idx === -1) break;
+      if (idx === i + markerLen) {
+        searchFrom = idx + markerLen;
+        continue;
+      }
+      const beforeClose = text[idx - 1];
+      if (!beforeClose || !beforeClose.trim()) {
+        searchFrom = idx + markerLen;
+        continue;
+      }
+      closingIndex = idx;
+      break;
+    }
+    if (closingIndex !== -1) {
+      markers.push({ from: i, to: i + markerLen });
+      markers.push({ from: closingIndex, to: closingIndex + markerLen });
+      i = closingIndex + markerLen;
+    } else {
+      i += markerLen;
+    }
+  }
+  return markers;
+}
+var markdownIndicatorPlugin = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.decorations = this.build(view);
+  }
+  update(update) {
+    if (update.docChanged || update.viewportChanged)
+      this.decorations = this.build(update.view);
+  }
+  build(view) {
+    const builder = new RangeSetBuilder();
+    for (const { from, to } of view.visibleRanges) {
+      let pos = from;
+      while (pos <= to) {
+        const line = view.state.doc.lineAt(pos);
+        this.decorateLine(line, builder);
+        pos = line.to + 1;
+        if (line.to >= to) break;
+      }
+    }
+    return builder.finish();
+  }
+  decorateLine(line, builder) {
+    const text = line.text;
+    const headingMatch = text.match(/^\s*(#{1,6})\s+/);
+    if (headingMatch) {
+      const prefix = headingMatch[1];
+      const offset = text.indexOf(prefix);
+      for (let i = 0; i < prefix.length; i++) {
+        builder.add(line.from + offset + i, line.from + offset + i + 1, Decoration.mark({ class: "cm-md-indicator" }));
+      }
+    }
+    if (text.includes("*")) {
+      const markers = collectEmphasisMarkers(text);
+      markers.forEach(({ from, to }) => {
+        builder.add(line.from + from, line.from + to, Decoration.mark({ class: "cm-md-indicator" }));
+      });
+    }
+  }
+}, {
+  decorations: (v) => v.decorations
+});
 function startEditor(shell2, opts = {}) {
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent || "");
   const mode = opts.mode === "template" ? "template" : "entry";
@@ -26716,6 +26758,53 @@ function startEditor(shell2, opts = {}) {
       unsaved = false;
     }
     cancelAutosaveTimer();
+  }
+  function createMarkerCommand(marker) {
+    const length = marker.length;
+    return (view) => {
+      const spec = view.state.changeByRange((range) => {
+        if (range.empty) {
+          return {
+            changes: { from: range.from, to: range.to, insert: marker },
+            range: EditorSelection.cursor(range.from + length)
+          };
+        }
+        const doc2 = view.state.doc;
+        const before = range.from >= length ? doc2.sliceString(range.from - length, range.from) : "";
+        const after = doc2.sliceString(range.to, range.to + length);
+        const selected = doc2.sliceString(range.from, range.to);
+        if (before === marker && after === marker) {
+          return {
+            changes: [
+              { from: range.to, to: range.to + length, insert: "" },
+              { from: range.from - length, to: range.from, insert: "" }
+            ],
+            range: EditorSelection.range(range.from - length, range.to - length)
+          };
+        }
+        if (selected.length >= length * 2 && selected.startsWith(marker) && selected.endsWith(marker)) {
+          return {
+            changes: [
+              { from: range.to - length, to: range.to, insert: "" },
+              { from: range.from, to: range.from + length, insert: "" }
+            ],
+            range: EditorSelection.range(range.from, range.to - length * 2)
+          };
+        }
+        return {
+          changes: [
+            { from: range.from, to: range.from, insert: marker },
+            { from: range.to, to: range.to, insert: marker }
+          ],
+          range: EditorSelection.range(range.from + length, range.to + length)
+        };
+      });
+      view.dispatch(view.state.update(spec, {
+        scrollIntoView: true,
+        userEvent: "input"
+      }));
+      return true;
+    };
   }
   function cancelAutosaveTimer() {
     if (autosaveTimer) {
@@ -27123,6 +27212,8 @@ function startEditor(shell2, opts = {}) {
     });
   }
   function buildExtensions() {
+    const applyBold = createMarkerCommand("**");
+    const applyItalic = createMarkerCommand("*");
     const insertTodo = (view) => {
       const spec = view.state.changeByRange((range) => {
         const insertBase = "- [ ] ";
@@ -27171,25 +27262,26 @@ function startEditor(shell2, opts = {}) {
       unsavedTracker,
       history(),
       todoPlugin,
+      markdownIndicatorPlugin,
       listLayoutPlugin,
       listRenumberListener,
       listTodoAutoComplete,
-      listTodoLineFixer,
-      listTodoBlankGuard,
       indentConfig,
       createListKeymap(INDENT2),
       keymap.of([
-        ...defaultKeymap,
+        ...CUSTOM_DEFAULT_KEYMAP,
         ...historyKeymap,
         ...searchKeymap,
         { key: "Mod-f", preventDefault: true, run: openSearchPanel },
+        { key: "Mod-b", preventDefault: true, run: applyBold },
+        { key: "Mod-i", preventDefault: true, run: applyItalic },
         { key: "Enter", run: findNext },
         { key: "Shift-Enter", run: findPrevious }
       ]),
       search({ top: true }),
       saveExitKeymap,
       indentOnInput(),
-      markdown(),
+      markdown({ addKeymap: false }),
       syntaxHighlighting(retroHighlight2),
       EditorView.lineWrapping
     ];
@@ -27920,10 +28012,11 @@ var FOLDER_ACTIONS = {
   OPEN: "open",
   DUPLICATE: "duplicate",
   DELETE: "delete",
-  RENAME: "rename"
+  RENAME: "rename",
+  NEW_CHILD: "new-child"
 };
 var INDENT = "  ";
-var CUSTOM_DEFAULT_KEYMAP = defaultKeymap.filter((binding) => binding.key !== "Mod-b" && binding.key !== "Mod-i");
+var CUSTOM_DEFAULT_KEYMAP2 = defaultKeymap.filter((binding) => binding.key !== "Mod-b" && binding.key !== "Mod-i");
 function hasPointerUserEvent2(update) {
   if (!update || !Array.isArray(update.transactions)) return false;
   return update.transactions.some((tr) => {
@@ -28026,7 +28119,7 @@ var todoPlugin2 = [
     }
   })
 ];
-function collectEmphasisMarkers(text) {
+function collectEmphasisMarkers2(text) {
   const markers = [];
   const len = text.length;
   let i = 0;
@@ -28036,8 +28129,9 @@ function collectEmphasisMarkers(text) {
       continue;
     }
     let markerLen = 1;
-    if (i + 1 < len && text[i + 1] === "*") markerLen = 2;
-    const marker = markerLen === 2 ? "**" : "*";
+    if (text.startsWith("***", i)) markerLen = 3;
+    else if (i + 1 < len && text[i + 1] === "*") markerLen = 2;
+    const marker = markerLen === 3 ? "***" : markerLen === 2 ? "**" : "*";
     const nextChar = text[i + markerLen] || "";
     const isAtLineStart = /^\s*$/.test(text.slice(0, i));
     if (markerLen === 1 && isAtLineStart && nextChar === " ") {
@@ -28075,7 +28169,7 @@ function collectEmphasisMarkers(text) {
   }
   return markers;
 }
-var markdownIndicatorPlugin = ViewPlugin.fromClass(class {
+var markdownIndicatorPlugin2 = ViewPlugin.fromClass(class {
   constructor(view) {
     this.decorations = this.build(view);
   }
@@ -28107,7 +28201,7 @@ var markdownIndicatorPlugin = ViewPlugin.fromClass(class {
       }
     }
     if (text.includes("*")) {
-      const markers = collectEmphasisMarkers(text);
+      const markers = collectEmphasisMarkers2(text);
       markers.forEach(({ from, to }) => {
         builder.add(line.from + from, line.from + to, Decoration.mark({ class: "cm-md-indicator" }));
       });
@@ -28457,6 +28551,8 @@ function startWriter(shell2, opts = {}) {
     listEl: null,
     fileContextMenuEl: null,
     folderContextMenuEl: null,
+    folderAreaContextMenuEl: null,
+    fileAreaContextMenuEl: null,
     toggleBtn: null,
     titleHelpEl: null,
     wordCountEl: null,
@@ -28780,18 +28876,39 @@ function startWriter(shell2, opts = {}) {
     const menu = document.createElement("div");
     menu.className = "writer-context-menu";
     menu.innerHTML = `
-            <button data-action="${FOLDER_ACTIONS.OPEN}">Open</button>
-            <button data-action="${FOLDER_ACTIONS.RENAME}">Rename</button>
-            <button data-action="${FOLDER_ACTIONS.DUPLICATE}">Duplicate</button>
-            <button data-action="${FOLDER_ACTIONS.DELETE}" class="danger">Delete</button>
-        `;
+        <button data-action="${FOLDER_ACTIONS.OPEN}">Open</button>
+        <button data-action="${FOLDER_ACTIONS.NEW_CHILD}">New folder</button>
+        <button data-action="${FOLDER_ACTIONS.RENAME}">Rename</button>
+        <button data-action="${FOLDER_ACTIONS.DUPLICATE}">Duplicate</button>
+        <button data-action="${FOLDER_ACTIONS.DELETE}" class="danger">Delete</button>
+    `;
     document.body.appendChild(menu);
     state2.folderContextMenuEl = menu;
+    return menu;
+  }
+  function ensureFolderAreaContextMenu() {
+    if (state2.folderAreaContextMenuEl) return state2.folderAreaContextMenuEl;
+    const menu = document.createElement("div");
+    menu.className = "writer-context-menu";
+    menu.innerHTML = `<button data-action="new-folder">New folder</button>`;
+    document.body.appendChild(menu);
+    state2.folderAreaContextMenuEl = menu;
+    return menu;
+  }
+  function ensureFileAreaContextMenu() {
+    if (state2.fileAreaContextMenuEl) return state2.fileAreaContextMenuEl;
+    const menu = document.createElement("div");
+    menu.className = "writer-context-menu";
+    menu.innerHTML = `<button data-action="new-file">New document</button>`;
+    document.body.appendChild(menu);
+    state2.fileAreaContextMenuEl = menu;
     return menu;
   }
   function closeContextMenu() {
     if (state2.fileContextMenuEl) state2.fileContextMenuEl.classList.remove("visible");
     if (state2.folderContextMenuEl) state2.folderContextMenuEl.classList.remove("visible");
+    if (state2.folderAreaContextMenuEl) state2.folderAreaContextMenuEl.classList.remove("visible");
+    if (state2.fileAreaContextMenuEl) state2.fileAreaContextMenuEl.classList.remove("visible");
   }
   function markDirty() {
     if (state2.dirty) return;
@@ -28981,15 +29098,14 @@ function startWriter(shell2, opts = {}) {
       wordCountTracker,
       history(),
       todoPlugin2,
-      markdownIndicatorPlugin,
+      markdownIndicatorPlugin2,
       listLayoutPlugin,
       listRenumberListener,
       listTodoAutoComplete,
-      listTodoLineFixer,
       indentUnit.of(INDENT),
       createListKeymap(INDENT),
       keymap.of([
-        ...CUSTOM_DEFAULT_KEYMAP,
+        ...CUSTOM_DEFAULT_KEYMAP2,
         ...historyKeymap,
         ...searchKeymap,
         { key: "Mod-f", preventDefault: true, run: openSearchPanel },
@@ -28999,7 +29115,7 @@ function startWriter(shell2, opts = {}) {
       search({ top: true }),
       saveExitKeymap,
       indentOnInput(),
-      markdown(),
+      markdown({ addKeymap: false }),
       syntaxHighlighting(retroHighlight),
       EditorView.lineWrapping
     ];
@@ -29116,6 +29232,10 @@ function startWriter(shell2, opts = {}) {
     state2.folderListEl = navigation.querySelector(".writer-folder-tree");
     state2.listEl = navigation.querySelector(".writer-file-list");
     state2.fileHeaderLabel = navigation.querySelector(".writer-files-title");
+    const folderBody = navigation.querySelector(".writer-folders-body");
+    const fileBody = navigation.querySelector(".writer-files-body");
+    if (folderBody) folderBody.addEventListener("contextmenu", onFolderAreaContextMenu);
+    if (fileBody) fileBody.addEventListener("contextmenu", onFileAreaContextMenu);
     bindFolderDnDHandlers();
     bindFileDnDHandlers();
     const createBtn = navigation.querySelector(".writer-create");
@@ -29125,8 +29245,7 @@ function startWriter(shell2, opts = {}) {
     const folderCreateBtn = navigation.querySelector(".writer-folder-create");
     if (folderCreateBtn) {
       folderCreateBtn.addEventListener("click", () => {
-        const parent = state2.selectedFolderId === "all" ? null : state2.selectedFolderId;
-        createFolder(parent);
+        createFolder(null, { forceRoot: true });
       });
     }
     if (state2.folderListEl) {
@@ -29488,7 +29607,12 @@ function startWriter(shell2, opts = {}) {
     const isInbox = isInboxFolder(folderId);
     menu.querySelectorAll("button").forEach((btn) => {
       const action = btn.dataset.action;
-      const allowed = !isInbox || action === FOLDER_ACTIONS.OPEN;
+      let allowed = true;
+      if (isInbox) {
+        allowed = action === FOLDER_ACTIONS.OPEN;
+      } else if (action === FOLDER_ACTIONS.NEW_CHILD && isInbox) {
+        allowed = false;
+      }
       btn.style.display = allowed ? "" : "none";
       btn.disabled = !allowed;
       btn.onclick = () => {
@@ -29496,6 +29620,23 @@ function startWriter(shell2, opts = {}) {
         closeContextMenu();
       };
     });
+  }
+  function onFolderAreaContextMenu(e) {
+    if (e.target.closest(".writer-folder-item")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    closeContextMenu();
+    const menu = ensureFolderAreaContextMenu();
+    menu.style.left = `${e.clientX}px`;
+    menu.style.top = `${e.clientY}px`;
+    menu.classList.add("visible");
+    const btn = menu.querySelector('button[data-action="new-folder"]');
+    if (btn) {
+      btn.onclick = () => {
+        closeContextMenu();
+        createFolder(null, { forceRoot: true });
+      };
+    }
   }
   async function handleFolderContextAction(action, id2) {
     if (isInboxFolder(id2) && action !== FOLDER_ACTIONS.OPEN) {
@@ -29505,6 +29646,9 @@ function startWriter(shell2, opts = {}) {
     switch (action) {
       case FOLDER_ACTIONS.OPEN:
         setSelectedFolder(id2);
+        break;
+      case FOLDER_ACTIONS.NEW_CHILD:
+        await createFolder(id2);
         break;
       case FOLDER_ACTIONS.RENAME:
         await renameFolder(id2);
@@ -29519,9 +29663,9 @@ function startWriter(shell2, opts = {}) {
         break;
     }
   }
-  async function createFolder(parentId = null) {
+  async function createFolder(parentId = null, { forceRoot = false } = {}) {
     if (!writerAPI || typeof writerAPI.createFolder !== "function") return null;
-    const resolvedParent = parentId == null ? state2.selectedFolderId === "all" ? null : state2.selectedFolderId : parentId;
+    const resolvedParent = forceRoot ? null : parentId == null ? state2.selectedFolderId === "all" ? null : state2.selectedFolderId : parentId;
     if (resolvedParent != null && isInboxFolder(resolvedParent)) {
       showToast("Inbox cannot contain folders", "warn");
       return null;
@@ -30046,6 +30190,23 @@ function startWriter(shell2, opts = {}) {
         closeContextMenu();
       };
     });
+  }
+  function onFileAreaContextMenu(e) {
+    if (e.target.closest(".writer-file-item")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    closeContextMenu();
+    const menu = ensureFileAreaContextMenu();
+    menu.style.left = `${e.clientX}px`;
+    menu.style.top = `${e.clientY}px`;
+    menu.classList.add("visible");
+    const btn = menu.querySelector('button[data-action="new-file"]');
+    if (btn) {
+      btn.onclick = () => {
+        closeContextMenu();
+        createNewDocument();
+      };
+    }
   }
   async function handleContextAction(action, id2) {
     switch (action) {

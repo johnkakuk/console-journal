@@ -5,7 +5,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { indentUnit, indentOnInput, syntaxHighlighting, HighlightStyle } from '@codemirror/language';
 import { search, searchKeymap, openSearchPanel, findNext, findPrevious } from '@codemirror/search';
 import { tags as t } from '@lezer/highlight';
-import { listLayoutPlugin, createListKeymap, listRenumberListener, listTodoAutoComplete, listTodoLineFixer } from './listLayout.js';
+import { listLayoutPlugin, createListKeymap, listRenumberListener, listTodoAutoComplete } from './listLayout.js';
 
 const SELECTION_BG = 'var(--editor-selection-bg, color-mix(in srgb, var(--editor-fg, #000) 25%, var(--editor-bg, #fff)))';
 const SELECTION_FG = 'var(--editor-selection-fg, var(--editor-fg, #000))';
@@ -22,7 +22,8 @@ const FOLDER_ACTIONS = {
     OPEN: 'open',
     DUPLICATE: 'duplicate',
     DELETE: 'delete',
-    RENAME: 'rename'
+    RENAME: 'rename',
+    NEW_CHILD: 'new-child'
 };
 
 const INDENT = '  '; // two spaces per nesting level
@@ -161,8 +162,9 @@ function collectEmphasisMarkers(text) {
             continue;
         }
         let markerLen = 1;
-        if (i + 1 < len && text[i + 1] === '*') markerLen = 2;
-        const marker = markerLen === 2 ? '**' : '*';
+        if (text.startsWith('***', i)) markerLen = 3;
+        else if (i + 1 < len && text[i + 1] === '*') markerLen = 2;
+        const marker = markerLen === 3 ? '***' : markerLen === 2 ? '**' : '*';
         const nextChar = text[i + markerLen] || '';
 
         // Skip list bullets like "* " or "** "
@@ -597,6 +599,8 @@ export function startWriter(shell, opts = {}) {
         listEl: null,
         fileContextMenuEl: null,
         folderContextMenuEl: null,
+        folderAreaContextMenuEl: null,
+        fileAreaContextMenuEl: null,
         toggleBtn: null,
         titleHelpEl: null,
         wordCountEl: null,
@@ -936,24 +940,47 @@ export function startWriter(shell, opts = {}) {
         return menu;
     }
 
-    function ensureFolderContextMenu() {
-        if (state.folderContextMenuEl) return state.folderContextMenuEl;
-        const menu = document.createElement('div');
-        menu.className = 'writer-context-menu';
-        menu.innerHTML = `
-            <button data-action="${FOLDER_ACTIONS.OPEN}">Open</button>
-            <button data-action="${FOLDER_ACTIONS.RENAME}">Rename</button>
-            <button data-action="${FOLDER_ACTIONS.DUPLICATE}">Duplicate</button>
-            <button data-action="${FOLDER_ACTIONS.DELETE}" class="danger">Delete</button>
-        `;
+function ensureFolderContextMenu() {
+    if (state.folderContextMenuEl) return state.folderContextMenuEl;
+    const menu = document.createElement('div');
+    menu.className = 'writer-context-menu';
+    menu.innerHTML = `
+        <button data-action="${FOLDER_ACTIONS.OPEN}">Open</button>
+        <button data-action="${FOLDER_ACTIONS.NEW_CHILD}">New folder</button>
+        <button data-action="${FOLDER_ACTIONS.RENAME}">Rename</button>
+        <button data-action="${FOLDER_ACTIONS.DUPLICATE}">Duplicate</button>
+        <button data-action="${FOLDER_ACTIONS.DELETE}" class="danger">Delete</button>
+    `;
         document.body.appendChild(menu);
         state.folderContextMenuEl = menu;
+        return menu;
+    }
+
+    function ensureFolderAreaContextMenu() {
+        if (state.folderAreaContextMenuEl) return state.folderAreaContextMenuEl;
+        const menu = document.createElement('div');
+        menu.className = 'writer-context-menu';
+        menu.innerHTML = `<button data-action="new-folder">New folder</button>`;
+        document.body.appendChild(menu);
+        state.folderAreaContextMenuEl = menu;
+        return menu;
+    }
+
+    function ensureFileAreaContextMenu() {
+        if (state.fileAreaContextMenuEl) return state.fileAreaContextMenuEl;
+        const menu = document.createElement('div');
+        menu.className = 'writer-context-menu';
+        menu.innerHTML = `<button data-action="new-file">New document</button>`;
+        document.body.appendChild(menu);
+        state.fileAreaContextMenuEl = menu;
         return menu;
     }
 
     function closeContextMenu() {
         if (state.fileContextMenuEl) state.fileContextMenuEl.classList.remove('visible');
         if (state.folderContextMenuEl) state.folderContextMenuEl.classList.remove('visible');
+        if (state.folderAreaContextMenuEl) state.folderAreaContextMenuEl.classList.remove('visible');
+        if (state.fileAreaContextMenuEl) state.fileAreaContextMenuEl.classList.remove('visible');
     }
 
     function markDirty() {
@@ -1170,7 +1197,6 @@ export function startWriter(shell, opts = {}) {
             listLayoutPlugin,
             listRenumberListener,
             listTodoAutoComplete,
-            listTodoLineFixer,
             indentUnit.of(INDENT),
             createListKeymap(INDENT),
             keymap.of([
@@ -1184,7 +1210,7 @@ export function startWriter(shell, opts = {}) {
             search({ top: true }),
             saveExitKeymap,
             indentOnInput(),
-            markdown(),
+            markdown({ addKeymap: false }),
             syntaxHighlighting(retroHighlight),
             EditorView.lineWrapping,
         ];
@@ -1312,6 +1338,10 @@ export function startWriter(shell, opts = {}) {
         state.folderListEl = navigation.querySelector('.writer-folder-tree');
         state.listEl = navigation.querySelector('.writer-file-list');
         state.fileHeaderLabel = navigation.querySelector('.writer-files-title');
+        const folderBody = navigation.querySelector('.writer-folders-body');
+        const fileBody = navigation.querySelector('.writer-files-body');
+        if (folderBody) folderBody.addEventListener('contextmenu', onFolderAreaContextMenu);
+        if (fileBody) fileBody.addEventListener('contextmenu', onFileAreaContextMenu);
         bindFolderDnDHandlers();
         bindFileDnDHandlers();
         const createBtn = navigation.querySelector('.writer-create');
@@ -1322,8 +1352,7 @@ export function startWriter(shell, opts = {}) {
         const folderCreateBtn = navigation.querySelector('.writer-folder-create');
         if (folderCreateBtn) {
             folderCreateBtn.addEventListener('click', () => {
-                const parent = state.selectedFolderId === 'all' ? null : state.selectedFolderId;
-                createFolder(parent);
+                createFolder(null, { forceRoot: true });
             });
         }
 
@@ -1727,7 +1756,12 @@ export function startWriter(shell, opts = {}) {
         const isInbox = isInboxFolder(folderId);
         menu.querySelectorAll('button').forEach(btn => {
             const action = btn.dataset.action;
-            const allowed = !isInbox || action === FOLDER_ACTIONS.OPEN;
+            let allowed = true;
+            if (isInbox) {
+                allowed = action === FOLDER_ACTIONS.OPEN;
+            } else if (action === FOLDER_ACTIONS.NEW_CHILD && isInbox) {
+                allowed = false;
+            }
             btn.style.display = allowed ? '' : 'none';
             btn.disabled = !allowed;
             btn.onclick = () => {
@@ -1735,6 +1769,24 @@ export function startWriter(shell, opts = {}) {
                 closeContextMenu();
             };
         });
+    }
+
+    function onFolderAreaContextMenu(e) {
+        if (e.target.closest('.writer-folder-item')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        closeContextMenu();
+        const menu = ensureFolderAreaContextMenu();
+        menu.style.left = `${e.clientX}px`;
+        menu.style.top = `${e.clientY}px`;
+        menu.classList.add('visible');
+        const btn = menu.querySelector('button[data-action="new-folder"]');
+        if (btn) {
+            btn.onclick = () => {
+                closeContextMenu();
+                createFolder(null, { forceRoot: true });
+            };
+        }
     }
 
     async function handleFolderContextAction(action, id) {
@@ -1745,6 +1797,9 @@ export function startWriter(shell, opts = {}) {
         switch (action) {
             case FOLDER_ACTIONS.OPEN:
                 setSelectedFolder(id);
+                break;
+            case FOLDER_ACTIONS.NEW_CHILD:
+                await createFolder(id);
                 break;
             case FOLDER_ACTIONS.RENAME:
                 await renameFolder(id);
@@ -1760,11 +1815,13 @@ export function startWriter(shell, opts = {}) {
         }
     }
 
-    async function createFolder(parentId = null) {
+    async function createFolder(parentId = null, { forceRoot = false } = {}) {
         if (!writerAPI || typeof writerAPI.createFolder !== 'function') return null;
-        const resolvedParent = parentId == null
-            ? (state.selectedFolderId === 'all' ? null : state.selectedFolderId)
-            : parentId;
+        const resolvedParent = forceRoot
+            ? null
+            : (parentId == null
+                ? (state.selectedFolderId === 'all' ? null : state.selectedFolderId)
+                : parentId);
         if (resolvedParent != null && isInboxFolder(resolvedParent)) {
             showToast('Inbox cannot contain folders', 'warn');
             return null;
@@ -2320,6 +2377,24 @@ export function startWriter(shell, opts = {}) {
                 closeContextMenu();
             };
         });
+    }
+
+    function onFileAreaContextMenu(e) {
+        if (e.target.closest('.writer-file-item')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        closeContextMenu();
+        const menu = ensureFileAreaContextMenu();
+        menu.style.left = `${e.clientX}px`;
+        menu.style.top = `${e.clientY}px`;
+        menu.classList.add('visible');
+        const btn = menu.querySelector('button[data-action="new-file"]');
+        if (btn) {
+            btn.onclick = () => {
+                closeContextMenu();
+                createNewDocument();
+            };
+        }
     }
 
     async function handleContextAction(action, id) {
