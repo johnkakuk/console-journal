@@ -7,7 +7,10 @@ import { indentOnInput, indentUnit, syntaxHighlighting, HighlightStyle } from '@
 import { tags as t } from '@lezer/highlight';
 import { search, searchKeymap, openSearchPanel, findNext, findPrevious } from '@codemirror/search';
 import { normalizeTemplateSchedule, cloneTemplateSchedule, isISODate } from './schedule.js';
-import { listLayoutPlugin, createListKeymap, listRenumberListener, listTodoAutoComplete } from './listLayout.js';
+import { listLayoutPlugin, createListKeymap, listRenumberListener, listTodoAutoComplete, listTodoLineFixer, listTodoBlankGuard } from './listLayout.js';
+
+const SELECTION_BG = 'var(--editor-selection-bg, color-mix(in srgb, var(--editor-fg, #000) 25%, var(--editor-bg, #fff)))';
+const SELECTION_FG = 'var(--editor-selection-fg, var(--editor-fg, #000))';
 
 function hasPointerUserEvent(update) {
     if (!update || !Array.isArray(update.transactions)) return false;
@@ -249,6 +252,10 @@ export function startEditor(shell, opts = {}) {
     let cmView = null;
     // Tracks the exact text at the last save so we can clear the '*' when undoing back to saved state
     let savedSnapshot = '';
+    let autosaveEnabled = !isTemplate && !!opts.autosave;
+    let autosaveTimer = null;
+    const AUTOSAVE_DELAY = 1500;
+    let autosaveInFlight = false;
 
     // Snapshot of console DOM we will restore on exit
     let domSnapshot = null;
@@ -259,6 +266,7 @@ export function startEditor(shell, opts = {}) {
     const titleEl = document.querySelector('.title');
     const originalTitle = titleEl ? titleEl.textContent : null;
     const originalTitleDisplay = titleEl ? titleEl.style.display : null;
+    let paneEl = null;
 
     // Save current console UI and mount writer UI
     function mountEditorDom() {
@@ -311,6 +319,7 @@ export function startEditor(shell, opts = {}) {
         pane.style.position = 'relative';
         pane.style.flex = '1';
         pane.style.width = '100%';
+        paneEl = pane;
 
         // Status bar
         const status = document.createElement('div');
@@ -367,6 +376,51 @@ export function startEditor(shell, opts = {}) {
             bannerEl.textContent = bannerEl.textContent.replace(/\s*\*$/, '');
             unsaved = false;
         }
+        cancelAutosaveTimer();
+    }
+
+    function cancelAutosaveTimer() {
+        if (autosaveTimer) {
+            clearTimeout(autosaveTimer);
+            autosaveTimer = null;
+        }
+    }
+
+    function scheduleAutosave(immediate = false) {
+        if (!autosaveEnabled || isTemplate || !state.dirty || !cmView) return;
+        cancelAutosaveTimer();
+        const delay = immediate ? 0 : AUTOSAVE_DELAY;
+        autosaveTimer = setTimeout(async () => {
+            autosaveTimer = null;
+            if (!autosaveEnabled || isTemplate || !state.dirty || !cmView) return;
+            if (autosaveInFlight) {
+                scheduleAutosave();
+                return;
+            }
+            autosaveInFlight = true;
+            try {
+                const ok = await save({ silent: true });
+                if (!ok && autosaveEnabled && state.dirty) {
+                    scheduleAutosave();
+                }
+            } finally {
+                autosaveInFlight = false;
+                if (autosaveEnabled && state.dirty && !autosaveTimer) {
+                    scheduleAutosave();
+                }
+            }
+        }, delay);
+    }
+
+    function setAutosaveEnabled(enabled) {
+        const next = !isTemplate && !!enabled;
+        if (autosaveEnabled === next) return;
+        autosaveEnabled = next;
+        if (!autosaveEnabled) {
+            cancelAutosaveTimer();
+        } else if (state.dirty) {
+            scheduleAutosave();
+        }
     }
 
     // Move the cursor to the end of the document and scroll into view
@@ -393,6 +447,7 @@ export function startEditor(shell, opts = {}) {
         if (inputWrapEl) inputWrapEl.style.display = domSnapshot ? domSnapshot.inputDisplay : '';
         if (caretEl) caretEl.style.display = domSnapshot ? domSnapshot.caretDisplay : '';
         if (screenEl) screenEl.style.padding = domSnapshot ? domSnapshot.screenPadding : '';
+        paneEl = null;
     }
 
     // --- Helpers --------------------------------------------------------------
@@ -439,7 +494,14 @@ export function startEditor(shell, opts = {}) {
         '.cm-activeLine': { backgroundColor: 'transparent' }, // current: single-row overlay handles highlight
         // To restore paragraph-wide highlight instead, uncomment this and remove the overlay plugin in buildExtensions():
         // '.cm-activeLine': { backgroundColor: 'var(--editor-active-line-bg)' },
-        '.cm-selectionBackground, ::selection': { backgroundColor: 'var(--editor-selection-bg)' },
+        '.cm-selectionBackground, ::selection': {
+            backgroundColor: SELECTION_BG,
+            color: SELECTION_FG
+        },
+        '.cm-selectionLayer .cm-selectionBackground': { backgroundColor: `${SELECTION_BG} !important` },
+        '.cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': {
+            backgroundColor: `${SELECTION_BG} !important`
+        },
         '.cm-lineNumbers': { color: 'color-mix(in srgb, var(--text) 55%, transparent)' },
         '.cm-gutters': { backgroundColor: 'var(--editor-gutter-bg)', borderRight: '1px solid var(--border, rgba(255,255,255,0.1))' },
         '.cm-panels': { backgroundColor: 'var(--editor-panel-bg)' },
@@ -494,12 +556,9 @@ export function startEditor(shell, opts = {}) {
             lineHeight: '1.5',
             wordBreak: 'break-word'
         },
-        '.cm-line.cm-list-line[data-list-empty="true"]::after': {
-            content: '""',
-            display: 'block',
-            gridColumn: '3',
+        '.cm-line.cm-list-line .cm-list-content[data-list-empty="true"]': {
             minHeight: '1.2em',
-            pointerEvents: 'none'
+            display: 'block'
         }
     }, { dark: true });
 
@@ -702,6 +761,9 @@ export function startEditor(shell, opts = {}) {
         } else {
             if (!unsaved) markUnsaved();
             state.dirty = true;
+            if (autosaveEnabled) {
+                scheduleAutosave();
+            }
         }
     });
 
@@ -748,10 +810,18 @@ export function startEditor(shell, opts = {}) {
     function buildExtensions() {
         const insertTodo = (view) => {
             const spec = view.state.changeByRange(range => {
-                const insertText = '- [ ] ';
+                const insertBase = '- [ ] ';
+                let insertText = insertBase;
+                if (range.empty) {
+                    const line = view.state.doc.lineAt(range.from);
+                    const remainder = view.state.doc.sliceString(range.from, line.to);
+                    if (remainder.trim().length) {
+                        insertText += '\n';
+                    }
+                }
                 return {
                     changes: { from: range.from, to: range.to, insert: insertText },
-                    range: EditorSelection.cursor(range.from + insertText.length)
+                    range: EditorSelection.cursor(range.from + insertBase.length)
                 };
             });
             view.dispatch(view.state.update(spec, {
@@ -787,6 +857,8 @@ export function startEditor(shell, opts = {}) {
             listLayoutPlugin,
             listRenumberListener,
             listTodoAutoComplete,
+            listTodoLineFixer,
+            listTodoBlankGuard,
             indentConfig,
             createListKeymap(INDENT),
             keymap.of([
@@ -822,7 +894,8 @@ export function startEditor(shell, opts = {}) {
         } catch (_) {}
     }
 
-    async function save() {
+    async function save(options = {}) {
+        const { silent = false } = options;
         if (!cmView) return;
         if (isTemplate) {
             promptTemplateSave();
@@ -844,11 +917,12 @@ export function startEditor(shell, opts = {}) {
             } else {
                 info(`Save failed: ${msg}`);
             }
-            return;
+            return false;
         }
         clearUnsaved();
-        showToast('Saved');
+        if (!silent) showToast('Saved');
         state.dirty = false;
+        return true;
     }
 
     function showTemplateSavedToast() {
@@ -1421,6 +1495,16 @@ export function startEditor(shell, opts = {}) {
 
     function requestExit() {
         if (state.dirty || unsaved) {
+            if (autosaveEnabled && !isTemplate) {
+                save({ silent: true }).then((ok) => {
+                    if (!ok) {
+                        showToast('Save failed', 'writerToast');
+                        return;
+                    }
+                    performExit();
+                });
+                return;
+            }
             showConfirmModal('Exit without saving?', () => performExit(), () => {/* cancelled */});
             return;
         }
@@ -1432,6 +1516,7 @@ export function startEditor(shell, opts = {}) {
     }
 
     function performExit() {
+        cancelAutosaveTimer();
         // Cleanup listeners, restore prompt/title, and return to shell
         window.removeEventListener('keydown', onHotkey, true);
         if (titleEl) {
@@ -1491,13 +1576,25 @@ export function startEditor(shell, opts = {}) {
     mountEditorDom();
 
     // Mount CodeMirror editor into our pane
-    const paneEl = document.getElementById('writerPane');
+    if (!paneEl) {
+        shell.print('<div class="error">Unable to mount editor UI.</div>');
+        restoreEditorDom();
+        shell.resetPrompt();
+        return null;
+    }
     const startDoc = state.buffer.join('\n');
     savedSnapshot = startDoc;
-    cmView = new EditorView({
-        state: EditorState.create({ doc: startDoc, extensions: buildExtensions() }),
-        parent: paneEl
-    });
+    try {
+        cmView = new EditorView({
+            state: EditorState.create({ doc: startDoc, extensions: buildExtensions() }),
+            parent: paneEl
+        });
+    } catch (err) {
+        restoreEditorDom();
+        shell.resetPrompt();
+        shell.print(`<div class="error">Unable to open editor: ${shell.esc(err?.message || err)}</div>`);
+        return null;
+    }
     cmView.focus();
     // Move cursor to end and scroll to bottom when opening a file
     const docLen = cmView.state.doc.length;
@@ -1536,6 +1633,12 @@ export function startEditor(shell, opts = {}) {
             // Shell Enter is ignored; the textarea owns input.
             // We still mark dirty to reflect that something happened.
             state.dirty = true;
+        },
+        setAutosave(enabled) {
+            setAutosaveEnabled(enabled);
+        },
+        destroy() {
+            cancelAutosaveTimer();
         }
     };
 

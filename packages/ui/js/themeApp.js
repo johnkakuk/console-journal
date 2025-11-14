@@ -12,10 +12,13 @@ import {
 const VAR_GROUPS = [
     {
         title: 'COLORS',
-        // vars: ['--bg', '--panel', '--text', '--muted', '--info', '--warn', '--error', '--soft', '--accent', '--border']
-        vars: ['--bg', '--panel', '--text', '--muted', '--soft', '--accent', '--border']
+        vars: ['--bg', '--panel', '--text', '--muted', '--soft', '--accent', '--border', '--editor-selection-bg']
     }
 ];
+
+const COLOR_LABELS = {
+    '--editor-selection-bg': 'Highlight'
+};
 
 const FONT_OPTIONS_UI = [
     {
@@ -145,7 +148,7 @@ function createColorRow(name, value) {
     wrapper.className = 'theme-color';
     const label = document.createElement('div');
     label.className = 'theme-color-label';
-    label.textContent = name.replace(/^--/, '');
+    label.textContent = COLOR_LABELS[name] || name.replace(/^--/, '');
     const swatch = document.createElement('button');
     swatch.className = 'theme-color-swatch';
     const colorInput = document.createElement('input');
