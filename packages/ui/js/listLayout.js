@@ -8,9 +8,7 @@ const UNORDERED_LIST_RE = /^(\s*)([-+*])(\s+)(.*)$/;
 const LIST_GAP_CH = 0.5;
 const TODO_AUTOCOMPLETE_PREFIX_RE = /^\s*[-*]\s+$/;
 const TODO_AUTOCOMPLETE_SUFFIX_RE = /^\s*\]/;
-const TODO_BRACKET_LINE_RE = /^\s*\[/;
 const todoAutoCompleteAnnotation = Annotation.define();
-const todoLineFixAnnotation = Annotation.define();
 
 function countLeadingSpaces(text) {
     const match = text.match(/^\s*/);
@@ -482,24 +480,6 @@ const todoAutoCompleteHandler = EditorView.inputHandler.of((view, from, to, text
         return true;
     }
 
-    if (from === line.from && line.number > 1 && TODO_BRACKET_LINE_RE.test(line.text)) {
-        const prev = state.doc.line(line.number - 1);
-        if (TODO_AUTOCOMPLETE_PREFIX_RE.test(prev.text)) {
-            const leadingSpaces = (line.text.match(/^\s*/) || [''])[0].length;
-            const joinFrom = prev.to;
-            const joinTo = line.from + leadingSpaces;
-            const spacing = prev.text.endsWith(' ') ? '' : ' ';
-            const insertText = spacing + '[ ] ';
-            view.dispatch({
-                changes: { from: joinFrom, to: joinTo, insert: insertText },
-                selection: EditorSelection.cursor(joinFrom + insertText.length),
-                annotations: todoAutoCompleteAnnotation.of(true),
-                scrollIntoView: false
-            });
-            return true;
-        }
-    }
-
     return false;
 });
 
@@ -528,39 +508,4 @@ export const listRenumberListener = EditorView.updateListener.of((update) => {
     });
 });
 
-const todoLineFixer = EditorView.updateListener.of((update) => {
-    if (!update.docChanged) return;
-    if (update.transactions.some(tr => tr.annotation(todoAutoCompleteAnnotation) || tr.annotation(todoLineFixAnnotation))) return;
-
-    const { state, view } = update;
-    const main = state.selection.main;
-    if (!main.empty) return;
-    const line = state.doc.lineAt(main.head);
-    if (line.number <= 1) return;
-    if (!TODO_BRACKET_LINE_RE.test(line.text)) return;
-    const prev = state.doc.line(line.number - 1);
-    if (!TODO_AUTOCOMPLETE_PREFIX_RE.test(prev.text)) return;
-
-    const leadingSpaces = (line.text.match(/^\s*/) || [''])[0].length;
-    const rest = line.text.slice(leadingSpaces);
-    if (!rest.startsWith('[')) return;
-    const remainder = rest.slice(1); // keep anything typed after '['
-    const trailing = state.doc.sliceString(line.to, line.to + 1) === '\n' ? '\n' : '\n';
-
-    const from = prev.to;
-    const to = line.to;
-    const needsSpace = prev.text.endsWith(' ') ? '' : ' ';
-    const insert = `${needsSpace}[ ] ${remainder}${trailing}`;
-    const caret = from + needsSpace.length + 4; // account for " [ ] "
-
-    view.dispatch({
-        changes: { from, to, insert },
-        selection: EditorSelection.cursor(caret),
-        scrollIntoView: false,
-        annotations: todoLineFixAnnotation.of(true)
-    });
-});
-
-export const listTodoAutoComplete = todoAutoCompleteHandler;
-export const listTodoLineFixer = todoLineFixer;
-export const listTodoBlankGuard = EditorView.updateListener.of(() => {});
+export const listTodoAutoComplete = Prec.highest(todoAutoCompleteHandler);
