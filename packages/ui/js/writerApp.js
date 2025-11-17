@@ -253,7 +253,7 @@ const retroTheme = EditorView.theme({
     '&': { backgroundColor: 'var(--editor-bg)', color: 'var(--editor-fg)', height: '100%' },
     '.cm-content': {
         caretColor: 'var(--editor-caret)',
-        fontFamily: 'var(--font-editor, var(--font-mono))',
+        fontFamily: 'var(--font-writer, var(--font-editor, var(--font-mono)))',
         fontSize: 'var(--editor-font-size)',
         lineHeight: 'var(--editor-line-height)'
     },
@@ -277,7 +277,8 @@ const retroTheme = EditorView.theme({
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        minWidth: '2ch',
+        minWidth: 'calc(var(--editor-line-height, 1.5) * 0.9em)',
+        minHeight: 'calc(var(--editor-line-height, 1.5) * 0.9em)',
         cursor: 'pointer',
         background: 'transparent',
         zIndex: 2,
@@ -297,7 +298,7 @@ const retroTheme = EditorView.theme({
         display: 'grid',
         gridTemplateColumns: 'calc(var(--list-indent-ch, 0) * 1ch) calc(var(--list-marker-ch, 2) * 1ch) minmax(0, 1fr)',
         columnGap: 'calc(var(--list-gap-ch, 0.5) * 1ch)',
-        alignItems: 'start'
+        alignItems: 'center'
     },
     '.cm-line.cm-list-line .cm-list-indent': {
         gridColumn: '1',
@@ -306,8 +307,9 @@ const retroTheme = EditorView.theme({
     },
     '.cm-line.cm-list-line .cm-list-marker': {
         gridColumn: '2',
-        display: 'block',
-        justifySelf: 'end',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
         whiteSpace: 'pre',
         textAlign: 'right',
         fontVariantNumeric: 'tabular-nums lining-nums',
@@ -319,7 +321,7 @@ const retroTheme = EditorView.theme({
         gridColumn: '3',
         minWidth: 0,
         whiteSpace: 'pre-wrap',
-        lineHeight: '1.5',
+        lineHeight: 'var(--editor-line-height, 1.5)',
         wordBreak: 'break-word'
     },
     '.cm-line.cm-list-line .cm-list-content[data-list-empty="true"]': {
@@ -347,7 +349,6 @@ function getScrollContainer(view) {
     }
     return view.scrollDOM;
 }
-
 const snapOutOfView = EditorView.updateListener.of((update) => {
     if (!(update.docChanged || update.selectionSet)) return;
     if (hasPointerUserEvent(update)) return;
@@ -572,6 +573,12 @@ function showToast(message, variant = 'info', id = 'writerToast') {
 
 export function startWriter(shell, opts = {}) {
     const writerAPI = window?.db?.writer;
+    const STATUS_COLOR_OPTIONS = [
+        '#0c4390', '#5999f2', '#ff8b8b', '#ff6f69',
+        '#ffbb1b', '#ffd981', '#37bc22', '#9bf18e',
+        '#6731b1', '#a26ded', '#6c757d', '#4e4e4e'
+    ];
+    const statusesSupported = !!(writerAPI && typeof writerAPI.listStatuses === 'function');
     if (!writerAPI || typeof writerAPI.list !== 'function') {
         shell.print('<div class="error">Writer is unavailable in this environment.</div>');
         return null;
@@ -627,8 +634,46 @@ export function startWriter(shell, opts = {}) {
         folderDragIntent: null,
         inboxFolderId: null,
         panelPreference: null,
-        expandedFolders: new Set()
+        expandedFolders: new Set(),
+        bootstrappedSelection: false,
+        statuses: [],
+        defaultStatusId: null,
+        statusesLoaded: false,
+        statusMenuEl: null,
+        statusMenuDocId: null,
+        statusMenuTrigger: null,
+        colorPickerEl: null,
+        draggingStatusId: null,
+        contextDismissHandlers: {},
+        scrollPositions: new Map(),
+        editorFocusHandler: null
     };
+
+    function rememberCurrentScrollPosition(docId = state.current?.id) {
+        if (!state.cmView) return;
+        const targetId = docId != null ? docId : null;
+        if (targetId == null) return;
+        const scroller = getScrollContainer(state.cmView);
+        if (!scroller) return;
+        const top = scroller.scrollTop;
+        if (!Number.isFinite(top)) return;
+        state.scrollPositions.set(targetId, top);
+    }
+
+    function getSavedScrollPosition(docId) {
+        if (docId == null) return 0;
+        if (!state.scrollPositions.has(docId)) return 0;
+        const value = state.scrollPositions.get(docId);
+        return Number.isFinite(value) ? Math.max(0, value) : 0;
+    }
+
+    function pruneScrollPositions() {
+        if (!(state.scrollPositions instanceof Map)) return;
+        const validIds = new Set(state.docs.map(doc => doc.id));
+        for (const key of state.scrollPositions.keys()) {
+            if (!validIds.has(key)) state.scrollPositions.delete(key);
+        }
+    }
 
     function computeWordCount(text) {
         if (!text) return 0;
@@ -655,11 +700,62 @@ export function startWriter(shell, opts = {}) {
 
     function normalizeDoc(doc) {
         if (!doc) return null;
+        const statusId = doc.status_id == null ? getDefaultStatusId() : doc.status_id;
         return {
             ...doc,
             folder_id: doc.folder_id == null ? null : doc.folder_id,
-            order_index: typeof doc.order_index === 'number' ? doc.order_index : 0
+            order_index: typeof doc.order_index === 'number' ? doc.order_index : 0,
+            status_id: statusId == null ? getDefaultStatusId() : statusId
         };
+    }
+
+    function sanitizeStatusColor(color) {
+        if (typeof color !== 'string') return 'transparent';
+        let value = color.trim();
+        if (/^transparent$/i.test(value)) return 'transparent';
+        if (/^#[0-9a-fA-F]{3}$/.test(value)) {
+            const r = value[1];
+            const g = value[2];
+            const b = value[3];
+            value = `#${r}${r}${g}${g}${b}${b}`;
+        }
+        if (/^#[0-9a-fA-F]{6}$/.test(value) || /^#[0-9a-fA-F]{8}$/.test(value)) {
+            return value.toLowerCase();
+        }
+        return 'transparent';
+    }
+
+    function normalizeStatus(status) {
+        if (!status || status.id == null) return null;
+        return {
+            id: status.id,
+            name: status.name || 'None',
+            color: sanitizeStatusColor(status.color || ''),
+            is_builtin: status.is_builtin === true || status.is_builtin === 1,
+            order_index: typeof status.order_index === 'number' ? status.order_index : 0
+        };
+    }
+
+    function getDefaultStatusId() {
+        if (state.defaultStatusId != null) return state.defaultStatusId;
+        const builtin = state.statuses.find(status => status.is_builtin);
+        if (builtin) {
+            state.defaultStatusId = builtin.id;
+            return builtin.id;
+        }
+        if (state.statuses.length) {
+            state.defaultStatusId = state.statuses[0].id;
+            return state.defaultStatusId;
+        }
+        return null;
+    }
+
+    function getStatusById(id) {
+        const numeric = Number(id);
+        const match = state.statuses.find(status => Number(status.id) === numeric);
+        if (match) return match;
+        const fallbackId = getDefaultStatusId();
+        return state.statuses.find(status => status.id === fallbackId) || null;
     }
 
     function normalizeFolder(folder) {
@@ -882,7 +978,7 @@ export function startWriter(shell, opts = {}) {
             state.titlebarInsertions.push(help);
 
             const wordCount = document.createElement('span');
-            wordCount.className = 'writer-word-count muted';
+            wordCount.className = 'writer-word-count';
             wordCount.textContent = '0 words';
             titlebar.appendChild(wordCount);
             state.wordCountEl = wordCount;
@@ -966,21 +1062,120 @@ function ensureFolderContextMenu() {
         return menu;
     }
 
-    function ensureFileAreaContextMenu() {
-        if (state.fileAreaContextMenuEl) return state.fileAreaContextMenuEl;
-        const menu = document.createElement('div');
-        menu.className = 'writer-context-menu';
+function ensureFileAreaContextMenu() {
+    if (state.fileAreaContextMenuEl) return state.fileAreaContextMenuEl;
+    const menu = document.createElement('div');
+    menu.className = 'writer-context-menu';
         menu.innerHTML = `<button data-action="new-file">New document</button>`;
         document.body.appendChild(menu);
         state.fileAreaContextMenuEl = menu;
         return menu;
     }
 
+    function positionContextMenu(menu, clientX, clientY) {
+        if (!menu) return;
+        const margin = 10;
+        const wasHidden = !menu.classList.contains('visible');
+        let prevDisplay = '';
+        let prevVisibility = '';
+        if (wasHidden) {
+            prevDisplay = menu.style.display;
+            prevVisibility = menu.style.visibility;
+            menu.style.display = 'flex';
+            menu.style.visibility = 'hidden';
+        }
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        const clampedX = Math.max(margin, Math.min(clientX, viewportWidth - margin));
+        const clampedY = Math.max(margin, clientY);
+        menu.style.transform = '';
+        menu.style.left = `${Math.round(clampedX)}px`;
+        menu.style.top = `${Math.round(clampedY)}px`;
+        let rect = menu.getBoundingClientRect();
+        if (rect.right + margin > viewportWidth) {
+            const newLeft = Math.max(margin, viewportWidth - (rect.width || 0) - margin);
+            menu.style.left = `${Math.round(newLeft)}px`;
+            rect = menu.getBoundingClientRect();
+        }
+        if (rect.bottom + margin > viewportHeight) {
+            const newTop = Math.max(margin, viewportHeight - (rect.height || 0) - margin);
+            menu.style.top = `${Math.round(newTop)}px`;
+        }
+        if (wasHidden) {
+            menu.style.display = prevDisplay || '';
+            menu.style.visibility = prevVisibility || '';
+        }
+    }
+
     function closeContextMenu() {
+        closeStandardContextMenus();
+        closeStatusMenu();
+    }
+
+    function closeStandardContextMenus() {
+        ['file', 'folder', 'folderArea', 'fileArea'].forEach(detachContextDismiss);
         if (state.fileContextMenuEl) state.fileContextMenuEl.classList.remove('visible');
         if (state.folderContextMenuEl) state.folderContextMenuEl.classList.remove('visible');
         if (state.folderAreaContextMenuEl) state.folderAreaContextMenuEl.classList.remove('visible');
         if (state.fileAreaContextMenuEl) state.fileAreaContextMenuEl.classList.remove('visible');
+    }
+
+    function attachContextDismiss(menu, key) {
+        if (!menu || !key) return;
+        detachContextDismiss(key);
+        const handler = (event) => {
+            const target = event.target;
+            if (target && menu.contains(target)) return;
+            detachContextDismiss(key);
+            menu.classList.remove('visible');
+        };
+        state.contextDismissHandlers[key] = handler;
+        setTimeout(() => {
+            if (state.contextDismissHandlers[key] === handler) {
+                document.addEventListener('click', handler, true);
+            }
+        }, 0);
+    }
+
+    function detachContextDismiss(key) {
+        if (!key) return;
+        const handler = state.contextDismissHandlers[key];
+        if (handler) {
+            document.removeEventListener('click', handler, true);
+            delete state.contextDismissHandlers[key];
+        }
+    }
+
+    function positionMenuNear(menu, triggerRect) {
+        if (!menu || !triggerRect) return;
+        let prevDisplay = '';
+        let prevVisibility = '';
+        const wasHidden = !menu.classList.contains('visible');
+        if (wasHidden) {
+            prevDisplay = menu.style.display;
+            prevVisibility = menu.style.visibility;
+            menu.style.display = 'flex';
+            menu.style.visibility = 'hidden';
+        }
+        const menuRect = menu.getBoundingClientRect();
+        const width = menuRect.width || menu.offsetWidth || 0;
+        const height = menuRect.height || menu.offsetHeight || 0;
+        const margin = 10;
+        let left = triggerRect.left;
+        let top = triggerRect.bottom;
+        if (left + width + margin > (window.innerWidth || 0)) {
+            left = Math.max(margin, (window.innerWidth || 0) - width - margin);
+        }
+        if (top + height + margin > (window.innerHeight || 0)) {
+            top = triggerRect.top - height;
+        }
+        if (top < margin) top = margin;
+        menu.style.left = `${Math.round(left)}px`;
+        menu.style.top = `${Math.round(top)}px`;
+        if (wasHidden) {
+            menu.style.display = prevDisplay || '';
+            menu.style.visibility = prevVisibility || '';
+        }
     }
 
     function markDirty() {
@@ -1217,7 +1412,9 @@ function ensureFolderContextMenu() {
     }
 
     function attachGlobalListeners() {
-        window.addEventListener('click', closeContextMenu, true);
+        window.addEventListener('click', handleGlobalClick, true);
+        window.addEventListener('pointerdown', handleStandardContextPointer, true);
+        window.addEventListener('pointerdown', handleGlobalStatusPointer, true);
         window.addEventListener('contextmenu', (e) => {
             const inFiles = state.listEl && state.listEl.contains(e.target);
             const inFolders = state.folderListEl && state.folderListEl.contains(e.target);
@@ -1230,7 +1427,9 @@ function ensureFolderContextMenu() {
     }
 
     function detachGlobalListeners() {
-        window.removeEventListener('click', closeContextMenu, true);
+        window.removeEventListener('click', handleGlobalClick, true);
+        window.removeEventListener('pointerdown', handleStandardContextPointer, true);
+        window.removeEventListener('pointerdown', handleGlobalStatusPointer, true);
         window.removeEventListener('keydown', onHotkey, true);
         window.removeEventListener('resize', handleResponsivePanels, { passive: true });
     }
@@ -1257,7 +1456,10 @@ function ensureFolderContextMenu() {
                 return;
             }
         }
-        if (e.key === 'Escape') closeContextMenu();
+        if (e.key === 'Escape') {
+            closeContextMenu();
+            closeStatusMenu();
+        }
     }
 
     function toggleNavigation() {
@@ -1362,6 +1564,7 @@ function ensureFolderContextMenu() {
         }
 
         if (state.listEl) {
+            state.listEl.addEventListener('click', onStatusTriggerClick);
             state.listEl.addEventListener('click', onFileClick);
             state.listEl.addEventListener('contextmenu', onFileContextMenu);
         }
@@ -1390,6 +1593,18 @@ function ensureFolderContextMenu() {
             state: EditorState.create({ doc: '', extensions: buildExtensions() }),
             parent: paneEl
         });
+        if (state.editorFocusHandler && state.cmView?.dom) {
+            try { state.cmView.dom.removeEventListener('focus', state.editorFocusHandler, true); } catch (_) {}
+        }
+        state.editorFocusHandler = () => {
+            if (!state.cmView) return;
+            const docLen = state.cmView.state.doc.length;
+            state.cmView.dispatch({
+                selection: { anchor: docLen, head: docLen },
+                scrollIntoView: true
+            });
+        };
+        state.cmView.dom.addEventListener('focus', state.editorFocusHandler, true);
         updateWordCountFromText('');
         INIT_SCROLL_SUPPRESS.add(state.cmView);
         state.savedSnapshot = '';
@@ -1409,9 +1624,17 @@ function ensureFolderContextMenu() {
             item.dataset.order = String(doc.order_index ?? 0);
             item.setAttribute('draggable', 'true');
             if (state.current && doc.id === state.current.id) item.classList.add('active');
+            const { label: statusLabel, color: statusColor } = getStatusVisual(doc);
+            const disabledAttr = statusesSupported ? '' : ' disabled';
+            const statusAria = `aria-label="Status: ${esc(statusLabel)}"`;
             item.innerHTML = `
-                <div class="writer-file-title">${esc(doc.title)}</div>
-                <div class="writer-file-meta muted">${formatUpdatedAt(doc.updated_at)}</div>
+                <div class="writer-file-main">
+                    <div class="writer-file-title">${esc(doc.title)}</div>
+                    <div class="writer-file-meta muted">${formatUpdatedAt(doc.updated_at)}</div>
+                </div>
+                <button class="writer-file-status" type="button" data-doc-id="${String(doc.id)}"${disabledAttr} ${statusAria} title="${esc(statusLabel)}">
+                    <span class="writer-file-status-dot" style="--writer-status-color:${statusColor};"></span>
+                </button>
             `;
             state.listEl.appendChild(item);
         }
@@ -1446,6 +1669,14 @@ function ensureFolderContextMenu() {
         } catch (_) {
             return '';
         }
+    }
+
+    function getStatusVisual(doc) {
+        const status = getStatusById(doc?.status_id);
+        return {
+            label: status ? status.name : 'None',
+            color: sanitizeStatusColor(status?.color || '')
+        };
     }
 
     function compareByUpdatedDesc(a, b) {
@@ -1611,7 +1842,36 @@ function ensureFolderContextMenu() {
             });
     }
 
-    function setSelectedFolder(folderId, { fromDocument = false } = {}) {
+    async function ensureSafeToLeaveDocument({ silentAutosave = false } = {}) {
+        if (!state.dirty) return true;
+        if (state.autosaveEnabled) {
+            const saved = await saveCurrentDocument({ silent: silentAutosave, refreshList: true });
+            return !!saved;
+        }
+        const result = await confirmModal({
+            title: 'Unsaved changes',
+            message: 'Save changes before switching documents?',
+            confirmLabel: 'Save',
+            cancelLabel: 'Discard'
+        });
+        if (result === 'confirm') {
+            const saved = await saveCurrentDocument();
+            return !!saved;
+        }
+        clearDirty();
+        return true;
+    }
+
+    function showNoSelectionAfterFolderChange() {
+        (async () => {
+            const proceed = await ensureSafeToLeaveDocument({ silentAutosave: true });
+            if (!proceed) return;
+            showNoSelectionOverlay();
+        })();
+    }
+
+    function setSelectedFolder(folderId, { fromDocument = false, skipAutoOpen = false } = {}) {
+        const previous = state.selectedFolderId;
         let resolved = resolveFolderId(folderId);
         if (resolved === 'all' && state.inboxFolderId != null) {
             resolved = state.inboxFolderId;
@@ -1627,6 +1887,24 @@ function ensureFolderContextMenu() {
         redrawFileList();
         if (fromDocument && state.current) {
             setActiveListItem(state.current.id);
+            return;
+        }
+        const changed = previous !== resolved;
+        if (!changed) return;
+        if (skipAutoOpen) {
+            showNoSelectionOverlay();
+            return;
+        }
+        const docs = getFilteredDocs();
+        if (!docs.length) {
+            showNoSelectionAfterFolderChange();
+            return;
+        }
+        const firstDoc = docs[0];
+        if (firstDoc && firstDoc.id != null) {
+            openDocument(firstDoc.id);
+        } else {
+            showNoSelectionOverlay();
         }
     }
 
@@ -1659,6 +1937,63 @@ function ensureFolderContextMenu() {
             renderFolderTree();
             updateFileHeaderLabel();
         }
+    }
+
+    async function loadStatuses(prefetched = undefined) {
+        if (!statusesSupported) {
+            state.statuses = [{
+                id: 0,
+                name: 'None',
+                color: 'transparent',
+                is_builtin: true,
+                order_index: 0
+            }];
+            state.defaultStatusId = 0;
+            state.statusesLoaded = true;
+            state.docs = state.docs.map(normalizeDoc);
+            if (state.listEl) redrawFileList();
+            return state.statuses;
+        }
+        try {
+            let rows = prefetched;
+            if (!Array.isArray(rows)) {
+                rows = await writerAPI.listStatuses();
+            }
+            const normalized = Array.isArray(rows)
+                ? rows.map(normalizeStatus).filter(Boolean)
+                : [];
+            normalized.sort((a, b) => {
+                if (a.order_index !== b.order_index) return a.order_index - b.order_index;
+                return (a.id ?? 0) - (b.id ?? 0);
+            });
+            if (!normalized.some(status => status.is_builtin)) {
+                normalized.unshift({
+                    id: 0,
+                    name: 'None',
+                    color: 'transparent',
+                    is_builtin: true,
+                    order_index: 0
+                });
+            }
+            state.statuses = normalized;
+            const builtin = normalized.find(status => status.is_builtin);
+            state.defaultStatusId = builtin ? builtin.id : (normalized[0]?.id ?? null);
+            state.statusesLoaded = true;
+        } catch (err) {
+            console.error('Failed to load writer statuses:', err);
+            state.statuses = [{
+                id: 0,
+                name: 'None',
+                color: 'transparent',
+                is_builtin: true,
+                order_index: 0
+            }];
+            state.defaultStatusId = 0;
+            state.statusesLoaded = true;
+        }
+        state.docs = state.docs.map(normalizeDoc);
+        if (state.listEl) redrawFileList();
+        return state.statuses;
     }
 
     async function ensureInboxFolderExists() {
@@ -1750,9 +2085,9 @@ function ensureFolderContextMenu() {
         closeContextMenu();
         const menu = ensureFolderContextMenu();
         menu.dataset.folderId = String(folderId);
-        menu.style.left = `${e.clientX}px`;
-        menu.style.top = `${e.clientY}px`;
+        positionContextMenu(menu, e.clientX, e.clientY);
         menu.classList.add('visible');
+        attachContextDismiss(menu, 'folder');
         const isInbox = isInboxFolder(folderId);
         menu.querySelectorAll('button').forEach(btn => {
             const action = btn.dataset.action;
@@ -1780,6 +2115,7 @@ function ensureFolderContextMenu() {
         menu.style.left = `${e.clientX}px`;
         menu.style.top = `${e.clientY}px`;
         menu.classList.add('visible');
+        attachContextDismiss(menu, 'folderArea');
         const btn = menu.querySelector('button[data-action="new-folder"]');
         if (btn) {
             btn.onclick = () => {
@@ -2128,11 +2464,12 @@ function ensureFolderContextMenu() {
             danger: true
         });
         if (result !== 'confirm') return;
+        const deletingActiveFolder = state.current && normalizeFolderId(state.current.folder_id) === normalizeFolderId(id);
         try {
             await writerAPI.deleteFolder(id);
             const nextSelection = 'all';
             await loadFolders();
-            setSelectedFolder(nextSelection);
+            setSelectedFolder(nextSelection, { skipAutoOpen: !!deletingActiveFolder });
             await loadDocuments();
             showToast('Folder deleted', 'warn');
         } catch (err) {
@@ -2210,24 +2547,6 @@ function ensureFolderContextMenu() {
         state.lastWindowWidth = width;
     }
 
-    function pickMostRecent(docs) {
-        if (!Array.isArray(docs) || !docs.length) return null;
-        const toTime = d => {
-            const u = d && d.updated_at ? new Date(d.updated_at).getTime() : NaN;
-            if (!Number.isNaN(u)) return u;
-            const c = d && d.created_at ? new Date(d.created_at).getTime() : NaN;
-            if (!Number.isNaN(c)) return c;
-            return typeof d.id === 'number' ? d.id : -Infinity;
-        };
-        let best = docs[0];
-        let bestT = toTime(best);
-        for (let i = 1; i < docs.length; i++) {
-            const t = toTime(docs[i]);
-            if (t > bestT) { best = docs[i]; bestT = t; }
-        }
-        return best;
-    }
-
     function setEmptyOverlayVisible(show) {
         if (!state.emptyOverlayEl) return;
         state.emptyOverlayEl.style.display = show ? 'flex' : 'none';
@@ -2235,6 +2554,7 @@ function ensureFolderContextMenu() {
 
     // Helper to positively clear the editor when no document is selected
     function showNoSelectionOverlay() {
+        rememberCurrentScrollPosition();
         setEmptyOverlayVisible(true);
         if (state.cmView) {
             const len = state.cmView.state.doc.length;
@@ -2251,12 +2571,18 @@ function ensureFolderContextMenu() {
     }
 
     async function loadDocuments(prefetchedDocs = undefined) {
+        if (!state.statusesLoaded) {
+            try {
+                await loadStatuses();
+            } catch (_) {}
+        }
         try {
             let docs = prefetchedDocs;
             if (!Array.isArray(docs)) {
                 docs = await writerAPI.list();
             }
             state.docs = Array.isArray(docs) ? docs.map(normalizeDoc) : [];
+            pruneScrollPositions();
             redrawFileList();
 
             if (!state.docs.length) {
@@ -2264,34 +2590,20 @@ function ensureFolderContextMenu() {
                 return;
             }
 
-            // If we already have a current doc and it's still present, keep it selected
             if (state.current && state.docs.some(d => d.id === state.current.id)) {
                 setActiveListItem(state.current.id);
                 setEmptyOverlayVisible(false);
-                return;
-            }
-
-            // Otherwise, open the most recent document (prefer updated_at)
-            let candidates = getFilteredDocs();
-            if (!candidates.length && state.selectedFolderId !== state.inboxFolderId) {
-                setSelectedFolder(state.inboxFolderId ?? 'all');
-                candidates = getFilteredDocs();
-            }
-            const target = pickMostRecent(candidates.length ? candidates : state.docs);
-            if (target && target.id != null) {
-                await openDocument(target.id, { force: true });
-                setEmptyOverlayVisible(false);
-            } else {
-                showNoSelectionOverlay();
             }
         } catch (err) {
             shell.print(`<div class="error">Failed to load writer documents: ${esc(err?.message || err)}</div>`);
         }
     }
 
-    function setEditorContent(content, title, snapshotOverride) {
+    function setEditorContent(content, title, snapshotOverride, options = {}) {
         if (!state.cmView) return;
         const doc = typeof content === 'string' ? content : '';
+        const desiredScrollTopRaw = typeof options.scrollTop === 'number' ? options.scrollTop : 0;
+        const desiredScrollTop = Number.isFinite(desiredScrollTopRaw) ? Math.max(0, desiredScrollTopRaw) : 0;
         state.cmView.dispatch({
             changes: { from: 0, to: state.cmView.state.doc.length, insert: doc }
         });
@@ -2300,16 +2612,7 @@ function ensureFolderContextMenu() {
         requestAnimationFrame(() => {
             const scroller = getScrollContainer(state.cmView);
             if (!scroller) return;
-            const ch = scroller.clientHeight || Math.max(0, window.innerHeight || 0);
-            const csContainer = getComputedStyle(scroller);
-            const child = state.cmView.scrollDOM;
-            const csChild = child && child !== scroller ? getComputedStyle(child) : csContainer;
-            const padBottomContainer = parseFloat(csContainer.paddingBottom || '0') || 0;
-            const padBottomChild = parseFloat(csChild.paddingBottom || '0') || 0;
-            const padBottom = Math.max(padBottomContainer, padBottomChild);
-            const contentBottom = Math.max(0, scroller.scrollHeight - padBottom);
-            const target = Math.max(0, contentBottom - Math.round(ch * 0.35));
-            scroller.scrollTop = target;
+            scroller.scrollTop = desiredScrollTop;
             requestAnimationFrame(() => {
                 INIT_SCROLL_SUPPRESS.delete(state.cmView);
             });
@@ -2322,27 +2625,22 @@ function ensureFolderContextMenu() {
     }
 
     async function openDocument(id, { force = false } = {}) {
+        closeStatusMenu();
         if (!force && state.current && state.current.id === id) return;
-        if (!force && state.dirty) {
-            const result = await confirmModal({
-                title: 'Unsaved changes',
-                message: 'Save changes before switching documents?',
-                confirmLabel: 'Save',
-                cancelLabel: 'Discard'
-            });
-            if (result === 'confirm') {
-                const saved = await saveCurrentDocument();
-                if (!saved) return;
-            }
-            clearDirty();
+        if (!force) {
+            const proceed = await ensureSafeToLeaveDocument({ silentAutosave: true });
+            if (!proceed) return;
         }
+        rememberCurrentScrollPosition();
+        setEmptyOverlayVisible(false);
         try {
             const doc = normalizeDoc(await writerAPI.get(id));
             if (!doc) return;
             state.current = doc;
             const folderForDoc = doc.folder_id == null ? 'all' : doc.folder_id;
             setSelectedFolder(folderForDoc, { fromDocument: true });
-            setEditorContent(doc.content || '', doc.title || 'Untitled Document', doc.content || '');
+            const savedScroll = getSavedScrollPosition(doc.id);
+            setEditorContent(doc.content || '', doc.title || 'Untitled Document', doc.content || '', { scrollTop: savedScroll });
             updateWordCountFromText(doc.content || '');
             setEmptyOverlayVisible(false);
         } catch (err) {
@@ -2350,7 +2648,25 @@ function ensureFolderContextMenu() {
         }
     }
 
+    function onStatusTriggerClick(e) {
+        if (!statusesSupported) return;
+        const btn = e.target.closest('.writer-file-status');
+        if (!btn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const docId = Number(btn.dataset.docId);
+        if (!Number.isFinite(docId)) return;
+        const alreadyOpen = state.statusMenuDocId === docId && state.statusMenuEl?.classList.contains('visible');
+        const sameTrigger = state.statusMenuTrigger === btn;
+        const justPicker = state.colorPickerEl && state.colorPickerEl.contains(e.target);
+        if (alreadyOpen && sameTrigger && justPicker) {
+            return;
+        }
+        openStatusMenu(docId, btn);
+    }
+
     function onFileClick(e) {
+        if (e.target.closest('.writer-file-status')) return;
         const li = e.target.closest('.writer-file-item');
         if (!li) return;
         const id = Number(li.dataset.id);
@@ -2367,9 +2683,9 @@ function ensureFolderContextMenu() {
         closeContextMenu();
         const menu = ensureFileContextMenu();
         menu.dataset.fileId = String(id);
-        menu.style.left = `${e.clientX}px`;
-        menu.style.top = `${e.clientY}px`;
         menu.classList.add('visible');
+        positionContextMenu(menu, e.clientX, e.clientY);
+        attachContextDismiss(menu, 'file');
         menu.querySelectorAll('button').forEach(btn => {
             btn.onclick = () => {
                 const action = btn.dataset.action;
@@ -2385,15 +2701,421 @@ function ensureFolderContextMenu() {
         e.stopPropagation();
         closeContextMenu();
         const menu = ensureFileAreaContextMenu();
-        menu.style.left = `${e.clientX}px`;
-        menu.style.top = `${e.clientY}px`;
         menu.classList.add('visible');
+        positionContextMenu(menu, e.clientX, e.clientY);
+        attachContextDismiss(menu, 'fileArea');
         const btn = menu.querySelector('button[data-action="new-file"]');
         if (btn) {
             btn.onclick = () => {
                 closeContextMenu();
                 createNewDocument();
             };
+        }
+    }
+
+    function ensureStatusMenu() {
+        if (state.statusMenuEl) return state.statusMenuEl;
+        const menu = document.createElement('div');
+        menu.className = 'writer-status-menu';
+        menu.innerHTML = `
+            <div class="writer-status-menu-list"></div>
+            <button type="button" class="writer-status-add">Add status</button>
+        `;
+        document.body.appendChild(menu);
+        const addBtn = menu.querySelector('.writer-status-add');
+        if (addBtn) addBtn.addEventListener('click', handleAddStatus);
+        state.statusMenuEl = menu;
+        return menu;
+    }
+
+    function renderStatusMenu(docId) {
+        if (!state.statusMenuEl) return;
+        const list = state.statusMenuEl.querySelector('.writer-status-menu-list');
+        if (!list) return;
+        list.innerHTML = '';
+        const numericDocId = Number(docId);
+        const currentDoc = state.docs.find(doc => doc.id === numericDocId);
+        const activeStatusId = currentDoc ? currentDoc.status_id : getDefaultStatusId();
+        state.statuses.forEach(status => {
+            const row = document.createElement('div');
+            row.className = 'writer-status-row';
+            row.dataset.statusId = String(status.id);
+            if (!status.is_builtin) {
+                row.dataset.draggable = 'true';
+                row.setAttribute('draggable', 'true');
+            }
+            if (status.id === activeStatusId) row.classList.add('active');
+            if (status.is_builtin) row.classList.add('builtin');
+            if (status.is_builtin) {
+                const swatch = document.createElement('span');
+                swatch.className = 'writer-status-color-dot';
+                swatch.style.setProperty('--writer-status-color', sanitizeStatusColor(status.color));
+                row.appendChild(swatch);
+            } else {
+                const colorBtn = document.createElement('button');
+                colorBtn.type = 'button';
+                colorBtn.className = 'writer-status-color-btn';
+                colorBtn.style.setProperty('--writer-status-color', sanitizeStatusColor(status.color));
+                colorBtn.title = `Change color for ${status.name}`;
+                colorBtn.setAttribute('aria-label', `Change color for ${status.name}`);
+                colorBtn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const chosen = await pickStatusColor({
+                        anchor: colorBtn,
+                        selected: sanitizeStatusColor(status.color || ''),
+                        host: state.statusMenuEl,
+                        quickSelect: true
+                    });
+                    if (!chosen) return;
+                    await updateStatusColor(status.id, chosen, numericDocId);
+                });
+                row.appendChild(colorBtn);
+            }
+            const selectBtn = document.createElement('button');
+            selectBtn.type = 'button';
+            selectBtn.className = 'writer-status-select';
+            selectBtn.textContent = status.name;
+            selectBtn.addEventListener('click', () => handleStatusSelection(status.id, numericDocId));
+            row.appendChild(selectBtn);
+            if (!status.is_builtin) {
+                const removeBtn = document.createElement('button');
+                removeBtn.type = 'button';
+                removeBtn.className = 'writer-status-remove';
+                removeBtn.textContent = '−';
+                removeBtn.title = `Delete ${status.name}`;
+                removeBtn.setAttribute('aria-label', `Delete ${status.name}`);
+                removeBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleStatusRemove(status.id, row);
+                });
+                row.appendChild(removeBtn);
+            }
+            list.appendChild(row);
+        });
+    }
+
+    function bindStatusDragHandlers() {
+        const list = state.statusMenuEl?.querySelector('.writer-status-menu-list');
+        if (!list || list.dataset.dragHandlers === '1') return;
+        list.dataset.dragHandlers = '1';
+        list.addEventListener('dragstart', handleStatusDragStart);
+        list.addEventListener('dragover', handleStatusDragOver);
+        list.addEventListener('drop', handleStatusDrop);
+        list.addEventListener('dragend', handleStatusDragEnd);
+    }
+
+    function handleStatusDragStart(e) {
+        const row = e.target.closest('.writer-status-row');
+        if (!row || row.dataset.draggable !== 'true') {
+            e.preventDefault();
+            return;
+        }
+        state.draggingStatusId = Number(row.dataset.statusId);
+        row.classList.add('dragging');
+        try {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', String(state.draggingStatusId));
+        } catch (_) {}
+    }
+
+    function handleStatusDragOver(e) {
+        if (state.draggingStatusId == null) return;
+        const row = e.target.closest('.writer-status-row');
+        if (!row || row.dataset.statusId === String(state.draggingStatusId) || row.dataset.draggable !== 'true') return;
+        e.preventDefault();
+        const list = state.statusMenuEl?.querySelector('.writer-status-menu-list');
+        if (!list) return;
+        clearStatusDragIndicators(list);
+        const rect = row.getBoundingClientRect();
+        const before = (e.clientY - rect.top) < rect.height / 2;
+        row.classList.add(before ? 'drag-over-before' : 'drag-over-after');
+        list.dataset.dropTargetId = row.dataset.statusId;
+        list.dataset.dropBefore = before ? '1' : '0';
+    }
+
+    async function handleStatusDrop(e) {
+        if (state.draggingStatusId == null) return;
+        e.preventDefault();
+        const list = state.statusMenuEl?.querySelector('.writer-status-menu-list');
+        if (!list) return;
+        const targetId = list.dataset.dropTargetId ? Number(list.dataset.dropTargetId) : null;
+        const before = list.dataset.dropBefore === '1';
+        const dragId = state.draggingStatusId;
+        clearStatusDragIndicators(list);
+        state.draggingStatusId = null;
+        if (!reorderStatusesLocally(dragId, targetId, before)) return;
+        renderStatusMenu(state.statusMenuDocId);
+        bindStatusDragHandlers();
+        await persistStatusOrder();
+    }
+
+    function handleStatusDragEnd() {
+        const list = state.statusMenuEl?.querySelector('.writer-status-menu-list');
+        if (!list) return;
+        list.querySelectorAll('.writer-status-row.dragging').forEach(row => row.classList.remove('dragging'));
+        clearStatusDragIndicators(list);
+        state.draggingStatusId = null;
+        delete list.dataset.dropTargetId;
+        delete list.dataset.dropBefore;
+    }
+
+    function clearStatusDragIndicators(list) {
+        if (!list) return;
+        list.querySelectorAll('.drag-over-before, .drag-over-after').forEach(row => {
+            row.classList.remove('drag-over-before', 'drag-over-after');
+        });
+    }
+
+    function reorderStatusesLocally(dragId, targetId, before) {
+        const statuses = state.statuses.slice();
+        const fromIdx = statuses.findIndex(status => status.id === dragId);
+        if (fromIdx === -1) return false;
+        const dragged = statuses.splice(fromIdx, 1)[0];
+        let insertIdx = targetId == null ? statuses.length : statuses.findIndex(status => status.id === targetId);
+        if (insertIdx === -1) insertIdx = statuses.length;
+        if (!before && insertIdx < statuses.length) insertIdx += 1;
+        if (insertIdx < 0) insertIdx = 0;
+        statuses.splice(insertIdx, 0, dragged);
+        state.statuses = statuses.map((status, idx) => ({ ...status, order_index: idx }));
+        return true;
+    }
+
+    async function persistStatusOrder() {
+        if (!writerAPI || typeof writerAPI.reorderStatuses !== 'function') return;
+        const order = state.statuses
+            .filter(status => !status.is_builtin)
+            .map(status => status.id);
+        try {
+            await writerAPI.reorderStatuses(order);
+        } catch (err) {
+            console.warn('Failed to persist status order', err);
+        }
+    }
+
+    function openStatusMenu(docId, anchor) {
+        if (!statusesSupported) return;
+        state.statusMenuDocId = Number(docId);
+        state.statusMenuTrigger = anchor;
+        const menu = ensureStatusMenu();
+        renderStatusMenu(docId);
+        bindStatusDragHandlers();
+        positionStatusMenu(menu, anchor);
+        menu.classList.add('visible');
+        clampMenuToViewport(menu);
+    }
+
+    function positionStatusMenu(menu, anchor) {
+        if (!menu || !anchor) return;
+        const rect = anchor.getBoundingClientRect();
+        const scrollX = window.scrollX || 0;
+        const scrollY = window.scrollY || 0;
+        const targetLeft = rect.left + scrollX;
+        const belowTop = rect.bottom + scrollY;
+        const aboveTop = rect.top + scrollY - (menu.offsetHeight || 0);
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        const spaceBelow = (viewportHeight - rect.bottom);
+        const shouldFlip = spaceBelow < (menu.offsetHeight || 0);
+        menu.style.left = `${Math.round(targetLeft)}px`;
+        menu.style.top = `${Math.round(shouldFlip ? aboveTop : belowTop)}px`;
+    }
+
+    function clampMenuToViewport(menu) {
+        if (!menu) return;
+        const margin = 10;
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        const rect = menu.getBoundingClientRect();
+        let left = rect.left;
+        let top = rect.top;
+        if (rect.right + margin > viewportWidth) {
+            left = viewportWidth - rect.width - margin;
+        } else if (rect.left < margin) {
+            left = margin;
+        }
+        if (rect.bottom + margin > viewportHeight) {
+            top = viewportHeight - rect.height - margin;
+        } else if (rect.top < margin) {
+            top = margin;
+        }
+        menu.style.left = `${Math.round(left)}px`;
+        menu.style.top = `${Math.round(top)}px`;
+    }
+
+    function closeStatusMenu() {
+        if (state.statusMenuEl) state.statusMenuEl.classList.remove('visible');
+        state.statusMenuDocId = null;
+        state.statusMenuTrigger = null;
+        if (state.colorPickerEl && state.colorPickerEl.parentElement) {
+            state.colorPickerEl.parentElement.removeChild(state.colorPickerEl);
+        }
+        state.colorPickerEl = null;
+    }
+
+    function handleGlobalStatusPointer(e) {
+        if (!state.statusMenuEl || !state.statusMenuEl.classList.contains('visible')) return;
+        const target = e.target;
+        if (target.closest && target.closest('.cj-modal')) return;
+        if (state.statusMenuEl.contains(target)) return;
+        if (state.colorPickerEl && state.colorPickerEl.contains(target)) return;
+        if (state.statusMenuTrigger && state.statusMenuTrigger.contains(target)) return;
+        if (state.statusMenuEl === target || state.colorPickerEl === target) return;
+        closeStatusMenu();
+    }
+
+    async function applyDocStatus(docId, statusId, { closeMenu = true } = {}) {
+        if (!statusesSupported || !writerAPI || typeof writerAPI.setStatus !== 'function') return;
+        const numericDocId = Number(docId);
+        if (!Number.isInteger(numericDocId) || numericDocId <= 0) return;
+        try {
+            const updated = normalizeDoc(await writerAPI.setStatus(numericDocId, statusId));
+            state.docs = state.docs.map(doc => doc.id === updated.id ? updated : doc);
+            if (state.current && state.current.id === updated.id) {
+                state.current = { ...state.current, status_id: updated.status_id };
+            }
+            redrawFileList();
+        } catch (err) {
+            console.warn('[status] applyDocStatus failed', err);
+            showToast(err?.message || 'Failed to update status', 'error', 'writerToastError');
+            return;
+        }
+        if (closeMenu) closeStatusMenu();
+    }
+
+    async function handleStatusSelection(statusId, docIdOverride = state.statusMenuDocId) {
+        await applyDocStatus(docIdOverride, statusId);
+    }
+
+    async function handleAddStatus() {
+        if (!statusesSupported || !writerAPI || typeof writerAPI.createStatus !== 'function') return;
+        const targetDocId = state.statusMenuDocId;
+        const numericDocId = Number(targetDocId);
+        const canApplyToDoc = Number.isInteger(numericDocId) && numericDocId > 0;
+        const payload = await newStatusModal();
+        if (!payload) return;
+        const { name, color } = payload;
+        try {
+            const created = await writerAPI.createStatus({ name, color });
+            await loadStatuses();
+            if (created && created.id != null && canApplyToDoc) {
+                await applyDocStatus(numericDocId, created.id, { closeMenu: false });
+            }
+            if (state.statusMenuEl && state.statusMenuEl.classList.contains('visible')) {
+                renderStatusMenu(state.statusMenuDocId);
+                bindStatusDragHandlers();
+            }
+        } catch (err) {
+            showToast(err?.message || 'Failed to create status', 'error', 'writerToastError');
+        }
+    }
+
+    function pickStatusColor({ selected = STATUS_COLOR_OPTIONS[0], anchor = null, host = null, quickSelect = false } = {}) {
+        return new Promise((resolve) => {
+            const container = host && host.contains ? host : (state.statusMenuEl || document.body);
+            const picker = document.createElement('div');
+            picker.className = 'writer-color-picker';
+            picker.innerHTML = `
+                <div class="writer-color-grid">
+                    ${STATUS_COLOR_OPTIONS.map(color => `
+                        <button type="button" class="writer-color-option${sanitizeStatusColor(color) === sanitizeStatusColor(selected) ? ' active' : ''}"
+                            data-color="${color}" style="--writer-color:${color};" aria-label="Select color ${color}"></button>
+                    `).join('')}
+                </div>
+                ${quickSelect ? '' : `
+                <div class="writer-color-actions">
+                    <button type="button" class="writer-color-confirm">Confirm</button>
+                    <button type="button" class="writer-color-close">Close</button>
+                </div>`}
+            `;
+            state.colorPickerEl = picker;
+            if (container !== document.body) {
+                picker.classList.add('embedded');
+                container.appendChild(picker);
+            } else {
+                picker.classList.add('global');
+                document.body.appendChild(picker);
+            }
+            const place = () => {
+                const gap = 8;
+                if (anchor && anchor.getBoundingClientRect) {
+                    const rect = anchor.getBoundingClientRect();
+                    if (container !== document.body) {
+                        const hostRect = container.getBoundingClientRect();
+                        let left = rect.left - hostRect.left;
+                        let top = rect.bottom - hostRect.top + gap;
+                        picker.style.left = `${left}px`;
+                        picker.style.top = `${top}px`;
+                    } else {
+                        const scrollX = window.scrollX || 0;
+                        const scrollY = window.scrollY || 0;
+                        picker.style.left = `${rect.left + scrollX}px`;
+                        picker.style.top = `${rect.bottom + scrollY + gap}px`;
+                    }
+                } else {
+                    picker.style.left = '50%';
+                    picker.style.top = '50%';
+                    picker.style.transform = 'translate(-50%, -50%)';
+                }
+            };
+            place();
+            let current = sanitizeStatusColor(selected);
+            const finalize = (value) => {
+                if (picker && picker.parentElement) picker.parentElement.removeChild(picker);
+                if (state.colorPickerEl === picker) state.colorPickerEl = null;
+                resolve(value ?? null);
+            };
+            picker.querySelectorAll('button.writer-color-option').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    current = btn.dataset.color;
+                    picker.querySelectorAll('button.writer-color-option').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    if (quickSelect) finalize(current);
+                });
+            });
+            if (!quickSelect) {
+                const confirmBtn = picker.querySelector('.writer-color-confirm');
+                const closeBtn = picker.querySelector('.writer-color-close');
+                if (confirmBtn) confirmBtn.addEventListener('click', () => finalize(current));
+                if (closeBtn) closeBtn.addEventListener('click', () => finalize(null));
+            }
+        });
+    }
+
+    async function updateStatusColor(statusId, color, docId) {
+        if (!statusesSupported || !writerAPI || typeof writerAPI.updateStatus !== 'function') return;
+        try {
+            await writerAPI.updateStatus(Number(statusId), { color });
+            await loadStatuses();
+            if (Number.isFinite(Number(docId))) {
+                await applyDocStatus(docId, statusId, { closeMenu: false });
+            }
+            if (state.statusMenuEl && state.statusMenuEl.classList.contains('visible')) {
+                renderStatusMenu(state.statusMenuDocId);
+            }
+            redrawFileList();
+        } catch (err) {
+            showToast(err?.message || 'Failed to update color', 'error', 'writerToastError');
+        }
+    }
+
+    async function handleStatusRemove(id, row) {
+        if (!statusesSupported || !writerAPI || typeof writerAPI.deleteStatus !== 'function') return;
+        const status = getStatusById(id);
+        if (!status || status.is_builtin) return;
+        if (row) {
+            row.style.transition = 'transform 0.25s ease, opacity 0.25s ease';
+            row.style.transform = 'translateX(-120%)';
+            row.style.opacity = '0';
+        }
+        await new Promise(resolve => setTimeout(resolve, 200));
+        try {
+            await writerAPI.deleteStatus(id);
+            await loadStatuses();
+            await loadDocuments();
+            closeStatusMenu();
+        } catch (err) {
+            showToast(err?.message || 'Failed to delete status', 'error', 'writerToastError');
         }
     }
 
@@ -2433,7 +3155,8 @@ function ensureFolderContextMenu() {
                 id: state.current.id,
                 title,
                 content,
-                folderId: state.current.folder_id ?? null
+                folderId: state.current.folder_id ?? null,
+                statusId: state.current.status_id ?? getDefaultStatusId()
             }));
             state.current = updated;
             state.savedSnapshot = content;
@@ -2450,6 +3173,11 @@ function ensureFolderContextMenu() {
             showToast(`Save failed: ${err?.message || err}`, 'error', 'writerToastError');
             return false;
         }
+    }
+
+    function activeFolderNormalized() {
+        const selected = state.selectedFolderId === 'all' ? state.inboxFolderId : state.selectedFolderId;
+        return normalizeFolderId(selected);
     }
 
     async function createNewDocument() {
@@ -2487,9 +3215,26 @@ function ensureFolderContextMenu() {
             const defaultFolder = state.selectedFolderId === 'all' ? state.inboxFolderId : state.selectedFolderId;
             const folderId = defaultFolder ?? state.inboxFolderId ?? null;
             const doc = normalizeDoc(await writerAPI.create({ title, content: '', folderId }));
+            const createdFolder = normalizeFolderId(doc.folder_id);
+            const viewingCreatedFolder = activeFolderNormalized() === createdFolder;
+            if (viewingCreatedFolder) {
+                const provisional = { ...doc };
+                if (typeof provisional.order_index !== 'number') {
+                    provisional.order_index = docsOrderedForFolder(folderId).length;
+                }
+                state.docs.push(provisional);
+                redrawFileList();
+            }
             await loadDocuments();
-            await openDocument(doc.id, { force: true });
-            setEmptyOverlayVisible(false);
+            if (viewingCreatedFolder) {
+                const docsInFolder = docsOrderedForFolder(folderId);
+                const onlyDoc = docsInFolder.length === 1 && docsInFolder[0].id === doc.id;
+                if (onlyDoc) {
+                    await openDocument(doc.id, { force: true });
+                } else if (state.current) {
+                    setActiveListItem(state.current.id);
+                }
+            }
             showToast('New document created', 'ok');
             return doc;
         } catch (err) {
@@ -2553,15 +3298,37 @@ function ensureFolderContextMenu() {
             danger: true
         });
         if (result !== 'confirm') return;
+        const deletingCurrent = state.current && state.current.id === id;
+        let fallbackId = null;
+        if (deletingCurrent) {
+            const ordered = docsOrderedForFolder(target.folder_id);
+            const index = ordered.findIndex(doc => doc.id === id);
+            if (index !== -1) {
+                if (ordered[index + 1]) {
+                    fallbackId = ordered[index + 1].id;
+                } else if (ordered[index - 1]) {
+                    fallbackId = ordered[index - 1].id;
+                }
+            }
+        }
         try {
             await writerAPI.delete(id);
+            state.scrollPositions.delete(id);
             showToast('Document deleted', 'warn');
+            if (deletingCurrent) {
+                state.current = null;
+            }
             await loadDocuments();
-            // If no documents remain, or the deleted doc was the current one, show the empty overlay and clear the editor
             if (!state.docs.length) {
                 showNoSelectionOverlay();
-            } else if (state.current && state.current.id === id) {
-                showNoSelectionOverlay();
+                return;
+            }
+            if (deletingCurrent) {
+                if (fallbackId != null && state.docs.some(doc => doc.id === fallbackId)) {
+                    await openDocument(fallbackId, { force: true });
+                } else {
+                    showNoSelectionOverlay();
+                }
             }
         } catch (err) {
             shell.print(`<div class="error">Delete failed: ${esc(err?.message || err)}</div>`);
@@ -2806,20 +3573,111 @@ function ensureFolderContextMenu() {
         });
     }
 
+    function newStatusModal({ defaultName = '', defaultColor = STATUS_COLOR_OPTIONS[0] } = {}) {
+        return new Promise((resolve) => {
+            const wrap = document.createElement('div');
+            wrap.className = 'cj-modal-backdrop';
+            wrap.innerHTML = `
+                <div class="cj-modal" role="dialog" aria-modal="true">
+                    <div class="cj-modal-title">New status</div>
+                    <div class="cj-modal-body">
+                        <label class="writer-status-name-field">
+                            <span>Name</span>
+                            <input type="text" class="cj-modal-input" value="${esc(defaultName)}" spellcheck="false" />
+                        </label>
+                        <div class="writer-status-color-field">
+                            <div class="writer-status-color-label muted">Color</div>
+                            <div class="writer-color-grid">
+                                ${STATUS_COLOR_OPTIONS.map(color => `
+                                    <button type="button" class="writer-color-option${sanitizeStatusColor(color) === sanitizeStatusColor(defaultColor) ? ' active' : ''}"
+                                        data-color="${color}" style="--writer-color:${color};" aria-label="Select color ${color}"></button>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="cj-modal-actions">
+                        <button class="confirm">Create</button>
+                        <button class="cancel">Cancel</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(wrap);
+            const input = wrap.querySelector('.cj-modal-input');
+            const confirmBtn = wrap.querySelector('button.confirm');
+            const cancelBtn = wrap.querySelector('button.cancel');
+            let selectedColor = sanitizeStatusColor(defaultColor);
+            const buttons = wrap.querySelectorAll('.writer-color-option');
+            buttons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    selectedColor = btn.dataset.color;
+                    buttons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                });
+            });
+            const cleanup = (value) => {
+                window.removeEventListener('keydown', onKey, true);
+                if (wrap && wrap.parentElement) wrap.parentElement.removeChild(wrap);
+                resolve(value);
+            };
+            const accept = () => {
+                const name = String(input.value || '').trim();
+                if (!name) return;
+                cleanup({ name, color: selectedColor });
+            };
+            const reject = () => cleanup(null);
+            const onKey = (e) => {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    reject();
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    accept();
+                }
+            };
+            confirmBtn.addEventListener('click', accept);
+            cancelBtn.addEventListener('click', reject);
+            window.addEventListener('keydown', onKey, true);
+            setTimeout(() => {
+                try { input.focus({ preventScroll: true }); } catch { input.focus(); }
+                input.select();
+            }, 0);
+        });
+    }
+
     mountUI();
     setEmptyOverlayVisible(true);
     shell.setPrompt(state.prompt);
     (async () => {
         let docsPromise = null;
+        let statusesPromise = null;
         try {
             docsPromise = writerAPI.list();
         } catch (_) {
             docsPromise = null;
         }
+        if (statusesSupported) {
+            try {
+                statusesPromise = writerAPI.listStatuses();
+            } catch (_) {
+                statusesPromise = null;
+            }
+        }
         try {
             await loadFolders();
         } catch (_) {
             // already surfaced in loadFolders
+        }
+        if (!state.statusesLoaded) {
+            if (statusesPromise) {
+                try {
+                    const prefetchedStatuses = await statusesPromise;
+                    await loadStatuses(prefetchedStatuses);
+                } catch (_) {
+                    await loadStatuses();
+                }
+            } else {
+                await loadStatuses();
+            }
         }
         let prefetchedDocs = null;
         if (docsPromise) {
@@ -2834,6 +3692,13 @@ function ensureFolderContextMenu() {
         } else {
             await loadDocuments();
         }
+        if (!state.bootstrappedSelection) {
+            state.bootstrappedSelection = true;
+            if (state.docs.length) {
+                const initialFolder = state.selectedFolderId ?? state.inboxFolderId ?? 'all';
+                setSelectedFolder(initialFolder);
+            }
+        }
     })();
 
     const program = {
@@ -2842,6 +3707,9 @@ function ensureFolderContextMenu() {
             detachGlobalListeners();
             closeContextMenu();
             cancelAutosaveTimer();
+            if (state.editorFocusHandler && state.cmView?.dom) {
+                try { state.cmView.dom.removeEventListener('focus', state.editorFocusHandler, true); } catch (_) {}
+            }
         },
         setAutosave(enabled) {
             setAutosaveEnabled(enabled);
@@ -2851,3 +3719,37 @@ function ensureFolderContextMenu() {
     shell.enter(program);
     return program;
 }
+    function handleGlobalClick(e) {
+        handleStandardContextPointer(e);
+    }
+
+    function handleStandardContextPointer(e) {
+        const target = e.target;
+        if (target.closest('.cj-modal')) return;
+        if (state.statusMenuEl && state.statusMenuEl.classList.contains('visible')) {
+            if (state.statusMenuEl.contains(target)) return;
+            if (state.colorPickerEl && state.colorPickerEl.contains(target)) return;
+        }
+        if (isTargetInsideStandardContextMenu(target)) return;
+        if (anyStandardContextMenuVisible()) {
+            closeStandardContextMenus();
+        }
+    }
+
+    function isTargetInsideStandardContextMenu(target) {
+        return (
+            state.fileContextMenuEl?.contains(target) ||
+            state.folderContextMenuEl?.contains(target) ||
+            state.fileAreaContextMenuEl?.contains(target) ||
+            state.folderAreaContextMenuEl?.contains(target)
+        );
+    }
+
+    function anyStandardContextMenuVisible() {
+        return !!(
+            state.fileContextMenuEl?.classList.contains('visible') ||
+            state.folderContextMenuEl?.classList.contains('visible') ||
+            state.fileAreaContextMenuEl?.classList.contains('visible') ||
+            state.folderAreaContextMenuEl?.classList.contains('visible')
+        );
+    }

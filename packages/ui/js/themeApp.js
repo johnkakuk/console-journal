@@ -172,6 +172,15 @@ function extractMaxWidth(value) {
     return Math.min(140, Math.max(40, Math.round(num)));
 }
 
+function extractLineHeight(value) {
+    const num = typeof value === 'number'
+        ? value
+        : Number.parseFloat(String(value ?? '').replace(/em$/, ''));
+    if (!Number.isFinite(num)) return 1.5;
+    const clamped = Math.min(2.5, Math.max(1, num));
+    return Math.round(clamped * 100) / 100;
+}
+
 export async function startThemeApp(shell) {
     const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent || '');
     let activeTheme = await loadActiveTheme();
@@ -252,7 +261,7 @@ export async function startThemeApp(shell) {
 
     const editorLabel = document.createElement('label');
     editorLabel.className = 'theme-font-label';
-    editorLabel.textContent = 'Editor Font';
+    editorLabel.textContent = 'Journal Font';
     const editorSelect = document.createElement('select');
     editorSelect.className = 'theme-font-select';
     FONT_OPTIONS_EDITOR.forEach(opt => {
@@ -271,6 +280,28 @@ export async function startThemeApp(shell) {
         <p>The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.</p>
     `;
     fontsPanel.appendChild(editorPreview);
+
+    const writerLabel = document.createElement('label');
+    writerLabel.className = 'theme-font-label';
+    writerLabel.textContent = 'Writer Font';
+    const writerSelect = document.createElement('select');
+    writerSelect.className = 'theme-font-select';
+    FONT_OPTIONS_EDITOR.forEach(opt => {
+        const option = document.createElement('option');
+        option.value = opt.id;
+        option.textContent = opt.label;
+        writerSelect.appendChild(option);
+    });
+    writerLabel.appendChild(writerSelect);
+    fontsPanel.appendChild(writerLabel);
+
+    const writerPreview = document.createElement('div');
+    writerPreview.className = 'theme-font-preview writer';
+    writerPreview.innerHTML = `
+        <div class="preview-heading">Writer Preview</div>
+        <p>Scenes: The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.</p>
+    `;
+    fontsPanel.appendChild(writerPreview);
 
     const uiLabel = document.createElement('label');
     uiLabel.className = 'theme-font-label';
@@ -356,6 +387,27 @@ export async function startThemeApp(shell) {
     maxLabel.appendChild(maxWidthInput);
     layoutPanel.appendChild(maxLabel);
 
+    const lineLabel = document.createElement('label');
+    lineLabel.className = 'theme-number-label';
+    lineLabel.textContent = 'Line Height';
+    const lineHeightInput = document.createElement('input');
+    lineHeightInput.type = 'number';
+    lineHeightInput.className = 'theme-number-input';
+    lineHeightInput.min = '1';
+    lineHeightInput.max = '2.5';
+    lineHeightInput.step = '0.05';
+    lineHeightInput.value = extractLineHeight(draft.vars['--editor-line-height'] ?? '1.5').toFixed(2);
+    lineHeightInput.addEventListener('input', () => {
+        const height = extractLineHeight(lineHeightInput.value + '');
+        lineHeightInput.value = height.toFixed(2);
+        draft.vars['--editor-line-height'] = String(height);
+        dirty = true;
+        updateStatus();
+        updatePreview();
+    });
+    lineLabel.appendChild(lineHeightInput);
+    layoutPanel.appendChild(lineLabel);
+
     panels.appendChild(layoutPanel);
 
     const actions = document.createElement('div');
@@ -405,17 +457,20 @@ export async function startThemeApp(shell) {
     function currentFontOptions() {
         const uiOpt = detectFontOption(draft.vars['--font-ui'], FONT_OPTIONS_UI);
         const editorOpt = detectFontOption(draft.vars['--font-editor'], FONT_OPTIONS_EDITOR);
+        const writerOpt = detectFontOption(draft.vars['--font-writer'], FONT_OPTIONS_EDITOR);
         const monoOpt = detectFontOption(draft.vars['--font-mono'], FONT_OPTIONS_MONO);
-        return { uiOpt, editorOpt, monoOpt };
+        return { uiOpt, editorOpt, writerOpt, monoOpt };
     }
 
     function updateFontPreviews() {
-        const { uiOpt, editorOpt, monoOpt } = currentFontOptions();
+        const { uiOpt, editorOpt, writerOpt, monoOpt } = currentFontOptions();
         uiSelect.value = uiOpt.id;
         editorSelect.value = editorOpt.id;
+        writerSelect.value = writerOpt.id;
         monoSelect.value = monoOpt.id;
         uiPreview.style.fontFamily = uiOpt.css;
         editorPreview.style.fontFamily = editorOpt.css;
+        writerPreview.style.fontFamily = writerOpt.css;
         monoPreview.style.fontFamily = monoOpt.css;
     }
 
@@ -429,12 +484,14 @@ export async function startThemeApp(shell) {
 
     function updateLayoutUI() {
         maxWidthInput.value = String(extractMaxWidth(draft.vars['--editor-max-width'] ?? '81'));
+        lineHeightInput.value = extractLineHeight(draft.vars['--editor-line-height'] ?? '1.5').toFixed(2);
     }
 
     function updatePreview() {
-        const { uiOpt, editorOpt, monoOpt } = currentFontOptions();
+        const { uiOpt, editorOpt, writerOpt, monoOpt } = currentFontOptions();
         draft.vars['--font-ui'] = uiOpt.css;
         draft.vars['--font-editor'] = editorOpt.css;
+        draft.vars['--font-writer'] = writerOpt.css;
         draft.vars['--font-mono'] = monoOpt.css;
         applyTheme(draft);
         updateFontPreviews();
@@ -463,6 +520,14 @@ export async function startThemeApp(shell) {
     editorSelect.addEventListener('change', () => {
         const opt = FONT_OPTIONS_EDITOR.find(o => o.id === editorSelect.value) || FONT_OPTIONS_EDITOR[0];
         draft.vars['--font-editor'] = opt.css;
+        dirty = true;
+        updateStatus();
+        updatePreview();
+    });
+
+    writerSelect.addEventListener('change', () => {
+        const opt = FONT_OPTIONS_EDITOR.find(o => o.id === writerSelect.value) || FONT_OPTIONS_EDITOR[0];
+        draft.vars['--font-writer'] = opt.css;
         dirty = true;
         updateStatus();
         updatePreview();

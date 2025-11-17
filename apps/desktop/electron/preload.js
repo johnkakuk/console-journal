@@ -28,7 +28,13 @@ contextBridge.exposeInMainWorld('db', {
         deleteFolder:   (id) => ipcRenderer.invoke('writer:delete-folder', id),
         duplicateFolder:(id, overrides = {}) => ipcRenderer.invoke('writer:duplicate-folder', { id, ...overrides }),
         reorderDocuments:(moves = []) => ipcRenderer.invoke('writer:reorder-docs', { moves }),
-        reorderFolders:(moves = []) => ipcRenderer.invoke('writer:reorder-folders', { moves })
+        reorderFolders:(moves = []) => ipcRenderer.invoke('writer:reorder-folders', { moves }),
+        listStatuses: () => ipcRenderer.invoke('writer:list-statuses'),
+        createStatus: (payload = {}) => ipcRenderer.invoke('writer:create-status', payload),
+        updateStatus: (id, updates = {}) => ipcRenderer.invoke('writer:update-status', { id, ...updates }),
+        deleteStatus: (id) => ipcRenderer.invoke('writer:delete-status', id),
+        setStatus: (id, statusId) => ipcRenderer.invoke('writer:set-status', { id, statusId }),
+        reorderStatuses: (order = []) => ipcRenderer.invoke('writer:reorder-statuses', { order })
     }
 });
 
