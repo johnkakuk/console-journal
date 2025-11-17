@@ -57,6 +57,93 @@ function normalizeWriterFolderName(name) {
     return 'New Folder';
 }
 
+const DEFAULT_WRITER_STATUS_NAME = 'None';
+const DEFAULT_WRITER_STATUS_COLOR = '#00000000';
+const DEFAULT_USER_STATUS_COLOR = '#37c978';
+let defaultWriterStatusId = null;
+
+function setDefaultWriterStatusId(id) {
+    if (Number.isFinite(id) && id > 0) {
+        defaultWriterStatusId = Number(id);
+    }
+    return defaultWriterStatusId;
+}
+
+function normalizeStatusColor(input, { allowTransparent = false } = {}) {
+    if (typeof input !== 'string') {
+        return allowTransparent ? DEFAULT_WRITER_STATUS_COLOR : DEFAULT_USER_STATUS_COLOR;
+    }
+    let value = input.trim();
+    if (/^transparent$/i.test(value)) {
+        return allowTransparent ? DEFAULT_WRITER_STATUS_COLOR : DEFAULT_USER_STATUS_COLOR;
+    }
+    if (/^#[0-9a-fA-F]{3}$/.test(value)) {
+        const r = value[1];
+        const g = value[2];
+        const b = value[3];
+        value = `#${r}${r}${g}${g}${b}${b}`;
+    }
+    if (/^#[0-9a-fA-F]{6}$/.test(value)) {
+        return value.toLowerCase();
+    }
+    if (/^#[0-9a-fA-F]{8}$/.test(value)) {
+        return value.toLowerCase();
+    }
+    return allowTransparent ? DEFAULT_WRITER_STATUS_COLOR : DEFAULT_USER_STATUS_COLOR;
+}
+
+function ensureDefaultWriterStatus() {
+    if (!db) return null;
+    const existing = db.prepare(`SELECT id FROM writer_statuses WHERE is_builtin = 1 LIMIT 1`).get();
+    if (existing && existing.id) {
+        return setDefaultWriterStatusId(existing.id);
+    }
+    const stmt = db.prepare(`
+        INSERT INTO writer_statuses (name, color, is_builtin, order_index)
+        VALUES (?, ?, 1, 0)
+        RETURNING id
+    `);
+    const row = stmt.get(DEFAULT_WRITER_STATUS_NAME, DEFAULT_WRITER_STATUS_COLOR);
+    if (row && row.id) {
+        return setDefaultWriterStatusId(row.id);
+    }
+    return setDefaultWriterStatusId(1);
+}
+
+function getDefaultWriterStatusId() {
+    if (defaultWriterStatusId == null) {
+        return ensureDefaultWriterStatus();
+    }
+    return defaultWriterStatusId;
+}
+
+function normalizeStatusRow(row) {
+    if (!row) return null;
+    return {
+        id: row.id,
+        name: row.name || DEFAULT_WRITER_STATUS_NAME,
+        color: typeof row.color === 'string'
+            ? row.color
+            : (row.is_builtin ? DEFAULT_WRITER_STATUS_COLOR : DEFAULT_USER_STATUS_COLOR),
+        is_builtin: row.is_builtin === 1 || row.is_builtin === true,
+        order_index: row.order_index == null ? 0 : row.order_index
+    };
+}
+
+function sanitizeStatusId(raw) {
+    const fallback = getDefaultWriterStatusId();
+    const numeric = Number(raw);
+    if (!Number.isInteger(numeric) || numeric <= 0) return fallback;
+    if (!db) return fallback;
+    if (db._writerGetStatus) {
+        const row = db._writerGetStatus.get(numeric);
+        return row ? numeric : fallback;
+    }
+    const stmt = db.prepare(`SELECT id FROM writer_statuses WHERE id = ?`);
+    const row = stmt.get(numeric);
+    return row ? numeric : fallback;
+}
+
 
 process.on('unhandledRejection', (reason, promise) => {
     console.error('🚨 Unhandled Rejection:', reason);
@@ -116,6 +203,16 @@ function initDB() {
             content TEXT NOT NULL,
             folder_id INTEGER,
             order_index INTEGER NOT NULL DEFAULT 0,
+            status_id INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS writer_statuses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            color TEXT NOT NULL DEFAULT '#00000000',
+            is_builtin INTEGER NOT NULL DEFAULT 0,
+            order_index INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
@@ -129,6 +226,8 @@ function initDB() {
         );
         CREATE INDEX IF NOT EXISTS idx_writer_documents_updated_at ON writer_documents (updated_at DESC);
         CREATE INDEX IF NOT EXISTS idx_writer_documents_folder ON writer_documents (folder_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_writer_statuses_name ON writer_statuses (name COLLATE NOCASE);
+        CREATE INDEX IF NOT EXISTS idx_writer_statuses_order ON writer_statuses (order_index, id);
         -- Optional FTS (enable if your SQLite has FTS5):
         -- CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(content, content='entries', content_rowid='id');
         -- CREATE TRIGGER IF NOT EXISTS entries_ai AFTER INSERT ON entries BEGIN
@@ -142,6 +241,7 @@ function initDB() {
         --     INSERT INTO entries_fts(entries_fts, rowid, content) VALUES('delete', old.id, old.content);
         -- END;
     `);
+    const ensuredStatusId = ensureDefaultWriterStatus();
 
     const templateColumns = db.prepare(`PRAGMA table_info(templates)`).all();
     if (!templateColumns.some(col => col.name === 'schedule')) {
@@ -188,6 +288,15 @@ function initDB() {
         db.exec(`UPDATE writer_documents SET order_index = id WHERE order_index = 0;`);
     }
     db.exec(`CREATE INDEX IF NOT EXISTS idx_writer_documents_folder_order ON writer_documents(folder_id, order_index);`);
+    const defaultStatusFallback = Number.isFinite(ensuredStatusId) ? ensuredStatusId : 1;
+    if (!docColumns.some(col => col.name === 'status_id')) {
+        db.exec(`
+            ALTER TABLE writer_documents ADD COLUMN status_id INTEGER NOT NULL DEFAULT ${defaultStatusFallback};
+        `);
+        db.exec(`UPDATE writer_documents SET status_id = ${defaultStatusFallback} WHERE status_id IS NULL;`);
+    } else {
+        db.exec(`UPDATE writer_documents SET status_id = ${defaultStatusFallback} WHERE status_id IS NULL OR status_id <= 0;`);
+    }
 
     // Prepared statements
     db._upsertEntry = db.prepare(`
@@ -260,6 +369,7 @@ function initDB() {
             content,
             folder_id,
             order_index,
+            status_id,
             created_at,
             updated_at
         FROM writer_documents
@@ -272,18 +382,19 @@ function initDB() {
     `);
     db._writerGet = db.prepare(`SELECT * FROM writer_documents WHERE id = ?`);
     db._writerInsert = db.prepare(`
-        INSERT INTO writer_documents (title, content, folder_id, order_index)
-        VALUES (@title, @content, @folder_id, @order_index)
-        RETURNING id, title, content, folder_id, order_index, created_at, updated_at
+        INSERT INTO writer_documents (title, content, folder_id, order_index, status_id)
+        VALUES (@title, @content, @folder_id, @order_index, @status_id)
+        RETURNING id, title, content, folder_id, order_index, status_id, created_at, updated_at
     `);
     db._writerUpdate = db.prepare(`
         UPDATE writer_documents
         SET title = @title,
             content = @content,
             folder_id = @folder_id,
+            status_id = COALESCE(@status_id, status_id),
             updated_at = datetime('now')
         WHERE id = @id
-        RETURNING id, title, content, folder_id, order_index, created_at, updated_at
+        RETURNING id, title, content, folder_id, order_index, status_id, created_at, updated_at
     `);
     db._writerDelete = db.prepare(`DELETE FROM writer_documents WHERE id = ?`);
     db._writerRename = db.prepare(`
@@ -291,7 +402,14 @@ function initDB() {
         SET title = @title,
             updated_at = datetime('now')
         WHERE id = @id
-        RETURNING id, title, content, folder_id, order_index, created_at, updated_at
+        RETURNING id, title, content, folder_id, order_index, status_id, created_at, updated_at
+    `);
+    db._writerSetStatus = db.prepare(`
+        UPDATE writer_documents
+        SET status_id = @status_id,
+            updated_at = datetime('now')
+        WHERE id = @id
+        RETURNING id, title, content, folder_id, order_index, status_id, created_at, updated_at
     `);
     db._writerListFolders = db.prepare(`
         SELECT id, name, parent_id, order_index, created_at, updated_at
@@ -341,6 +459,39 @@ function initDB() {
             updated_at = datetime('now')
         WHERE id = @id
     `);
+    db._writerListStatuses = db.prepare(`
+        SELECT id, name, color, is_builtin, order_index
+        FROM writer_statuses
+        ORDER BY order_index ASC, id ASC
+    `);
+    db._writerInsertStatus = db.prepare(`
+        INSERT INTO writer_statuses (name, color, order_index, is_builtin)
+        VALUES (@name, @color, @order_index, 0)
+        RETURNING id, name, color, is_builtin, order_index
+    `);
+    db._writerUpdateStatus = db.prepare(`
+        UPDATE writer_statuses
+        SET name = COALESCE(@name, name),
+            color = COALESCE(@color, color),
+            updated_at = datetime('now')
+        WHERE id = @id AND is_builtin = 0
+        RETURNING id, name, color, is_builtin, order_index
+    `);
+    db._writerDeleteStatus = db.prepare(`DELETE FROM writer_statuses WHERE id = ? AND is_builtin = 0`);
+    db._writerGetStatus = db.prepare(`SELECT * FROM writer_statuses WHERE id = ?`);
+    db._writerMaxStatusOrder = db.prepare(`SELECT COALESCE(MAX(order_index), -1) AS max_order FROM writer_statuses`);
+    db._writerReorderStatuses = db.prepare(`
+        UPDATE writer_statuses
+        SET order_index = @order_index,
+            updated_at = datetime('now')
+        WHERE id = @id AND is_builtin = 0
+    `);
+    db._writerResetStatus = db.prepare(`
+        UPDATE writer_documents
+        SET status_id = @default_id,
+            updated_at = datetime('now')
+        WHERE status_id = @target_id
+    `);
 }
 
 function folderNameKey(parentId, name) {
@@ -385,7 +536,8 @@ function normalizeDocRow(row) {
     return {
         ...row,
         folder_id: row.folder_id == null ? null : row.folder_id,
-        order_index: row.order_index == null ? 0 : row.order_index
+        order_index: row.order_index == null ? 0 : row.order_index,
+        status_id: row.status_id == null ? getDefaultWriterStatusId() : row.status_id
     };
 }
 
@@ -548,11 +700,13 @@ ipcMain.handle('writer:create', (_evt, payload = {}) => {
     const maxRow = db._writerMaxOrder.get({ folder_id: folderId });
     const baseOrder = maxRow && Number.isFinite(maxRow.max_order) ? Number(maxRow.max_order) : -1;
     const nextOrder = baseOrder + 1;
+    const statusId = sanitizeStatusId(payload.statusId);
     const row = db._writerInsert.get({
         title,
         content,
         folder_id: folderId,
-        order_index: nextOrder
+        order_index: nextOrder,
+        status_id: statusId
     });
     return normalizeDocRow(row);
 });
@@ -564,12 +718,23 @@ ipcMain.handle('writer:update', (_evt, payload = {}) => {
     const content = typeof payload.content === 'string' ? payload.content : '';
     const folderId = payload.folderId == null ? null : Number(payload.folderId);
     if (folderId != null && !Number.isInteger(folderId)) throw new Error('Bad folder id');
+    const statusId = payload.statusId == null ? null : sanitizeStatusId(payload.statusId);
     const row = db._writerUpdate.get({
         id,
         title,
         content,
-        folder_id: folderId
+        folder_id: folderId,
+        status_id: statusId
     });
+    if (!row) throw new Error('Writer document not found');
+    return normalizeDocRow(row);
+});
+
+ipcMain.handle('writer:set-status', (_evt, payload = {}) => {
+    const id = Number(payload.id);
+    if (!Number.isInteger(id) || id <= 0) throw new Error('Bad writer document id');
+    const statusId = sanitizeStatusId(payload.statusId);
+    const row = db._writerSetStatus.get({ id, status_id: statusId });
     if (!row) throw new Error('Writer document not found');
     return normalizeDocRow(row);
 });
@@ -635,11 +800,13 @@ ipcMain.handle('writer:duplicate', (_evt, payload = {}) => {
     if (folderId != null && !Number.isInteger(folderId)) throw new Error('Bad folder id');
     const maxRow = db._writerMaxOrder.get({ folder_id: folderId });
     const nextOrder = (maxRow && Number.isFinite(maxRow.max_order) ? Number(maxRow.max_order) : -1) + 1;
+    const statusId = sanitizeStatusId(payload.statusId == null ? source.status_id : payload.statusId);
     const row = db._writerInsert.get({
         title,
         content: source.content || '',
         folder_id: folderId,
-        order_index: nextOrder
+        order_index: nextOrder,
+        status_id: statusId
     });
     return normalizeDocRow(row);
 });
@@ -762,7 +929,8 @@ ipcMain.handle('writer:duplicate-folder', (_evt, payload = {}) => {
                 title: doc.title,
                 content: doc.content || '',
                 folder_id: destinationFolderId,
-                order_index: orderIndex
+                order_index: orderIndex,
+                status_id: sanitizeStatusId(doc.status_id)
             });
         });
     };
@@ -792,6 +960,76 @@ ipcMain.handle('writer:duplicate-folder', (_evt, payload = {}) => {
     if (!created.length) throw new Error('Unable to duplicate folder');
     const root = created[0];
     return { ...root, parent_id: root.parent_id == null ? null : root.parent_id };
+});
+
+ipcMain.handle('writer:list-statuses', () => {
+    return db._writerListStatuses.all().map(normalizeStatusRow).filter(Boolean);
+});
+
+ipcMain.handle('writer:create-status', (_evt, payload = {}) => {
+    const rawName = typeof payload.name === 'string' ? payload.name : '';
+    const trimmed = rawName.trim();
+    if (!trimmed) throw new Error('Status name required');
+    if (trimmed.toLowerCase() === DEFAULT_WRITER_STATUS_NAME.toLowerCase()) {
+        throw new Error('That status name is reserved');
+    }
+    const color = normalizeStatusColor(payload.color);
+    const existing = db.prepare(`SELECT id FROM writer_statuses WHERE name COLLATE NOCASE = ?`).get(trimmed);
+    if (existing && existing.id) throw new Error('A status with that name already exists');
+    const maxRow = db._writerMaxStatusOrder.get();
+    const nextOrder = (maxRow && Number.isFinite(maxRow.max_order) ? Number(maxRow.max_order) : -1) + 1;
+    const row = db._writerInsertStatus.get({ name: trimmed, color, order_index: nextOrder });
+    return normalizeStatusRow(row);
+});
+
+ipcMain.handle('writer:update-status', (_evt, payload = {}) => {
+    const id = Number(payload.id);
+    if (!Number.isInteger(id) || id <= 0) throw new Error('Bad status id');
+    const target = db._writerGetStatus.get(id);
+    if (!target) throw new Error('Status not found');
+    if (target.is_builtin) throw new Error('Cannot modify this status');
+    let name = null;
+    if (typeof payload.name === 'string') {
+        const trimmed = payload.name.trim();
+        if (trimmed) {
+            const existing = db.prepare(`SELECT id FROM writer_statuses WHERE name COLLATE NOCASE = ? AND id != ?`).get(trimmed, id);
+            if (existing && existing.id) throw new Error('A status with that name already exists');
+            name = trimmed;
+        }
+    }
+    const color = payload.color == null ? null : normalizeStatusColor(payload.color);
+    const row = db._writerUpdateStatus.get({ id, name, color });
+    if (!row) throw new Error('Status update failed');
+    return normalizeStatusRow(row);
+});
+
+ipcMain.handle('writer:delete-status', (_evt, payload = {}) => {
+    const value = typeof payload === 'object' && payload !== null ? payload.id : payload;
+    const id = Number(value);
+    if (!Number.isInteger(id) || id <= 0) throw new Error('Bad status id');
+    const target = db._writerGetStatus.get(id);
+    if (!target) return { deleted: 0 };
+    if (target.is_builtin) throw new Error('Cannot delete this status');
+    const defaultId = getDefaultWriterStatusId();
+    const txn = db.transaction(() => {
+        db._writerResetStatus.run({ default_id: defaultId, target_id: id });
+        return db._writerDeleteStatus.run(id).changes;
+    });
+    const deleted = txn();
+    return { deleted };
+});
+
+ipcMain.handle('writer:reorder-statuses', (_evt, payload = {}) => {
+    const order = Array.isArray(payload.order) ? payload.order : [];
+    const ids = order.map(Number).filter(id => Number.isInteger(id) && id > 0);
+    if (!ids.length) return { updated: 0 };
+    const txn = db.transaction(() => {
+        ids.forEach((id, idx) => {
+            db._writerReorderStatuses.run({ id, order_index: idx });
+        });
+    });
+    txn();
+    return { updated: ids.length };
 });
 
 ipcMain.handle('settings:get', (_evt, key) => {

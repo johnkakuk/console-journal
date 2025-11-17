@@ -35,6 +35,14 @@ function shiftISO(days = 0, tz = Intl.DateTimeFormat().resolvedOptions().timeZon
 
 function isISODate(s) { return /^\d{4}-\d{2}-\d{2}$/.test(s); }
 
+function shiftISOFrom(dateStr, days = 0) {
+    if (!isISODate(dateStr)) return dateStr;
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const base = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+    const shifted = new Date(base.getTime() + days * 86400000);
+    return shifted.toISOString().slice(0, 10);
+}
+
 function isMonthDay(s) { return /^\d{2}-\d{2}$/.test(s); }
 
 function isYearMonth(s) { return /^\d{4}-\d{2}$/.test(s); }
@@ -117,12 +125,17 @@ if (!db) {
     if (!window.electronAPI) {
         // ===== Minimal IndexedDB adapter for PWA =====
         const DB_NAME = 'console-journal';
-        const DB_VERSION = 5;
+        const DB_VERSION = 6;
         const STORE = 'entries';
         const TEMPLATE_STORE = 'templates';
         const SETTINGS_STORE = 'settings';
         const WRITER_STORE = 'writer_docs';
         const WRITER_FOLDER_STORE = 'writer_folders';
+        const WRITER_STATUS_STORE = 'writer_statuses';
+        const DEFAULT_WRITER_STATUS_NAME = 'None';
+        const DEFAULT_WRITER_STATUS_COLOR = '#00000000';
+        const DEFAULT_USER_STATUS_COLOR = '#37c978';
+        let writerDefaultStatusId = null;
 
         const openDB = () => new Promise((resolve, reject) => {
             const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -152,6 +165,64 @@ if (!db) {
                     f.createIndex('parent_name', ['parent_id', 'name_lower'], { unique: true });
                     f.createIndex('name_lower', 'name_lower', { unique: false });
                 }
+                let statusStore;
+                if (!db.objectStoreNames.contains(WRITER_STATUS_STORE)) {
+                    statusStore = db.createObjectStore(WRITER_STATUS_STORE, { keyPath: 'id', autoIncrement: true });
+                    statusStore.createIndex('name_lower', 'name_lower', { unique: true });
+                    statusStore.createIndex('order_index', 'order_index', { unique: false });
+                    statusStore.createIndex('is_builtin', 'is_builtin', { unique: false });
+                } else {
+                    statusStore = req.transaction.objectStore(WRITER_STATUS_STORE);
+                    if (!statusStore.indexNames.contains('name_lower')) {
+                        statusStore.createIndex('name_lower', 'name_lower', { unique: true });
+                    }
+                    if (!statusStore.indexNames.contains('order_index')) {
+                        statusStore.createIndex('order_index', 'order_index', { unique: false });
+                    }
+                    if (!statusStore.indexNames.contains('is_builtin')) {
+                        statusStore.createIndex('is_builtin', 'is_builtin', { unique: false });
+                    }
+                }
+                const writerStore = req.transaction.objectStore(WRITER_STORE);
+                const ensureDefaultStatus = (defaultId) => {
+                    if (!writerStore) return;
+                    const cursorReq = writerStore.openCursor();
+                    cursorReq.onsuccess = () => {
+                        const cursor = cursorReq.result;
+                        if (!cursor) return;
+                        const value = cursor.value || {};
+                        if (value.status_id == null) {
+                            value.status_id = defaultId;
+                            cursor.update(value);
+                        }
+                        cursor.continue();
+                    };
+                };
+                const now = new Date().toISOString();
+                if (statusStore) {
+                    const builtinReq = statusStore.index('is_builtin').get(1);
+                    builtinReq.onsuccess = () => {
+                        const row = builtinReq.result;
+                        if (row && row.id != null) {
+                            writerDefaultStatusId = row.id;
+                            ensureDefaultStatus(row.id);
+                        } else {
+                            const addReq = statusStore.add({
+                                name: DEFAULT_WRITER_STATUS_NAME,
+                                name_lower: DEFAULT_WRITER_STATUS_NAME.toLowerCase(),
+                                color: DEFAULT_WRITER_STATUS_COLOR,
+                                is_builtin: 1,
+                                order_index: 0,
+                                created_at: now,
+                                updated_at: now
+                            });
+                            addReq.onsuccess = () => {
+                                writerDefaultStatusId = addReq.result;
+                                ensureDefaultStatus(addReq.result);
+                            };
+                        }
+                    };
+                }
             };
             req.onsuccess = () => resolve(req.result);
             req.onerror = () => reject(req.error);
@@ -171,6 +242,7 @@ if (!db) {
         const txRun = (mode, fn) => txRunStore(STORE, mode, fn);
         const txRunWriter = (mode, fn) => txRunStore(WRITER_STORE, mode, fn);
         const txRunFolders = (mode, fn) => txRunStore(WRITER_FOLDER_STORE, mode, fn);
+        const txRunStatuses = (mode, fn) => txRunStore(WRITER_STATUS_STORE, mode, fn);
 
         function normalizeWriterTitle(title) {
             const trimmed = String(title ?? '').trim();
@@ -219,10 +291,104 @@ if (!db) {
             return out;
         }
 
+        function normalizeStatusColorValue(color, { allowTransparent = false } = {}) {
+            if (typeof color !== 'string') {
+                return allowTransparent ? DEFAULT_WRITER_STATUS_COLOR : DEFAULT_USER_STATUS_COLOR;
+            }
+            let value = color.trim();
+            if (/^transparent$/i.test(value)) {
+                return allowTransparent ? DEFAULT_WRITER_STATUS_COLOR : DEFAULT_USER_STATUS_COLOR;
+            }
+            if (/^#[0-9a-fA-F]{3}$/.test(value)) {
+                const r = value[1];
+                const g = value[2];
+                const b = value[3];
+                value = `#${r}${r}${g}${g}${b}${b}`;
+            }
+            if (/^#[0-9a-fA-F]{6}$/.test(value) || /^#[0-9a-fA-F]{8}$/.test(value)) {
+                return value.toLowerCase();
+            }
+            return allowTransparent ? DEFAULT_WRITER_STATUS_COLOR : DEFAULT_USER_STATUS_COLOR;
+        }
+
+        function normalizeStatusRecord(row) {
+            if (!row) return null;
+            return {
+                id: row.id,
+                name: row.name || DEFAULT_WRITER_STATUS_NAME,
+                color: normalizeStatusColorValue(row.color, { allowTransparent: true }),
+                is_builtin: row.is_builtin === 1 || row.is_builtin === true,
+                order_index: row.order_index == null ? 0 : row.order_index
+            };
+        }
+
+        function normalizeWriterDocRow(row, defaultStatusId) {
+            if (!row) return null;
+            const fallback = Number.isFinite(defaultStatusId) ? defaultStatusId : writerDefaultStatusId;
+            const statusId = row.status_id == null ? fallback : row.status_id;
+            return {
+                ...row,
+                folder_id: row.folder_id == null ? null : row.folder_id,
+                status_id: statusId == null ? fallback : statusId,
+                order_index: row.order_index == null ? 0 : row.order_index
+            };
+        }
+
+        async function ensureWriterDefaultStatusId() {
+            if (writerDefaultStatusId != null) return writerDefaultStatusId;
+            try {
+                const row = await txRunStatuses('readonly', store => new Promise((resolve, reject) => {
+                    if (!store.indexNames.contains('is_builtin')) {
+                        resolve(null);
+                        return;
+                    }
+                    const req = store.index('is_builtin').get(1);
+                    req.onsuccess = () => resolve(req.result || null);
+                    req.onerror = () => reject(req.error);
+                }));
+                if (row && row.id != null) {
+                    writerDefaultStatusId = row.id;
+                    return row.id;
+                }
+            } catch (_) {}
+            const now = new Date().toISOString();
+            const createdId = await txRunStatuses('readwrite', store => new Promise((resolve, reject) => {
+                const addReq = store.add({
+                    name: DEFAULT_WRITER_STATUS_NAME,
+                    name_lower: DEFAULT_WRITER_STATUS_NAME.toLowerCase(),
+                    color: DEFAULT_WRITER_STATUS_COLOR,
+                    is_builtin: 1,
+                    order_index: 0,
+                    created_at: now,
+                    updated_at: now
+                });
+                addReq.onsuccess = () => resolve(addReq.result);
+                addReq.onerror = () => reject(addReq.error);
+            }));
+            writerDefaultStatusId = createdId;
+            return createdId;
+        }
+
+        async function resolveWriterStatusId(value) {
+            const fallback = await ensureWriterDefaultStatusId();
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
+            try {
+                const exists = await txRunStatuses('readonly', store => new Promise((resolve, reject) => {
+                    const req = store.get(numeric);
+                    req.onsuccess = () => resolve(req.result || null);
+                    req.onerror = () => reject(req.error);
+                }));
+                return exists ? numeric : fallback;
+            } catch (_) {
+                return fallback;
+            }
+        }
+
         async function listDocsForFolder(folderId) {
             const key = folderId == null ? null : Number(folderId);
-            return txRunWriter('readonly', store => {
-                const docs = [];
+            const docs = await txRunWriter('readonly', store => {
+                const rows = [];
                 return new Promise((resolve, reject) => {
                     const index = store.index('folder_id');
                     const range = IDBKeyRange.only(key);
@@ -230,15 +396,17 @@ if (!db) {
                     cursor.onsuccess = () => {
                         const cur = cursor.result;
                         if (!cur) {
-                            resolve(docs);
+                            resolve(rows);
                             return;
                         }
-                        docs.push(cur.value);
+                        rows.push(cur.value);
                         cur.continue();
                     };
                     cursor.onerror = () => reject(cursor.error);
                 });
             });
+            const defaultStatusId = await ensureWriterDefaultStatusId();
+            return docs.map(doc => normalizeWriterDocRow(doc, defaultStatusId));
         }
 
         async function clearDocsForFolder(folderId) {
@@ -423,7 +591,7 @@ if (!db) {
             },
             writer: {
                 async list() {
-                    return txRunWriter('readonly', store => {
+                    const docs = await txRunWriter('readonly', store => {
                         const idx = store.index('updated_at');
                         const out = [];
                         return new Promise((resolve, reject) => {
@@ -437,43 +605,61 @@ if (!db) {
                             cursor.onerror = () => reject(cursor.error);
                         });
                     });
+                    const defaultStatusId = await ensureWriterDefaultStatusId();
+                    return docs.map(doc => normalizeWriterDocRow(doc, defaultStatusId));
                 },
                 async get(id) {
                     const key = Number(id);
                     if (!Number.isFinite(key)) throw new Error('Writer document id required');
-                    return txRunWriter('readonly', store => {
+                    const row = await txRunWriter('readonly', store => {
                         const req = store.get(key);
                         return new Promise((resolve, reject) => {
                             req.onsuccess = () => resolve(req.result || null);
                             req.onerror = () => reject(req.error);
                         });
                     });
+                    if (!row) return null;
+                    const defaultStatusId = await ensureWriterDefaultStatusId();
+                    return normalizeWriterDocRow(row, defaultStatusId);
                 },
-                async create({ title, content = '', folderId = null } = {}) {
+                async create({ title, content = '', folderId = null, statusId = null } = {}) {
                     const now = new Date().toISOString();
                     const titleNormalized = normalizeWriterTitle(title);
+                    const resolvedStatusId = await resolveWriterStatusId(statusId);
+                    const resolvedFolderId = folderId == null ? null : Number(folderId);
+                    if (resolvedFolderId != null && !Number.isFinite(resolvedFolderId)) throw new Error('Folder id required');
+                    const siblings = await listDocsForFolder(resolvedFolderId);
+                    const maxOrder = siblings.reduce((max, doc) => Math.max(max, Number(doc.order_index) || 0), -1);
+                    const nextOrder = maxOrder + 1;
                     const doc = {
                         title: titleNormalized,
                         title_lower: titleNormalized.toLowerCase(),
                         content: String(content ?? ''),
-                        folder_id: folderId == null ? null : Number(folderId),
+                        folder_id: resolvedFolderId,
+                        order_index: nextOrder,
+                        status_id: resolvedStatusId,
                         created_at: now,
                         updated_at: now
                     };
-                    return txRunWriter('readwrite', store => {
+                    const created = await txRunWriter('readwrite', store => {
                         const req = store.add(doc);
                         return new Promise((resolve, reject) => {
                             req.onsuccess = () => resolve({ ...doc, id: req.result });
                             req.onerror = () => reject(req.error);
                         });
                     });
+                    const defaultStatusId = await ensureWriterDefaultStatusId();
+                    return normalizeWriterDocRow(created, defaultStatusId);
                 },
-                async update({ id, title, content = '', folderId = null } = {}) {
+                async update({ id, title, content = '', folderId = null, statusId = null } = {}) {
                     const key = Number(id);
                     if (!Number.isFinite(key)) throw new Error('Writer document id required');
                     const now = new Date().toISOString();
                     const titleNormalized = normalizeWriterTitle(title);
-                    return txRunWriter('readwrite', store => {
+                    const resolvedStatus = statusId == null ? null : await resolveWriterStatusId(statusId);
+                    const resolvedFolderId = folderId == null ? null : Number(folderId);
+                    if (resolvedFolderId != null && !Number.isFinite(resolvedFolderId)) throw new Error('Folder id required');
+                    const updated = await txRunWriter('readwrite', store => {
                         const getReq = store.get(key);
                         return new Promise((resolve, reject) => {
                             getReq.onsuccess = () => {
@@ -487,7 +673,8 @@ if (!db) {
                                     title: titleNormalized,
                                     title_lower: titleNormalized.toLowerCase(),
                                     content: String(content ?? ''),
-                                    folder_id: folderId == null ? null : Number(folderId),
+                                    folder_id: resolvedFolderId,
+                                    status_id: resolvedStatus == null ? existing.status_id : resolvedStatus,
                                     updated_at: now
                                 };
                                 const putReq = store.put(next);
@@ -497,6 +684,8 @@ if (!db) {
                             getReq.onerror = () => reject(getReq.error);
                         });
                     });
+                    const defaultStatusId = await ensureWriterDefaultStatusId();
+                    return normalizeWriterDocRow(updated, defaultStatusId);
                 },
                 async delete(id) {
                     const key = Number(id);
@@ -516,14 +705,56 @@ if (!db) {
                     return this.create({
                         title: nextTitle,
                         content: source.content ?? '',
-                        folderId: folderId ?? source.folder_id ?? null
+                        folderId: folderId ?? source.folder_id ?? null,
+                        statusId: source.status_id ?? null
                     });
+                },
+                async reorderDocuments(moves = []) {
+                    if (!Array.isArray(moves) || !moves.length) return;
+                    const normalizedMoves = moves
+                        .map(move => ({
+                            id: Number(move?.id),
+                            folderId: move?.folderId == null ? null : Number(move.folderId),
+                            order: Number(move?.order)
+                        }))
+                        .filter(move => Number.isFinite(move.id));
+                    if (!normalizedMoves.length) return;
+                    const now = new Date().toISOString();
+                    await txRunWriter('readwrite', store => new Promise((resolve, reject) => {
+                        let index = 0;
+                        const processNext = () => {
+                            if (index >= normalizedMoves.length) {
+                                resolve(true);
+                                return;
+                            }
+                            const move = normalizedMoves[index++];
+                            const getReq = store.get(move.id);
+                            getReq.onsuccess = () => {
+                                const row = getReq.result;
+                                if (!row) {
+                                    processNext();
+                                    return;
+                                }
+                                const updated = {
+                                    ...row,
+                                    folder_id: move.folderId == null ? null : move.folderId,
+                                    order_index: Number.isFinite(move.order) ? move.order : (row.order_index ?? 0),
+                                    updated_at: now
+                                };
+                                const putReq = store.put(updated);
+                                putReq.onsuccess = () => processNext();
+                                putReq.onerror = () => reject(putReq.error);
+                            };
+                            getReq.onerror = () => reject(getReq.error);
+                        };
+                        processNext();
+                    }));
                 },
                 async rename(id, title) {
                     const key = Number(id);
                     if (!Number.isFinite(key)) throw new Error('Writer document id required');
                     const normalized = normalizeWriterTitle(title);
-                    return txRunWriter('readwrite', store => {
+                    const renamed = await txRunWriter('readwrite', store => {
                         const getReq = store.get(key);
                         return new Promise((resolve, reject) => {
                             getReq.onsuccess = () => {
@@ -545,6 +776,8 @@ if (!db) {
                             getReq.onerror = () => reject(getReq.error);
                         });
                     });
+                    const defaultStatusId = await ensureWriterDefaultStatusId();
+                    return normalizeWriterDocRow(renamed, defaultStatusId);
                 },
                 async listFolders() {
                     return txRunFolders('readonly', store => {
@@ -553,9 +786,14 @@ if (!db) {
                             req.onsuccess = () => {
                                 const rows = (req.result || []).map(row => ({
                                     ...row,
-                                    parent_id: row.parent_id == null ? null : row.parent_id
+                                    parent_id: row.parent_id == null ? null : row.parent_id,
+                                    order_index: row.order_index == null ? 0 : row.order_index
                                 }));
-                                rows.sort((a, b) => a.name_lower.localeCompare(b.name_lower));
+                                rows.sort((a, b) => {
+                                    const diff = (a.order_index ?? 0) - (b.order_index ?? 0);
+                                    if (diff !== 0) return diff;
+                                    return (a.name_lower || '').localeCompare(b.name_lower || '');
+                                });
                                 resolve(rows);
                             };
                             req.onerror = () => reject(req.error);
@@ -588,11 +826,15 @@ if (!db) {
                     const existingKeys = new Set(existing.map(f => folderNameKey(f.parent_id, f.name)));
                     const finalName = ensureUniqueFolderName(name, parentKey, existingKeys);
                     const now = new Date().toISOString();
+                    const siblings = existing.filter(f => (f.parent_id == null ? null : f.parent_id) === (parentKey == null ? null : parentKey));
+                    const maxOrder = siblings.reduce((max, folder) => Math.max(max, Number(folder.order_index) || 0), -1);
+                    const nextOrder = maxOrder + 1;
                     return txRunFolders('readwrite', store => {
                         const doc = {
                             name: finalName,
                             name_lower: finalName.toLowerCase(),
                             parent_id: parentKey == null ? null : parentKey,
+                            order_index: nextOrder,
                             created_at: now,
                             updated_at: now
                         };
@@ -632,6 +874,7 @@ if (!db) {
                                     ...existingRow,
                                     name: normalized,
                                     name_lower: normalized.toLowerCase(),
+                                    order_index: existingRow.order_index == null ? 0 : existingRow.order_index,
                                     updated_at: now
                                 };
                                 const putReq = store.put(next);
@@ -676,7 +919,8 @@ if (!db) {
                             await this.create({
                                 title: doc.title,
                                 content: doc.content ?? '',
-                                folderId: destFolderId
+                                folderId: destFolderId,
+                                statusId: doc.status_id ?? null
                             });
                         }
                     };
@@ -691,6 +935,249 @@ if (!db) {
                         }
                     }
                     return createdRoot;
+                },
+                async reorderFolders(moves = []) {
+                    if (!Array.isArray(moves) || !moves.length) return;
+                    const normalizedMoves = moves
+                        .map(move => ({
+                            id: Number(move?.id),
+                            parentId: move?.parentId == null ? null : Number(move.parentId),
+                            order: Number(move?.order)
+                        }))
+                        .filter(move => Number.isFinite(move.id));
+                    if (!normalizedMoves.length) return;
+                    const now = new Date().toISOString();
+                    await txRunFolders('readwrite', store => new Promise((resolve, reject) => {
+                        let index = 0;
+                        const processNext = () => {
+                            if (index >= normalizedMoves.length) {
+                                resolve(true);
+                                return;
+                            }
+                            const move = normalizedMoves[index++];
+                            const getReq = store.get(move.id);
+                            getReq.onsuccess = () => {
+                                const row = getReq.result;
+                                if (!row) {
+                                    processNext();
+                                    return;
+                                }
+                                const updated = {
+                                    ...row,
+                                    parent_id: move.parentId == null ? null : move.parentId,
+                                    order_index: Number.isFinite(move.order) ? move.order : (row.order_index ?? 0),
+                                    updated_at: now
+                                };
+                                const putReq = store.put(updated);
+                                putReq.onsuccess = () => processNext();
+                                putReq.onerror = () => reject(putReq.error);
+                            };
+                            getReq.onerror = () => reject(getReq.error);
+                        };
+                        processNext();
+                    }));
+                },
+                async listStatuses() {
+                    const rows = await txRunStatuses('readonly', store => new Promise((resolve, reject) => {
+                        const req = store.getAll();
+                        req.onsuccess = () => resolve(req.result || []);
+                        req.onerror = () => reject(req.error);
+                    }));
+                    rows.sort((a, b) => {
+                        const orderDiff = (a.order_index ?? 0) - (b.order_index ?? 0);
+                        if (orderDiff !== 0) return orderDiff;
+                        return (a.id ?? 0) - (b.id ?? 0);
+                    });
+                    return rows.map(normalizeStatusRecord);
+                },
+                async createStatus({ name, color } = {}) {
+                    const trimmed = String(name ?? '').trim();
+                    if (!trimmed) throw new Error('Status name required');
+                    if (trimmed.toLowerCase() === DEFAULT_WRITER_STATUS_NAME.toLowerCase()) {
+                        throw new Error('That status name is reserved');
+                    }
+                    const lower = trimmed.toLowerCase();
+                    const colorValue = normalizeStatusColorValue(color);
+                    const existing = await txRunStatuses('readonly', store => new Promise((resolve, reject) => {
+                        if (!store.indexNames.contains('name_lower')) {
+                            resolve(null);
+                            return;
+                        }
+                        const req = store.index('name_lower').get(lower);
+                        req.onsuccess = () => resolve(req.result || null);
+                        req.onerror = () => reject(req.error);
+                    }));
+                    if (existing) throw new Error('A status with that name already exists');
+                    const statuses = await this.listStatuses();
+                    const maxOrder = statuses.reduce((max, status) => Math.max(max, status.order_index ?? 0), 0);
+                    const nextOrder = maxOrder + 1;
+                    const now = new Date().toISOString();
+                    const created = await txRunStatuses('readwrite', store => new Promise((resolve, reject) => {
+                        const addReq = store.add({
+                            name: trimmed,
+                            name_lower: lower,
+                            color: colorValue,
+                            is_builtin: 0,
+                            order_index: nextOrder,
+                            created_at: now,
+                            updated_at: now
+                        });
+                        addReq.onsuccess = () => resolve({ id: addReq.result, name: trimmed, color: colorValue, is_builtin: 0, order_index: nextOrder });
+                        addReq.onerror = () => reject(addReq.error);
+                    }));
+                    return normalizeStatusRecord(created);
+                },
+                async updateStatus(id, updates = {}) {
+                    const key = Number(id);
+                    if (!Number.isFinite(key)) throw new Error('Status id required');
+                    const target = await txRunStatuses('readonly', store => new Promise((resolve, reject) => {
+                        const req = store.get(key);
+                        req.onsuccess = () => resolve(req.result || null);
+                        req.onerror = () => reject(req.error);
+                    }));
+                    if (!target) throw new Error('Status not found');
+                    if (target.is_builtin) throw new Error('Cannot modify this status');
+                    let newName = null;
+                    if (typeof updates.name === 'string') {
+                        const trimmed = updates.name.trim();
+                        if (trimmed) {
+                            const lower = trimmed.toLowerCase();
+                            const conflict = await txRunStatuses('readonly', store => new Promise((resolve, reject) => {
+                                if (!store.indexNames.contains('name_lower')) {
+                                    resolve(null);
+                                    return;
+                                }
+                                const req = store.index('name_lower').get(lower);
+                                req.onsuccess = () => resolve(req.result && req.result.id !== key ? req.result : null);
+                                req.onerror = () => reject(req.error);
+                            }));
+                            if (conflict) throw new Error('A status with that name already exists');
+                            newName = trimmed;
+                        }
+                    }
+                    const newColor = updates.color == null ? null : normalizeStatusColorValue(updates.color, { allowTransparent: true });
+                    const now = new Date().toISOString();
+                    const updated = await txRunStatuses('readwrite', store => new Promise((resolve, reject) => {
+                        const getReq = store.get(key);
+                        getReq.onsuccess = () => {
+                            const existing = getReq.result;
+                            if (!existing) {
+                                reject(new Error('Status not found'));
+                                return;
+                            }
+                            if (existing.is_builtin) {
+                                reject(new Error('Cannot modify this status'));
+                                return;
+                            }
+                            const next = {
+                                ...existing,
+                                name: newName || existing.name,
+                                name_lower: (newName || existing.name).toLowerCase(),
+                                color: newColor || existing.color,
+                                updated_at: now
+                            };
+                            const putReq = store.put(next);
+                            putReq.onsuccess = () => resolve(next);
+                            putReq.onerror = () => reject(putReq.error);
+                        };
+                        getReq.onerror = () => reject(getReq.error);
+                    }));
+                    return normalizeStatusRecord(updated);
+                },
+                async deleteStatus(id) {
+                    const key = Number(id);
+                    if (!Number.isFinite(key)) throw new Error('Status id required');
+                    const target = await txRunStatuses('readonly', store => new Promise((resolve, reject) => {
+                        const req = store.get(key);
+                        req.onsuccess = () => resolve(req.result || null);
+                        req.onerror = () => reject(req.error);
+                    }));
+                    if (!target) return { deleted: 0 };
+                    if (target.is_builtin) throw new Error('Cannot delete this status');
+                    const defaultId = await ensureWriterDefaultStatusId();
+                    const now = new Date().toISOString();
+                    await txRunWriter('readwrite', store => new Promise((resolve, reject) => {
+                        const cursor = store.openCursor();
+                        cursor.onsuccess = () => {
+                            const cur = cursor.result;
+                            if (!cur) {
+                                resolve(true);
+                                return;
+                            }
+                            const value = cur.value || {};
+                            if (value.status_id === key) {
+                                value.status_id = defaultId;
+                                value.updated_at = now;
+                                const updateReq = cur.update(value);
+                                updateReq.onsuccess = () => cur.continue();
+                                updateReq.onerror = () => reject(updateReq.error);
+                            } else {
+                                cur.continue();
+                            }
+                        };
+                        cursor.onerror = () => reject(cursor.error);
+                    }));
+                    await txRunStatuses('readwrite', store => new Promise((resolve, reject) => {
+                        const delReq = store.delete(key);
+                        delReq.onsuccess = () => resolve(true);
+                        delReq.onerror = () => reject(delReq.error);
+                    }));
+                    return { deleted: 1 };
+                },
+                async setStatus(id, statusId) {
+                    const key = Number(id);
+                    if (!Number.isFinite(key)) throw new Error('Writer document id required');
+                    const resolved = await resolveWriterStatusId(statusId);
+                    const now = new Date().toISOString();
+                    const updated = await txRunWriter('readwrite', store => new Promise((resolve, reject) => {
+                        const req = store.get(key);
+                        req.onsuccess = () => {
+                            const existing = req.result;
+                            if (!existing) {
+                                reject(new Error('Document not found'));
+                                return;
+                            }
+                            const next = {
+                                ...existing,
+                                status_id: resolved,
+                                updated_at: now
+                            };
+                            const putReq = store.put(next);
+                            putReq.onsuccess = () => resolve(next);
+                            putReq.onerror = () => reject(putReq.error);
+                        };
+                        req.onerror = () => reject(req.error);
+                    }));
+                    const defaultStatusId = await ensureWriterDefaultStatusId();
+                    return normalizeWriterDocRow(updated, defaultStatusId);
+                },
+                async reorderStatuses(order = []) {
+                    const ids = Array.isArray(order) ? order.map(Number).filter(id => Number.isFinite(id) && id > 0) : [];
+                    if (!ids.length) return { updated: 0 };
+                    return txRunStatuses('readwrite', store => new Promise((resolve, reject) => {
+                        let index = 0;
+                        const step = () => {
+                            if (index >= ids.length) {
+                                resolve({ updated: ids.length });
+                                return;
+                            }
+                            const id = ids[index++];
+                            const getReq = store.get(id);
+                            getReq.onsuccess = () => {
+                                const row = getReq.result;
+                                if (!row || row.is_builtin) {
+                                    step();
+                                    return;
+                                }
+                                row.order_index = index - 1;
+                                const putReq = store.put(row);
+                                putReq.onsuccess = () => step();
+                                putReq.onerror = () => reject(putReq.error);
+                            };
+                            getReq.onerror = () => reject(getReq.error);
+                        };
+                        step();
+                    }));
                 }
             }
         };
@@ -773,7 +1260,13 @@ if (!db) {
                 createFolder:   (payload = {}) => invoke('writer:create-folder', payload),
                 renameFolder:   (id, name) => invoke('writer:rename-folder', { id, name }),
                 deleteFolder:   (id) => invoke('writer:delete-folder', id),
-                duplicateFolder:(id, overrides = {}) => invoke('writer:duplicate-folder', { id, ...overrides })
+                duplicateFolder:(id, overrides = {}) => invoke('writer:duplicate-folder', { id, ...overrides }),
+                listStatuses: () => invoke('writer:list-statuses'),
+                createStatus: (payload = {}) => invoke('writer:create-status', payload),
+                updateStatus: (id, updates = {}) => invoke('writer:update-status', { id, ...updates }),
+                deleteStatus: (id) => invoke('writer:delete-status', id),
+                setStatus: (id, statusId) => invoke('writer:set-status', { id, statusId }),
+                reorderStatuses: (order = []) => invoke('writer:reorder-statuses', { order })
             }
         };
     }
@@ -1810,6 +2303,7 @@ function printExportHelp() {
         <div><span class="kbd">export YYYY</span> — export that year</div>
         <div><span class="kbd">export YYYY-MM</span> — export that month</div>
         <div><span class="kbd">export YYYY-MM-DD</span> — export that day</div>
+        <div><span class="kbd">export YYYY-MM-DD-YYYY-MM-DD</span> — export that date range</div>
         <div><span class="kbd">export ... -pdf</span> — export as <em>.pdf</em> instead of .txt</div>
         <div><span class="kbd">export -help</span> — show this help</div>
     </div>`);
@@ -1817,13 +2311,32 @@ function printExportHelp() {
 
 // Resolve a list of entry rows for various selectors
 async function gatherEntriesForExport(selector) {
-    // selector: { type: 'all' | 'year' | 'month' | 'day' }
+    // selector: { type: 'all' | 'year' | 'month' | 'day' | 'range' }
     if (!selector || !selector.type) selector = { type: 'recent7' };
 
     if (selector.type === 'day') {
         const key = `${selector.y}-${String(selector.m).padStart(2,'0')}-${String(selector.d).padStart(2,'0')}`;
         const row = await db.get(key);
         return row ? [row] : [];
+    }
+
+    if (selector.type === 'range') {
+        const startISO = selector.startISO || `${selector.start.y}-${String(selector.start.m).padStart(2,'0')}-${String(selector.start.d).padStart(2,'0')}`;
+        const endISO = selector.endISO || `${selector.end.y}-${String(selector.end.m).padStart(2,'0')}-${String(selector.end.d).padStart(2,'0')}`;
+        if (!startISO || !endISO) return [];
+        const rows = [];
+        let cursor = startISO;
+        let safety = 0;
+        const maxSpan = 365 * 200; // safety cap (~200 years)
+        while (cursor && cursor <= endISO && safety < maxSpan) {
+            const row = await db.get(cursor);
+            if (row) rows.push(row);
+            const next = shiftISOFrom(cursor, 1);
+            if (!next || next === cursor) break;
+            cursor = next;
+            safety += 1;
+        }
+        return rows;
     }
 
     if (selector.type === 'month') {
@@ -1889,7 +2402,7 @@ function makeFilename(base, ext) {
 }
 
 function parseExportArgs(argv) {
-    // returns { target?: {type, y?, m?, d?}, pdf: boolean, help?: boolean, invalid?: string }
+    // returns { target?: {type, y?, m?, d?, start?, end?, startISO?, endISO?}, pdf: boolean, help?: boolean, invalid?: string }
     const opts = { pdf: false };
     const args = argv.map(String);
     if (!args.length) return opts; // default case -> recent 7 (no target)
@@ -1930,6 +2443,22 @@ function parseExportArgs(argv) {
         } else if (/^\d{4}-\d{2}-\d{2}$/.test(a0)) {
             const [y, m, d] = a0.split('-').map(n => Number(n));
             opts.target = { type: 'day', y, m, d };
+        } else if (/^\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}$/.test(a0)) {
+            const parts = a0.split('-').map(n => Number(n));
+            if (parts.length === 6) {
+                const start = { y: parts[0], m: parts[1], d: parts[2] };
+                const end = { y: parts[3], m: parts[4], d: parts[5] };
+                const startISO = `${String(start.y).padStart(4,'0')}-${String(start.m).padStart(2,'0')}-${String(start.d).padStart(2,'0')}`;
+                const endISO = `${String(end.y).padStart(4,'0')}-${String(end.m).padStart(2,'0')}-${String(end.d).padStart(2,'0')}`;
+                const valid = isValidISO(start.y, start.m, start.d) && isValidISO(end.y, end.m, end.d);
+                if (!valid || startISO > endISO) {
+                    opts.invalid = a0;
+                } else {
+                    opts.target = { type: 'range', start, end, startISO, endISO };
+                }
+            } else {
+                opts.invalid = a0;
+            }
         } else if (a0.length) {
             opts.invalid = a0;
         }
@@ -1941,7 +2470,7 @@ register('export', async (argv = []) => {
     const parsed = parseExportArgs(argv);
     if (parsed.help) { printExportHelp(); return; }
     if (parsed.invalid) {
-        print(`<div class="error">Invalid argument for export: ${esc(parsed.invalid)}<br>Use none, -a, YYYY, YYYY-MM, YYYY-MM-DD, optional -pdf, or -help.</div>`);
+        print(`<div class="error">Invalid argument for export: ${esc(parsed.invalid)}<br>Use none, -a, YYYY, YYYY-MM, YYYY-MM-DD, YYYY-MM-DD-YYYY-MM-DD, optional -pdf, or -help.</div>`);
         return;
     }
 
@@ -1962,6 +2491,10 @@ register('export', async (argv = []) => {
         base = `console-journal-${String(parsed.target.y)}-${String(parsed.target.m).padStart(2,'0')}`;
     } else if (parsed.target.type === 'year') {
         base = `console-journal-${String(parsed.target.y)}`;
+    } else if (parsed.target.type === 'range') {
+        const startISO = parsed.target.startISO || `${String(parsed.target.start?.y ?? '').padStart(4,'0')}-${String(parsed.target.start?.m ?? '').padStart(2,'0')}-${String(parsed.target.start?.d ?? '').padStart(2,'0')}`;
+        const endISO = parsed.target.endISO || `${String(parsed.target.end?.y ?? '').padStart(4,'0')}-${String(parsed.target.end?.m ?? '').padStart(2,'0')}-${String(parsed.target.end?.d ?? '').padStart(2,'0')}`;
+        base = `console-journal-${startISO}_to_${endISO}`;
     } else if (parsed.target.type === 'all') {
         base = 'console-journal-ALL';
     } else {

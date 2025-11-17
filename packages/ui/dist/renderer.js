@@ -1534,7 +1534,7 @@ var Facet = class _Facet {
   from(field, get) {
     if (!get)
       get = (x) => x;
-    return this.compute([field], (state2) => get(state2.field(field)));
+    return this.compute([field], (state3) => get(state3.field(field)));
   }
 };
 function sameArray(a, b) {
@@ -1563,34 +1563,34 @@ var FacetProvider = class {
         depAddrs.push(addresses[dep.id]);
     }
     return {
-      create(state2) {
-        state2.values[idx] = getter(state2);
+      create(state3) {
+        state3.values[idx] = getter(state3);
         return 1;
       },
-      update(state2, tr) {
-        if (depDoc && tr.docChanged || depSel && (tr.docChanged || tr.selection) || ensureAll(state2, depAddrs)) {
-          let newVal = getter(state2);
-          if (multi ? !compareArray(newVal, state2.values[idx], compare2) : !compare2(newVal, state2.values[idx])) {
-            state2.values[idx] = newVal;
+      update(state3, tr) {
+        if (depDoc && tr.docChanged || depSel && (tr.docChanged || tr.selection) || ensureAll(state3, depAddrs)) {
+          let newVal = getter(state3);
+          if (multi ? !compareArray(newVal, state3.values[idx], compare2) : !compare2(newVal, state3.values[idx])) {
+            state3.values[idx] = newVal;
             return 1;
           }
         }
         return 0;
       },
-      reconfigure: (state2, oldState) => {
+      reconfigure: (state3, oldState) => {
         let newVal, oldAddr = oldState.config.address[id2];
         if (oldAddr != null) {
           let oldVal = getAddr(oldState, oldAddr);
           if (this.dependencies.every((dep) => {
-            return dep instanceof Facet ? oldState.facet(dep) === state2.facet(dep) : dep instanceof StateField ? oldState.field(dep, false) == state2.field(dep, false) : true;
-          }) || (multi ? compareArray(newVal = getter(state2), oldVal, compare2) : compare2(newVal = getter(state2), oldVal))) {
-            state2.values[idx] = oldVal;
+            return dep instanceof Facet ? oldState.facet(dep) === state3.facet(dep) : dep instanceof StateField ? oldState.field(dep, false) == state3.field(dep, false) : true;
+          }) || (multi ? compareArray(newVal = getter(state3), oldVal, compare2) : compare2(newVal = getter(state3), oldVal))) {
+            state3.values[idx] = oldVal;
             return 0;
           }
         } else {
-          newVal = getter(state2);
+          newVal = getter(state3);
         }
-        state2.values[idx] = newVal;
+        state3.values[idx] = newVal;
         return 1;
       }
     };
@@ -1604,10 +1604,10 @@ function compareArray(a, b, compare2) {
       return false;
   return true;
 }
-function ensureAll(state2, addrs) {
+function ensureAll(state3, addrs) {
   let changed = false;
   for (let addr of addrs)
-    if (ensureAddr(state2, addr) & 1)
+    if (ensureAddr(state3, addr) & 1)
       changed = true;
   return changed;
 }
@@ -1616,10 +1616,10 @@ function dynamicFacetSlot(addresses, facet, providers) {
   let providerTypes = providers.map((p) => p.type);
   let dynamic = providerAddrs.filter((p) => !(p & 1));
   let idx = addresses[facet.id] >> 1;
-  function get(state2) {
+  function get(state3) {
     let values2 = [];
     for (let i = 0; i < providerAddrs.length; i++) {
-      let value = getAddr(state2, providerAddrs[i]);
+      let value = getAddr(state3, providerAddrs[i]);
       if (providerTypes[i] == 2)
         for (let val of value)
           values2.push(val);
@@ -1629,34 +1629,34 @@ function dynamicFacetSlot(addresses, facet, providers) {
     return facet.combine(values2);
   }
   return {
-    create(state2) {
+    create(state3) {
       for (let addr of providerAddrs)
-        ensureAddr(state2, addr);
-      state2.values[idx] = get(state2);
+        ensureAddr(state3, addr);
+      state3.values[idx] = get(state3);
       return 1;
     },
-    update(state2, tr) {
-      if (!ensureAll(state2, dynamic))
+    update(state3, tr) {
+      if (!ensureAll(state3, dynamic))
         return 0;
-      let value = get(state2);
-      if (facet.compare(value, state2.values[idx]))
+      let value = get(state3);
+      if (facet.compare(value, state3.values[idx]))
         return 0;
-      state2.values[idx] = value;
+      state3.values[idx] = value;
       return 1;
     },
-    reconfigure(state2, oldState) {
-      let depChanged = ensureAll(state2, providerAddrs);
+    reconfigure(state3, oldState) {
+      let depChanged = ensureAll(state3, providerAddrs);
       let oldProviders = oldState.config.facets[facet.id], oldValue = oldState.facet(facet);
       if (oldProviders && !depChanged && sameArray(providers, oldProviders)) {
-        state2.values[idx] = oldValue;
+        state3.values[idx] = oldValue;
         return 0;
       }
-      let value = get(state2);
+      let value = get(state3);
       if (facet.compare(value, oldValue)) {
-        state2.values[idx] = oldValue;
+        state3.values[idx] = oldValue;
         return 0;
       }
-      state2.values[idx] = value;
+      state3.values[idx] = value;
       return 1;
     }
   };
@@ -1680,9 +1680,9 @@ var StateField = class _StateField {
       field.provides = config.provide(field);
     return field;
   }
-  create(state2) {
-    let init = state2.facet(initField).find((i) => i.field == this);
-    return ((init === null || init === void 0 ? void 0 : init.create) || this.createF)(state2);
+  create(state3) {
+    let init = state3.facet(initField).find((i) => i.field == this);
+    return ((init === null || init === void 0 ? void 0 : init.create) || this.createF)(state3);
   }
   /**
   @internal
@@ -1690,29 +1690,29 @@ var StateField = class _StateField {
   slot(addresses) {
     let idx = addresses[this.id] >> 1;
     return {
-      create: (state2) => {
-        state2.values[idx] = this.create(state2);
+      create: (state3) => {
+        state3.values[idx] = this.create(state3);
         return 1;
       },
-      update: (state2, tr) => {
-        let oldVal = state2.values[idx];
+      update: (state3, tr) => {
+        let oldVal = state3.values[idx];
         let value = this.updateF(oldVal, tr);
         if (this.compareF(oldVal, value))
           return 0;
-        state2.values[idx] = value;
+        state3.values[idx] = value;
         return 1;
       },
-      reconfigure: (state2, oldState) => {
-        let init = state2.facet(initField), oldInit = oldState.facet(initField), reInit;
+      reconfigure: (state3, oldState) => {
+        let init = state3.facet(initField), oldInit = oldState.facet(initField), reInit;
         if ((reInit = init.find((i) => i.field == this)) && reInit != oldInit.find((i) => i.field == this)) {
-          state2.values[idx] = reInit.create(state2);
+          state3.values[idx] = reInit.create(state3);
           return 1;
         }
         if (oldState.config.address[this.id] != null) {
-          state2.values[idx] = oldState.field(this);
+          state3.values[idx] = oldState.field(this);
           return 0;
         }
-        state2.values[idx] = this.create(state2);
+        state3.values[idx] = this.create(state3);
         return 1;
       }
     };
@@ -1789,8 +1789,8 @@ var Compartment = class _Compartment {
   Get the current content of the compartment in the state, or
   `undefined` if it isn't present.
   */
-  get(state2) {
-    return state2.config.compartments.get(this);
+  get(state3) {
+    return state3.config.compartments.get(this);
   }
 };
 var CompartmentInstance = class {
@@ -1912,21 +1912,21 @@ function flatten(extension, compartments, newCompartments) {
   inner(extension, Prec_.default);
   return result.reduce((a, b) => a.concat(b));
 }
-function ensureAddr(state2, addr) {
+function ensureAddr(state3, addr) {
   if (addr & 1)
     return 2;
   let idx = addr >> 1;
-  let status = state2.status[idx];
+  let status = state3.status[idx];
   if (status == 4)
     throw new Error("Cyclic dependency between fields and/or facets");
   if (status & 2)
     return status;
-  state2.status[idx] = 4;
-  let changed = state2.computeSlot(state2, state2.config.dynamicSlots[idx]);
-  return state2.status[idx] = 2 | changed;
+  state3.status[idx] = 4;
+  let changed = state3.computeSlot(state3, state3.config.dynamicSlots[idx]);
+  return state3.status[idx] = 2 | changed;
 }
-function getAddr(state2, addr) {
-  return addr & 1 ? state2.config.staticValues[addr >> 1] : state2.values[addr >> 1];
+function getAddr(state3, addr) {
+  return addr & 1 ? state3.config.staticValues[addr >> 1] : state3.values[addr >> 1];
 }
 var languageData = /* @__PURE__ */ Facet.define();
 var allowMultipleSelections = /* @__PURE__ */ Facet.define({
@@ -2161,35 +2161,35 @@ function mergeTransaction(a, b, sequential) {
     scrollIntoView: a.scrollIntoView || b.scrollIntoView
   };
 }
-function resolveTransactionInner(state2, spec, docSize) {
+function resolveTransactionInner(state3, spec, docSize) {
   let sel = spec.selection, annotations = asArray(spec.annotations);
   if (spec.userEvent)
     annotations = annotations.concat(Transaction.userEvent.of(spec.userEvent));
   return {
-    changes: spec.changes instanceof ChangeSet ? spec.changes : ChangeSet.of(spec.changes || [], docSize, state2.facet(lineSeparator)),
+    changes: spec.changes instanceof ChangeSet ? spec.changes : ChangeSet.of(spec.changes || [], docSize, state3.facet(lineSeparator)),
     selection: sel && (sel instanceof EditorSelection ? sel : EditorSelection.single(sel.anchor, sel.head)),
     effects: asArray(spec.effects),
     annotations,
     scrollIntoView: !!spec.scrollIntoView
   };
 }
-function resolveTransaction(state2, specs, filter) {
-  let s = resolveTransactionInner(state2, specs.length ? specs[0] : {}, state2.doc.length);
+function resolveTransaction(state3, specs, filter) {
+  let s = resolveTransactionInner(state3, specs.length ? specs[0] : {}, state3.doc.length);
   if (specs.length && specs[0].filter === false)
     filter = false;
   for (let i = 1; i < specs.length; i++) {
     if (specs[i].filter === false)
       filter = false;
     let seq = !!specs[i].sequential;
-    s = mergeTransaction(s, resolveTransactionInner(state2, specs[i], seq ? s.changes.newLength : state2.doc.length), seq);
+    s = mergeTransaction(s, resolveTransactionInner(state3, specs[i], seq ? s.changes.newLength : state3.doc.length), seq);
   }
-  let tr = Transaction.create(state2, s.changes, s.selection, s.effects, s.annotations, s.scrollIntoView);
+  let tr = Transaction.create(state3, s.changes, s.selection, s.effects, s.annotations, s.scrollIntoView);
   return extendTransaction(filter ? filterTransaction(tr) : tr);
 }
 function filterTransaction(tr) {
-  let state2 = tr.startState;
+  let state3 = tr.startState;
   let result = true;
-  for (let filter of state2.facet(changeFilter)) {
+  for (let filter of state3.facet(changeFilter)) {
     let value = filter(tr);
     if (value === false) {
       result = false;
@@ -2202,15 +2202,15 @@ function filterTransaction(tr) {
     let changes, back;
     if (result === false) {
       back = tr.changes.invertedDesc;
-      changes = ChangeSet.empty(state2.doc.length);
+      changes = ChangeSet.empty(state3.doc.length);
     } else {
       let filtered = tr.changes.filter(result);
       changes = filtered.changes;
       back = filtered.filtered.mapDesc(filtered.changes).invertedDesc;
     }
-    tr = Transaction.create(state2, changes, tr.selection && tr.selection.map(back), StateEffect.mapEffects(tr.effects, back), tr.annotations, tr.scrollIntoView);
+    tr = Transaction.create(state3, changes, tr.selection && tr.selection.map(back), StateEffect.mapEffects(tr.effects, back), tr.annotations, tr.scrollIntoView);
   }
-  let filters = state2.facet(transactionFilter);
+  let filters = state3.facet(transactionFilter);
   for (let i = filters.length - 1; i >= 0; i--) {
     let filtered = filters[i](tr);
     if (filtered instanceof Transaction)
@@ -2218,18 +2218,18 @@ function filterTransaction(tr) {
     else if (Array.isArray(filtered) && filtered.length == 1 && filtered[0] instanceof Transaction)
       tr = filtered[0];
     else
-      tr = resolveTransaction(state2, asArray(filtered), false);
+      tr = resolveTransaction(state3, asArray(filtered), false);
   }
   return tr;
 }
 function extendTransaction(tr) {
-  let state2 = tr.startState, extenders = state2.facet(transactionExtender), spec = tr;
+  let state3 = tr.startState, extenders = state3.facet(transactionExtender), spec = tr;
   for (let i = extenders.length - 1; i >= 0; i--) {
     let extension = extenders[i](tr);
     if (extension && Object.keys(extension).length)
-      spec = mergeTransaction(spec, resolveTransactionInner(state2, extension, tr.changes.newLength), true);
+      spec = mergeTransaction(spec, resolveTransactionInner(state3, extension, tr.changes.newLength), true);
   }
-  return spec == tr ? tr : Transaction.create(state2, tr.changes, tr.selection, spec.effects, spec.annotations, spec.scrollIntoView);
+  return spec == tr ? tr : Transaction.create(state3, tr.changes, tr.selection, spec.effects, spec.annotations, spec.scrollIntoView);
 }
 var none = [];
 function asArray(value) {
@@ -2335,13 +2335,13 @@ var EditorState = class _EditorState {
     let startValues;
     if (!conf) {
       conf = Configuration.resolve(base2, compartments, this);
-      let intermediateState = new _EditorState(conf, this.doc, this.selection, conf.dynamicSlots.map(() => null), (state2, slot) => slot.reconfigure(state2, this), null);
+      let intermediateState = new _EditorState(conf, this.doc, this.selection, conf.dynamicSlots.map(() => null), (state3, slot) => slot.reconfigure(state3, this), null);
       startValues = intermediateState.values;
     } else {
       startValues = tr.startState.values.slice();
     }
     let selection = tr.startState.facet(allowMultipleSelections) ? tr.newSelection : tr.newSelection.asSingle();
-    new _EditorState(conf, tr.newDoc, selection, startValues, (state2, slot) => slot.update(state2, tr), tr);
+    new _EditorState(conf, tr.newDoc, selection, startValues, (state3, slot) => slot.update(state3, tr), tr);
   }
   /**
   Create a [transaction spec](https://codemirror.net/6/docs/ref/#state.TransactionSpec) that
@@ -2454,7 +2454,7 @@ var EditorState = class _EditorState {
       for (let prop in fields) {
         if (Object.prototype.hasOwnProperty.call(json, prop)) {
           let field = fields[prop], value = json[prop];
-          fieldInit.push(field.init((state2) => field.spec.fromJSON(value, state2)));
+          fieldInit.push(field.init((state3) => field.spec.fromJSON(value, state3)));
         }
       }
     return _EditorState.create({
@@ -2475,7 +2475,7 @@ var EditorState = class _EditorState {
     checkSelection(selection, doc2.length);
     if (!configuration.staticFacet(allowMultipleSelections))
       selection = selection.asSingle();
-    return new _EditorState(configuration, doc2, selection, configuration.dynamicSlots.map(() => null), (state2, slot) => slot.create(state2), null);
+    return new _EditorState(configuration, doc2, selection, configuration.dynamicSlots.map(() => null), (state3, slot) => slot.create(state3), null);
   }
   /**
   The size (in columns) of a tab in the document, determined by
@@ -5909,14 +5909,14 @@ var ScrollTarget = class _ScrollTarget {
   map(changes) {
     return changes.empty ? this : new _ScrollTarget(this.range.map(changes), this.y, this.x, this.yMargin, this.xMargin, this.isSnapshot);
   }
-  clip(state2) {
-    return this.range.to <= state2.doc.length ? this : new _ScrollTarget(EditorSelection.cursor(state2.doc.length), this.y, this.x, this.yMargin, this.xMargin, this.isSnapshot);
+  clip(state3) {
+    return this.range.to <= state3.doc.length ? this : new _ScrollTarget(EditorSelection.cursor(state3.doc.length), this.y, this.x, this.yMargin, this.xMargin, this.isSnapshot);
   }
 };
 var scrollIntoView = /* @__PURE__ */ StateEffect.define({ map: (t2, ch) => t2.map(ch) });
 var setEditContextFormatting = /* @__PURE__ */ StateEffect.define();
-function logException(state2, exception, context) {
-  let handler = state2.facet(exceptionSink);
+function logException(state3, exception, context) {
+  let handler = state3.facet(exceptionSink);
   if (handler.length)
     handler[0](exception);
   else if (window.onerror && window.onerror(String(exception), context, void 0, void 0, exception)) ;
@@ -6134,9 +6134,9 @@ var ChangedRange = class _ChangedRange {
   }
 };
 var ViewUpdate = class _ViewUpdate {
-  constructor(view, state2, transactions) {
+  constructor(view, state3, transactions) {
     this.view = view;
-    this.state = state2;
+    this.state = state3;
     this.transactions = transactions;
     this.flags = 0;
     this.startState = view.state;
@@ -6150,8 +6150,8 @@ var ViewUpdate = class _ViewUpdate {
   /**
   @internal
   */
-  static create(view, state2, transactions) {
-    return new _ViewUpdate(view, state2, transactions);
+  static create(view, state3, transactions) {
+    return new _ViewUpdate(view, state3, transactions);
   }
   /**
   Tells you whether the [viewport](https://codemirror.net/6/docs/ref/#view.EditorView.viewport) or
@@ -6808,9 +6808,9 @@ function touchesComposition(changes, composition) {
     });
   return touched;
 }
-function groupAt(state2, pos, bias = 1) {
-  let categorize = state2.charCategorizer(pos);
-  let line = state2.doc.lineAt(pos), linePos = pos - line.from;
+function groupAt(state3, pos, bias = 1) {
+  let categorize = state3.charCategorizer(pos);
+  let line = state3.doc.lineAt(pos), linePos = pos - line.from;
   if (line.length == 0)
     return EditorSelection.cursor(pos);
   if (linePos == 0)
@@ -7188,10 +7188,10 @@ function skipAtoms(view, oldPos, pos) {
 }
 var LineBreakPlaceholder = "\uFFFF";
 var DOMReader = class {
-  constructor(points, state2) {
+  constructor(points, state3) {
     this.points = points;
     this.text = "";
-    this.lineSeparator = state2.facet(EditorState.lineSeparator);
+    this.lineSeparator = state3.facet(EditorState.lineSeparator);
   }
   append(text) {
     this.text += text;
@@ -7869,31 +7869,31 @@ function capturePaste(view) {
     doPaste(view, target.value);
   }, 50);
 }
-function textFilter(state2, facet, text) {
-  for (let filter of state2.facet(facet))
-    text = filter(text, state2);
+function textFilter(state3, facet, text) {
+  for (let filter of state3.facet(facet))
+    text = filter(text, state3);
   return text;
 }
 function doPaste(view, input2) {
   input2 = textFilter(view.state, clipboardInputFilter, input2);
-  let { state: state2 } = view, changes, i = 1, text = state2.toText(input2);
-  let byLine = text.lines == state2.selection.ranges.length;
-  let linewise = lastLinewiseCopy != null && state2.selection.ranges.every((r) => r.empty) && lastLinewiseCopy == text.toString();
+  let { state: state3 } = view, changes, i = 1, text = state3.toText(input2);
+  let byLine = text.lines == state3.selection.ranges.length;
+  let linewise = lastLinewiseCopy != null && state3.selection.ranges.every((r) => r.empty) && lastLinewiseCopy == text.toString();
   if (linewise) {
     let lastLine = -1;
-    changes = state2.changeByRange((range) => {
-      let line = state2.doc.lineAt(range.from);
+    changes = state3.changeByRange((range) => {
+      let line = state3.doc.lineAt(range.from);
       if (line.from == lastLine)
         return { range };
       lastLine = line.from;
-      let insert2 = state2.toText((byLine ? text.line(i++).text : input2) + state2.lineBreak);
+      let insert2 = state3.toText((byLine ? text.line(i++).text : input2) + state3.lineBreak);
       return {
         changes: { from: line.from, insert: insert2 },
         range: EditorSelection.cursor(range.from + insert2.length)
       };
     });
   } else if (byLine) {
-    changes = state2.changeByRange((range) => {
+    changes = state3.changeByRange((range) => {
       let line = text.line(i++);
       return {
         changes: { from: range.from, to: range.to, insert: line.text },
@@ -7901,7 +7901,7 @@ function doPaste(view, input2) {
       };
     });
   } else {
-    changes = state2.replaceSelection(text);
+    changes = state3.replaceSelection(text);
   }
   view.dispatch(changes, {
     userEvent: "input.paste",
@@ -8142,26 +8142,26 @@ function captureCopy(view, text) {
     view.focus();
   }, 50);
 }
-function copiedRange(state2) {
+function copiedRange(state3) {
   let content2 = [], ranges = [], linewise = false;
-  for (let range of state2.selection.ranges)
+  for (let range of state3.selection.ranges)
     if (!range.empty) {
-      content2.push(state2.sliceDoc(range.from, range.to));
+      content2.push(state3.sliceDoc(range.from, range.to));
       ranges.push(range);
     }
   if (!content2.length) {
     let upto = -1;
-    for (let { from } of state2.selection.ranges) {
-      let line = state2.doc.lineAt(from);
+    for (let { from } of state3.selection.ranges) {
+      let line = state3.doc.lineAt(from);
       if (line.number > upto) {
         content2.push(line.text);
-        ranges.push({ from: line.from, to: Math.min(state2.doc.length, line.to + 1) });
+        ranges.push({ from: line.from, to: Math.min(state3.doc.length, line.to + 1) });
       }
       upto = line.number;
     }
     linewise = true;
   }
-  return { text: textFilter(state2, clipboardOutputFilter, content2.join(state2.lineBreak)), ranges, linewise };
+  return { text: textFilter(state3, clipboardOutputFilter, content2.join(state3.lineBreak)), ranges, linewise };
 }
 var lastLinewiseCopy = null;
 handlers.copy = handlers.cut = (view, event) => {
@@ -8186,14 +8186,14 @@ handlers.copy = handlers.cut = (view, event) => {
   }
 };
 var isFocusChange = /* @__PURE__ */ Annotation.define();
-function focusChangeTransaction(state2, focus) {
+function focusChangeTransaction(state3, focus) {
   let effects = [];
-  for (let getEffect of state2.facet(focusChangeEffect)) {
-    let effect = getEffect(state2, focus);
+  for (let getEffect of state3.facet(focusChangeEffect)) {
+    let effect = getEffect(state3, focus);
     if (effect)
       effects.push(effect);
   }
-  return effects.length ? state2.update({ effects, annotations: isFocusChange.of(true) }) : null;
+  return effects.length ? state3.update({ effects, annotations: isFocusChange.of(true) }) : null;
 }
 function updateForFocusChange(view) {
   setTimeout(() => {
@@ -9077,8 +9077,8 @@ var LineGapWidget = class extends WidgetType {
   }
 };
 var ViewState = class {
-  constructor(state2) {
-    this.state = state2;
+  constructor(state3) {
+    this.state = state3;
     this.pixelViewport = { left: 0, right: window.innerWidth, top: 0, bottom: 0 };
     this.inView = true;
     this.paddingTop = 0;
@@ -9100,10 +9100,10 @@ var ViewState = class {
     this.defaultTextDirection = Direction.LTR;
     this.visibleRanges = [];
     this.mustEnforceCursorAssoc = false;
-    let guessWrapping = state2.facet(contentAttributes).some((v) => typeof v != "function" && v.class == "cm-lineWrapping");
+    let guessWrapping = state3.facet(contentAttributes).some((v) => typeof v != "function" && v.class == "cm-lineWrapping");
     this.heightOracle = new HeightOracle(guessWrapping);
-    this.stateDeco = state2.facet(decorations).filter((d) => typeof d != "function");
-    this.heightMap = HeightMap.empty().applyChanges(this.stateDeco, Text.empty, this.heightOracle.setDoc(state2.doc), [new ChangedRange(0, 0, 0, state2.doc.length)]);
+    this.stateDeco = state3.facet(decorations).filter((d) => typeof d != "function");
+    this.heightMap = HeightMap.empty().applyChanges(this.stateDeco, Text.empty, this.heightOracle.setDoc(state3.doc), [new ChangedRange(0, 0, 0, state3.doc.length)]);
     for (let i = 0; i < 2; i++) {
       this.viewport = this.getViewport(0, null);
       if (!this.updateForViewport())
@@ -10491,39 +10491,39 @@ var EditContextManager = class {
     if (update.geometryChanged || update.docChanged || update.selectionSet)
       update.view.requestMeasure(this.measureReq);
   }
-  resetRange(state2) {
-    let { head } = state2.selection.main;
+  resetRange(state3) {
+    let { head } = state3.selection.main;
     this.from = Math.max(
       0,
       head - 1e4
       /* CxVp.Margin */
     );
     this.to = Math.min(
-      state2.doc.length,
+      state3.doc.length,
       head + 1e4
       /* CxVp.Margin */
     );
   }
-  reset(state2) {
-    this.resetRange(state2);
-    this.editContext.updateText(0, this.editContext.text.length, state2.doc.sliceString(this.from, this.to));
-    this.setSelection(state2);
+  reset(state3) {
+    this.resetRange(state3);
+    this.editContext.updateText(0, this.editContext.text.length, state3.doc.sliceString(this.from, this.to));
+    this.setSelection(state3);
   }
-  revertPending(state2) {
+  revertPending(state3) {
     let pending = this.pendingContextChange;
     this.pendingContextChange = null;
-    this.editContext.updateText(this.toContextPos(pending.from), this.toContextPos(pending.from + pending.insert.length), state2.doc.sliceString(pending.from, pending.to));
+    this.editContext.updateText(this.toContextPos(pending.from), this.toContextPos(pending.from + pending.insert.length), state3.doc.sliceString(pending.from, pending.to));
   }
-  setSelection(state2) {
-    let { main } = state2.selection;
+  setSelection(state3) {
+    let { main } = state3.selection;
     let start = this.toContextPos(Math.max(this.from, Math.min(this.to, main.anchor)));
     let end = this.toContextPos(main.head);
     if (this.editContext.selectionStart != start || this.editContext.selectionEnd != end)
       this.editContext.updateSelection(start, end);
   }
-  rangeIsValid(state2) {
-    let { head } = state2.selection.main;
-    return !(this.from > 0 && head - this.from < 500 || this.to < state2.doc.length && this.to - head < 500 || this.to - this.from > 1e4 * 3);
+  rangeIsValid(state3) {
+    let { head } = state3.selection.main;
+    return !(this.from > 0 && head - this.from < 500 || this.to < state3.doc.length && this.to - head < 500 || this.to - this.from > 1e4 * 3);
   }
   toEditorPos(contextPos, clipLen = this.to - this.from) {
     contextPos = Math.min(contextPos, clipLen);
@@ -10669,14 +10669,14 @@ var EditorView = class _EditorView {
     if (this.updateState != 0)
       throw new Error("Calls to EditorView.update are not allowed while an update is in progress");
     let redrawn = false, attrsChanged = false, update;
-    let state2 = this.state;
+    let state3 = this.state;
     for (let tr of transactions) {
-      if (tr.startState != state2)
+      if (tr.startState != state3)
         throw new RangeError("Trying to update state with a transaction that doesn't start from the previous state.");
-      state2 = tr.state;
+      state3 = tr.state;
     }
     if (this.destroyed) {
-      this.viewState.state = state2;
+      this.viewState.state = state3;
       return;
     }
     let focus = this.hasFocus, focusFlag = 0, dispatchFocus = null;
@@ -10685,7 +10685,7 @@ var EditorView = class _EditorView {
       focusFlag = 1;
     } else if (focus != this.inputState.notifiedFocused) {
       this.inputState.notifiedFocused = focus;
-      dispatchFocus = focusChangeTransaction(state2, focus);
+      dispatchFocus = focusChangeTransaction(state3, focus);
       if (!dispatchFocus)
         focusFlag = 1;
     }
@@ -10693,14 +10693,14 @@ var EditorView = class _EditorView {
     if (pendingKey) {
       this.observer.clearDelayedAndroidKey();
       domChange = this.observer.readChange();
-      if (domChange && !this.state.doc.eq(state2.doc) || !this.state.selection.eq(state2.selection))
+      if (domChange && !this.state.doc.eq(state3.doc) || !this.state.selection.eq(state3.selection))
         domChange = null;
     } else {
       this.observer.clear();
     }
-    if (state2.facet(EditorState.phrases) != this.state.facet(EditorState.phrases))
-      return this.setState(state2);
-    update = ViewUpdate.create(this, state2, transactions);
+    if (state3.facet(EditorState.phrases) != this.state.facet(EditorState.phrases))
+      return this.setState(state3);
+    update = ViewUpdate.create(this, state3, transactions);
     update.flags |= focusFlag;
     let scrollTarget = this.viewState.scrollTarget;
     try {
@@ -11564,8 +11564,8 @@ var handleKeyEvents = /* @__PURE__ */ Prec.default(/* @__PURE__ */ EditorView.do
 }));
 var keymap = /* @__PURE__ */ Facet.define({ enables: handleKeyEvents });
 var Keymaps = /* @__PURE__ */ new WeakMap();
-function getKeymap(state2) {
-  let bindings = state2.facet(keymap);
+function getKeymap(state3) {
+  let bindings = state3.facet(keymap);
   let map = Keymaps.get(bindings);
   if (!map)
     Keymaps.set(bindings, map = buildKeymap(bindings.reduce((a, b) => a.concat(b), [])));
@@ -11884,8 +11884,8 @@ var LayerView = class {
     if (this.layer.updateOnDocViewUpdate !== false)
       view.requestMeasure(this.measureReq);
   }
-  setOrder(state2) {
-    let pos = 0, order = state2.facet(layerOrder);
+  setOrder(state3) {
+    let pos = 0, order = state3.facet(layerOrder);
     while (pos < order.length && order[pos] != this.layer)
       pos++;
     this.dom.style.zIndex = String((this.layer.above ? 150 : -1) - pos);
@@ -11961,10 +11961,10 @@ function configChanged(update) {
 var cursorLayer = /* @__PURE__ */ layer({
   above: true,
   markers(view) {
-    let { state: state2 } = view, conf = state2.facet(selectionConfig);
+    let { state: state3 } = view, conf = state3.facet(selectionConfig);
     let cursors = [];
-    for (let r of state2.selection.ranges) {
-      let prim = r == state2.selection.main;
+    for (let r of state3.selection.ranges) {
+      let prim = r == state3.selection.main;
       if (r.empty || conf.drawRangeCursor) {
         let className = prim ? "cm-cursor cm-cursor-primary" : "cm-cursor cm-cursor-secondary";
         let cursor = r.empty ? r : EditorSelection.cursor(r.head, r.head > r.anchor ? -1 : 1);
@@ -11987,8 +11987,8 @@ var cursorLayer = /* @__PURE__ */ layer({
   },
   class: "cm-cursorLayer"
 });
-function setBlinkRate(state2, dom) {
-  dom.style.animationDuration = state2.facet(selectionConfig).cursorBlinkRate + "ms";
+function setBlinkRate(state3, dom) {
+  dom.style.animationDuration = state3.facet(selectionConfig).cursorBlinkRate + "ms";
 }
 var selectionLayer = /* @__PURE__ */ layer({
   above: false,
@@ -15044,16 +15044,16 @@ var Language = class {
     this.parser = parser6;
     this.extension = [
       language.of(this),
-      EditorState.languageData.of((state2, pos, side) => {
-        let top2 = topNodeAt(state2, pos, side), data3 = top2.type.prop(languageDataProp);
+      EditorState.languageData.of((state3, pos, side) => {
+        let top2 = topNodeAt(state3, pos, side), data3 = top2.type.prop(languageDataProp);
         if (!data3)
           return [];
-        let base2 = state2.facet(data3), sub = top2.type.prop(sublanguageProp);
+        let base2 = state3.facet(data3), sub = top2.type.prop(sublanguageProp);
         if (sub) {
           let innerNode = top2.resolve(pos - top2.from, side);
           for (let sublang of sub)
-            if (sublang.test(innerNode, state2)) {
-              let data4 = state2.facet(sublang.facet);
+            if (sublang.test(innerNode, state3)) {
+              let data4 = state3.facet(sublang.facet);
               return sublang.type == "replace" ? data4 : data4.concat(base2);
             }
         }
@@ -15064,18 +15064,18 @@ var Language = class {
   /**
   Query whether this language is active at the given position.
   */
-  isActiveAt(state2, pos, side = -1) {
-    return topNodeAt(state2, pos, side).type.prop(languageDataProp) == this.data;
+  isActiveAt(state3, pos, side = -1) {
+    return topNodeAt(state3, pos, side).type.prop(languageDataProp) == this.data;
   }
   /**
   Find the document regions that were parsed using this language.
   The returned regions will _include_ any nested languages rooted
   in this language, when those exist.
   */
-  findRegions(state2) {
-    let lang = state2.facet(language);
+  findRegions(state3) {
+    let lang = state3.facet(language);
     if ((lang === null || lang === void 0 ? void 0 : lang.data) == this.data)
-      return [{ from: 0, to: state2.doc.length }];
+      return [{ from: 0, to: state3.doc.length }];
     if (!lang || !lang.allowsNesting)
       return [];
     let result = [];
@@ -15106,7 +15106,7 @@ var Language = class {
           explore(ch, tree.positions[i] + from);
       }
     };
-    explore(syntaxTree(state2), 0);
+    explore(syntaxTree(state3), 0);
     return result;
   }
   /**
@@ -15118,8 +15118,8 @@ var Language = class {
   }
 };
 Language.setState = /* @__PURE__ */ StateEffect.define();
-function topNodeAt(state2, pos, side) {
-  let topLang = state2.facet(language), tree = syntaxTree(state2).topNode;
+function topNodeAt(state3, pos, side) {
+  let topLang = state3.facet(language), tree = syntaxTree(state3).topNode;
   if (!topLang || topLang.allowsNesting) {
     for (let node = tree; node; node = node.enter(pos, side, IterMode.ExcludeBuffers))
       if (node.type.isTop)
@@ -15152,8 +15152,8 @@ var LRLanguage = class _LRLanguage extends Language {
     return this.parser.hasWrappers();
   }
 };
-function syntaxTree(state2) {
-  let field = state2.field(Language.state, false);
+function syntaxTree(state3) {
+  let field = state3.field(Language.state, false);
   return field ? field.tree : Tree.empty;
 }
 var DocInput = class {
@@ -15191,9 +15191,9 @@ var DocInput = class {
 };
 var currentContext = null;
 var ParseContext = class _ParseContext {
-  constructor(parser6, state2, fragments = [], tree, treeLen, viewport, skipped, scheduleOn) {
+  constructor(parser6, state3, fragments = [], tree, treeLen, viewport, skipped, scheduleOn) {
     this.parser = parser6;
-    this.state = state2;
+    this.state = state3;
     this.fragments = fragments;
     this.tree = tree;
     this.treeLen = treeLen;
@@ -15206,8 +15206,8 @@ var ParseContext = class _ParseContext {
   /**
   @internal
   */
-  static create(parser6, state2, viewport) {
-    return new _ParseContext(parser6, state2, [], Tree.empty, 0, viewport, [], null);
+  static create(parser6, state3, viewport) {
+    return new _ParseContext(parser6, state3, [], Tree.empty, 0, viewport, [], null);
   }
   startParse() {
     return this.parser.startParse(new DocInput(this.state.doc), this.fragments);
@@ -15409,9 +15409,9 @@ var LanguageState = class _LanguageState {
       newCx.takeTree();
     return new _LanguageState(newCx);
   }
-  static init(state2) {
-    let vpTo = Math.min(3e3, state2.doc.length);
-    let parseState = ParseContext.create(state2.facet(language).parser, state2, { from: 0, to: vpTo });
+  static init(state3) {
+    let vpTo = Math.min(3e3, state3.doc.length);
+    let parseState = ParseContext.create(state3.facet(language).parser, state3, { from: 0, to: vpTo });
     if (!parseState.work(20, vpTo))
       parseState.takeTree();
     return new _LanguageState(parseState);
@@ -15475,8 +15475,8 @@ var parseWorker = /* @__PURE__ */ ViewPlugin.fromClass(class ParseWorker {
   scheduleWork() {
     if (this.working)
       return;
-    let { state: state2 } = this.view, field = state2.field(Language.state);
-    if (field.tree != field.context.tree || !field.context.isDone(state2.doc.length))
+    let { state: state3 } = this.view, field = state3.field(Language.state);
+    if (field.tree != field.context.tree || !field.context.isDone(state3.doc.length))
       this.working = requestIdle(this.work);
   }
   work(deadline) {
@@ -15488,14 +15488,14 @@ var parseWorker = /* @__PURE__ */ ViewPlugin.fromClass(class ParseWorker {
     }
     if (this.chunkBudget <= 0)
       return;
-    let { state: state2, viewport: { to: vpTo } } = this.view, field = state2.field(Language.state);
+    let { state: state3, viewport: { to: vpTo } } = this.view, field = state3.field(Language.state);
     if (field.tree == field.context.tree && field.context.isDone(
       vpTo + 1e5
       /* Work.MaxParseAhead */
     ))
       return;
     let endTime = Date.now() + Math.min(this.chunkBudget, 100, deadline && !isInputPending ? Math.max(25, deadline.timeRemaining() - 5) : 1e9);
-    let viewportFirst = field.context.treeLen < vpTo && state2.doc.length > vpTo + 1e3;
+    let viewportFirst = field.context.treeLen < vpTo && state3.doc.length > vpTo + 1e3;
     let done = field.context.work(() => {
       return isInputPending && isInputPending() || Date.now() > endTime;
     }, vpTo + (viewportFirst ? 0 : 1e5));
@@ -15534,8 +15534,8 @@ var language = /* @__PURE__ */ Facet.define({
   enables: (language2) => [
     Language.state,
     parseWorker,
-    EditorView.contentAttributes.compute([language2], (state2) => {
-      let lang = state2.facet(language2);
+    EditorView.contentAttributes.compute([language2], (state3) => {
+      let lang = state3.facet(language2);
       return lang && lang.name ? { "data-language": lang.name } : {};
     })
   ]
@@ -15635,12 +15635,12 @@ var indentUnit = /* @__PURE__ */ Facet.define({
     return unit;
   }
 });
-function getIndentUnit(state2) {
-  let unit = state2.facet(indentUnit);
-  return unit.charCodeAt(0) == 9 ? state2.tabSize * unit.length : unit.length;
+function getIndentUnit(state3) {
+  let unit = state3.facet(indentUnit);
+  return unit.charCodeAt(0) == 9 ? state3.tabSize * unit.length : unit.length;
 }
-function indentString(state2, cols) {
-  let result = "", ts = state2.tabSize, ch = state2.facet(indentUnit)[0];
+function indentString(state3, cols) {
+  let result = "", ts = state3.tabSize, ch = state3.facet(indentUnit)[0];
   if (ch == "	") {
     while (cols >= ts) {
       result += "	";
@@ -15667,10 +15667,10 @@ var IndentContext = class {
   /**
   Create an indent context.
   */
-  constructor(state2, options2 = {}) {
-    this.state = state2;
+  constructor(state3, options2 = {}) {
+    this.state = state3;
     this.options = options2;
-    this.unit = getIndentUnit(state2);
+    this.unit = getIndentUnit(state3);
   }
   /**
   Get a description of the line at the given position, taking
@@ -15901,17 +15901,17 @@ function indentOnInput() {
     let lineStart = doc2.sliceString(line.from, head);
     if (!rules.some((r) => r.test(lineStart)))
       return tr;
-    let { state: state2 } = tr, last = -1, changes = [];
-    for (let { head: head2 } of state2.selection.ranges) {
-      let line2 = state2.doc.lineAt(head2);
+    let { state: state3 } = tr, last = -1, changes = [];
+    for (let { head: head2 } of state3.selection.ranges) {
+      let line2 = state3.doc.lineAt(head2);
       if (line2.from == last)
         continue;
       last = line2.from;
-      let indent = getIndentation(state2, line2.from);
+      let indent = getIndentation(state3, line2.from);
       if (indent == null)
         continue;
       let cur = /^\s*/.exec(line2.text)[0];
-      let norm = indentString(state2, indent);
+      let norm = indentString(state3, indent);
       if (cur != norm)
         changes.push({ from: line2.from, to: line2.from + cur.length, insert: norm });
     }
@@ -15970,9 +15970,9 @@ var fallbackHighlighter = /* @__PURE__ */ Facet.define({
     return values2.length ? [values2[0]] : null;
   }
 });
-function getHighlighters(state2) {
-  let main = state2.facet(highlighterFacet);
-  return main.length ? main : state2.facet(fallbackHighlighter);
+function getHighlighters(state3) {
+  let main = state3.facet(highlighterFacet);
+  return main.length ? main : state3.facet(fallbackHighlighter);
 }
 function syntaxHighlighting(highlighter, options2) {
   let ext = [treeHighlighter], themeType;
@@ -15984,8 +15984,8 @@ function syntaxHighlighting(highlighter, options2) {
   if (options2 === null || options2 === void 0 ? void 0 : options2.fallback)
     ext.push(fallbackHighlighter.of(highlighter));
   else if (themeType)
-    ext.push(highlighterFacet.computeN([EditorView.darkTheme], (state2) => {
-      return state2.facet(EditorView.darkTheme) == (themeType == "dark") ? [highlighter] : [];
+    ext.push(highlighterFacet.computeN([EditorView.darkTheme], (state3) => {
+      return state3.facet(EditorView.darkTheme) == (themeType == "dark") ? [highlighter] : [];
     }));
   else
     ext.push(highlighterFacet.of(highlighter));
@@ -16123,18 +16123,18 @@ function findHandle(node) {
   let hasHandle = node.type.prop(bracketMatchingHandle);
   return hasHandle ? hasHandle(node.node) : node;
 }
-function matchBrackets(state2, pos, dir, config = {}) {
+function matchBrackets(state3, pos, dir, config = {}) {
   let maxScanDistance = config.maxScanDistance || DefaultScanDist, brackets = config.brackets || DefaultBrackets;
-  let tree = syntaxTree(state2), node = tree.resolveInner(pos, dir);
+  let tree = syntaxTree(state3), node = tree.resolveInner(pos, dir);
   for (let cur = node; cur; cur = cur.parent) {
     let matches = matchingNodes(cur.type, dir, brackets);
     if (matches && cur.from < cur.to) {
       let handle = findHandle(cur);
       if (handle && (dir > 0 ? pos >= handle.from && pos < handle.to : pos > handle.from && pos <= handle.to))
-        return matchMarkedBrackets(state2, pos, dir, cur, handle, matches, brackets);
+        return matchMarkedBrackets(state3, pos, dir, cur, handle, matches, brackets);
     }
   }
-  return matchPlainBrackets(state2, pos, dir, tree, node.type, maxScanDistance, brackets);
+  return matchPlainBrackets(state3, pos, dir, tree, node.type, maxScanDistance, brackets);
 }
 function matchMarkedBrackets(_state, _pos, dir, token, handle, matching, brackets) {
   let parent = token.parent, firstToken = { from: handle.from, to: handle.to };
@@ -16162,13 +16162,13 @@ function matchMarkedBrackets(_state, _pos, dir, token, handle, matching, bracket
     } while (dir < 0 ? cursor.prevSibling() : cursor.nextSibling());
   return { start: firstToken, matched: false };
 }
-function matchPlainBrackets(state2, pos, dir, tree, tokenType, maxScanDistance, brackets) {
-  let startCh = dir < 0 ? state2.sliceDoc(pos - 1, pos) : state2.sliceDoc(pos, pos + 1);
+function matchPlainBrackets(state3, pos, dir, tree, tokenType, maxScanDistance, brackets) {
+  let startCh = dir < 0 ? state3.sliceDoc(pos - 1, pos) : state3.sliceDoc(pos, pos + 1);
   let bracket2 = brackets.indexOf(startCh);
   if (bracket2 < 0 || bracket2 % 2 == 0 != dir > 0)
     return null;
   let startToken = { from: dir < 0 ? pos - 1 : pos, to: dir > 0 ? pos + 1 : pos };
-  let iter = state2.doc.iterRange(pos, dir > 0 ? state2.doc.length : 0), depth = 0;
+  let iter = state3.doc.iterRange(pos, dir > 0 ? state3.doc.length : 0), depth = 0;
   for (let distance = 0; !iter.next().done && distance <= maxScanDistance; ) {
     let text = iter.value;
     if (dir < 0)
@@ -16262,17 +16262,17 @@ var marks = {
 
 // node_modules/@codemirror/commands/dist/index.js
 var toggleComment = (target) => {
-  let { state: state2 } = target, line = state2.doc.lineAt(state2.selection.main.from), config = getConfig(target.state, line.from);
+  let { state: state3 } = target, line = state3.doc.lineAt(state3.selection.main.from), config = getConfig(target.state, line.from);
   return config.line ? toggleLineComment(target) : config.block ? toggleBlockCommentByLine(target) : false;
 };
 function command(f, option) {
-  return ({ state: state2, dispatch }) => {
-    if (state2.readOnly)
+  return ({ state: state3, dispatch }) => {
+    if (state3.readOnly)
       return false;
-    let tr = f(option, state2);
+    let tr = f(option, state3);
     if (!tr)
       return false;
-    dispatch(state2.update(tr));
+    dispatch(state3.update(tr));
     return true;
   };
 }
@@ -16291,14 +16291,14 @@ var toggleBlockCommentByLine = /* @__PURE__ */ command(
   0
   /* CommentOption.Toggle */
 );
-function getConfig(state2, pos) {
-  let data2 = state2.languageDataAt("commentTokens", pos, 1);
+function getConfig(state3, pos) {
+  let data2 = state3.languageDataAt("commentTokens", pos, 1);
   return data2.length ? data2[0] : {};
 }
 var SearchMargin = 50;
-function findBlockComment(state2, { open, close }, from, to) {
-  let textBefore = state2.sliceDoc(from - SearchMargin, from);
-  let textAfter = state2.sliceDoc(to, to + SearchMargin);
+function findBlockComment(state3, { open, close }, from, to) {
+  let textBefore = state3.sliceDoc(from - SearchMargin, from);
+  let textAfter = state3.sliceDoc(to, to + SearchMargin);
   let spaceBefore = /\s*$/.exec(textBefore)[0].length, spaceAfter = /^\s*/.exec(textAfter)[0].length;
   let beforeOff = textBefore.length - spaceBefore;
   if (textBefore.slice(beforeOff - open.length, beforeOff) == open && textAfter.slice(spaceAfter, spaceAfter + close.length) == close) {
@@ -16309,10 +16309,10 @@ function findBlockComment(state2, { open, close }, from, to) {
   }
   let startText, endText;
   if (to - from <= 2 * SearchMargin) {
-    startText = endText = state2.sliceDoc(from, to);
+    startText = endText = state3.sliceDoc(from, to);
   } else {
-    startText = state2.sliceDoc(from, from + SearchMargin);
-    endText = state2.sliceDoc(to - SearchMargin, to);
+    startText = state3.sliceDoc(from, from + SearchMargin);
+    endText = state3.sliceDoc(to - SearchMargin, to);
   }
   let startSpace = /^\s*/.exec(startText)[0].length, endSpace = /\s*$/.exec(endText)[0].length;
   let endOff = endText.length - endSpace - close.length;
@@ -16330,13 +16330,13 @@ function findBlockComment(state2, { open, close }, from, to) {
   }
   return null;
 }
-function selectedLineRanges(state2) {
+function selectedLineRanges(state3) {
   let ranges = [];
-  for (let r of state2.selection.ranges) {
-    let fromLine = state2.doc.lineAt(r.from);
-    let toLine = r.to <= fromLine.to ? fromLine : state2.doc.lineAt(r.to);
+  for (let r of state3.selection.ranges) {
+    let fromLine = state3.doc.lineAt(r.from);
+    let toLine = r.to <= fromLine.to ? fromLine : state3.doc.lineAt(r.to);
     if (toLine.from > fromLine.from && toLine.from == r.to)
-      toLine = r.to == fromLine.to + 1 ? fromLine : state2.doc.lineAt(r.to - 1);
+      toLine = r.to == fromLine.to + 1 ? fromLine : state3.doc.lineAt(r.to - 1);
     let last = ranges.length - 1;
     if (last >= 0 && ranges[last].to > fromLine.from)
       ranges[last].to = toLine.to;
@@ -16345,13 +16345,13 @@ function selectedLineRanges(state2) {
   }
   return ranges;
 }
-function changeBlockComment(option, state2, ranges = state2.selection.ranges) {
-  let tokens = ranges.map((r) => getConfig(state2, r.from).block);
+function changeBlockComment(option, state3, ranges = state3.selection.ranges) {
+  let tokens = ranges.map((r) => getConfig(state3, r.from).block);
   if (!tokens.every((c) => c))
     return null;
-  let comments = ranges.map((r, i) => findBlockComment(state2, tokens[i], r.from, r.to));
+  let comments = ranges.map((r, i) => findBlockComment(state3, tokens[i], r.from, r.to));
   if (option != 2 && !comments.every((c) => c)) {
-    return { changes: state2.changes(ranges.map((range, i) => {
+    return { changes: state3.changes(ranges.map((range, i) => {
       if (comments[i])
         return [];
       return [{ from: range.from, insert: tokens[i].open + " " }, { from: range.to, insert: " " + tokens[i].close }];
@@ -16367,16 +16367,16 @@ function changeBlockComment(option, state2, ranges = state2.selection.ranges) {
   }
   return null;
 }
-function changeLineComment(option, state2, ranges = state2.selection.ranges) {
+function changeLineComment(option, state3, ranges = state3.selection.ranges) {
   let lines = [];
   let prevLine = -1;
   for (let { from, to } of ranges) {
     let startI = lines.length, minIndent = 1e9;
-    let token = getConfig(state2, from).line;
+    let token = getConfig(state3, from).line;
     if (!token)
       continue;
     for (let pos = from; pos <= to; ) {
-      let line = state2.doc.lineAt(pos);
+      let line = state3.doc.lineAt(pos);
       if (line.from > prevLine && (from == to || to > line.from)) {
         prevLine = line.from;
         let indent = /^\s*/.exec(line.text)[0].length;
@@ -16401,8 +16401,8 @@ function changeLineComment(option, state2, ranges = state2.selection.ranges) {
     for (let { line, token, indent, empty: empty2, single } of lines)
       if (single || !empty2)
         changes.push({ from: line.from + indent, insert: token + " " });
-    let changeSet = state2.changes(changes);
-    return { changes: changeSet, selection: state2.selection.map(changeSet, 1) };
+    let changeSet = state3.changes(changes);
+    return { changes: changeSet, selection: state3.selection.map(changeSet, 1) };
   } else if (option != 1 && lines.some((l) => l.comment >= 0)) {
     let changes = [];
     for (let { line, comment: comment2, token } of lines)
@@ -16436,12 +16436,12 @@ var historyField_ = /* @__PURE__ */ StateField.define({
   create() {
     return HistoryState.empty;
   },
-  update(state2, tr) {
+  update(state3, tr) {
     let config = tr.state.facet(historyConfig);
     let fromHist = tr.annotation(fromHistory);
     if (fromHist) {
       let item = HistEvent.fromTransaction(tr, fromHist.selection), from = fromHist.side;
-      let other = from == 0 ? state2.undone : state2.done;
+      let other = from == 0 ? state3.undone : state3.done;
       if (item)
         other = updateBranch(other, other.length, config.minDepth, item);
       else
@@ -16450,18 +16450,18 @@ var historyField_ = /* @__PURE__ */ StateField.define({
     }
     let isolate = tr.annotation(isolateHistory);
     if (isolate == "full" || isolate == "before")
-      state2 = state2.isolate();
+      state3 = state3.isolate();
     if (tr.annotation(Transaction.addToHistory) === false)
-      return !tr.changes.empty ? state2.addMapping(tr.changes.desc) : state2;
+      return !tr.changes.empty ? state3.addMapping(tr.changes.desc) : state3;
     let event = HistEvent.fromTransaction(tr);
     let time = tr.annotation(Transaction.time), userEvent = tr.annotation(Transaction.userEvent);
     if (event)
-      state2 = state2.addChanges(event, time, userEvent, config, tr);
+      state3 = state3.addChanges(event, time, userEvent, config, tr);
     else if (tr.selection)
-      state2 = state2.addSelection(tr.startState.selection, time, userEvent, config.newGroupDelay);
+      state3 = state3.addSelection(tr.startState.selection, time, userEvent, config.newGroupDelay);
     if (isolate == "full" || isolate == "after")
-      state2 = state2.isolate();
-    return state2;
+      state3 = state3.isolate();
+    return state3;
   },
   toJSON(value) {
     return { done: value.done.map((e) => e.toJSON()), undone: value.undone.map((e) => e.toJSON()) };
@@ -16486,13 +16486,13 @@ function history(config = {}) {
   ];
 }
 function cmd(side, selection) {
-  return function({ state: state2, dispatch }) {
-    if (!selection && state2.readOnly)
+  return function({ state: state3, dispatch }) {
+    if (!selection && state3.readOnly)
       return false;
-    let historyState = state2.field(historyField_, false);
+    let historyState = state3.field(historyField_, false);
     if (!historyState)
       return false;
-    let tr = historyState.pop(side, state2, selection);
+    let tr = historyState.pop(side, state3, selection);
     if (!tr)
       return false;
     dispatch(tr);
@@ -16644,13 +16644,13 @@ var HistoryState = class _HistoryState {
   addMapping(mapping) {
     return new _HistoryState(addMappingToBranch(this.done, mapping), addMappingToBranch(this.undone, mapping), this.prevTime, this.prevUserEvent);
   }
-  pop(side, state2, onlySelection) {
+  pop(side, state3, onlySelection) {
     let branch = side == 0 ? this.done : this.undone;
     if (branch.length == 0)
       return null;
-    let event = branch[branch.length - 1], selection = event.selectionsAfter[0] || state2.selection;
+    let event = branch[branch.length - 1], selection = event.selectionsAfter[0] || state3.selection;
     if (onlySelection && event.selectionsAfter.length) {
-      return state2.update({
+      return state3.update({
         selection: event.selectionsAfter[event.selectionsAfter.length - 1],
         annotations: fromHistory.of({ side, rest: popSelection(branch), selection }),
         userEvent: side == 0 ? "select.undo" : "select.redo",
@@ -16662,7 +16662,7 @@ var HistoryState = class _HistoryState {
       let rest = branch.length == 1 ? none2 : branch.slice(0, branch.length - 1);
       if (event.mapped)
         rest = addMappingToBranch(rest, event.mapped);
-      return state2.update({
+      return state3.update({
         changes: event.changes,
         selection: event.startSelection,
         effects: event.effects,
@@ -16685,14 +16685,14 @@ var historyKeymap = [
 function updateSel(sel, by) {
   return EditorSelection.create(sel.ranges.map(by), sel.mainIndex);
 }
-function setSel(state2, selection) {
-  return state2.update({ selection, scrollIntoView: true, userEvent: "select" });
+function setSel(state3, selection) {
+  return state3.update({ selection, scrollIntoView: true, userEvent: "select" });
 }
-function moveSel({ state: state2, dispatch }, how) {
-  let selection = updateSel(state2.selection, how);
-  if (selection.eq(state2.selection, true))
+function moveSel({ state: state3, dispatch }, how) {
+  let selection = updateSel(state3.selection, how);
+  if (selection.eq(state3.selection, true))
     return false;
-  dispatch(setSel(state2, selection));
+  dispatch(setSel(state3, selection));
   return true;
 }
 function rangeEnd(range, forward) {
@@ -16712,26 +16712,26 @@ function cursorByGroup(view, forward) {
 var cursorGroupLeft = (view) => cursorByGroup(view, !ltrAtCursor(view));
 var cursorGroupRight = (view) => cursorByGroup(view, ltrAtCursor(view));
 var segmenter = typeof Intl != "undefined" && Intl.Segmenter ? /* @__PURE__ */ new Intl.Segmenter(void 0, { granularity: "word" }) : null;
-function interestingNode(state2, node, bracketProp) {
+function interestingNode(state3, node, bracketProp) {
   if (node.type.prop(bracketProp))
     return true;
   let len = node.to - node.from;
-  return len && (len > 2 || /[^\s,.;:]/.test(state2.sliceDoc(node.from, node.to))) || node.firstChild;
+  return len && (len > 2 || /[^\s,.;:]/.test(state3.sliceDoc(node.from, node.to))) || node.firstChild;
 }
-function moveBySyntax(state2, start, forward) {
-  let pos = syntaxTree(state2).resolveInner(start.head);
+function moveBySyntax(state3, start, forward) {
+  let pos = syntaxTree(state3).resolveInner(start.head);
   let bracketProp = forward ? NodeProp.closedBy : NodeProp.openedBy;
   for (let at = start.head; ; ) {
     let next = forward ? pos.childAfter(at) : pos.childBefore(at);
     if (!next)
       break;
-    if (interestingNode(state2, next, bracketProp))
+    if (interestingNode(state3, next, bracketProp))
       pos = next;
     else
       at = forward ? next.to : next.from;
   }
   let bracket2 = pos.type.prop(bracketProp), match, newPos;
-  if (bracket2 && (match = forward ? matchBrackets(state2, pos.from, 1) : matchBrackets(state2, pos.to, -1)) && match.matched)
+  if (bracket2 && (match = forward ? matchBrackets(state3, pos.from, 1) : matchBrackets(state3, pos.to, -1)) && match.matched)
     newPos = forward ? match.end.to : match.end.from;
   else
     newPos = forward ? pos.to : pos.from;
@@ -16773,20 +16773,20 @@ function pageInfo(view) {
 }
 function cursorByPage(view, forward) {
   let page = pageInfo(view);
-  let { state: state2 } = view, selection = updateSel(state2.selection, (range) => {
+  let { state: state3 } = view, selection = updateSel(state3.selection, (range) => {
     return range.empty ? view.moveVertically(range, forward, page.height) : rangeEnd(range, forward);
   });
-  if (selection.eq(state2.selection))
+  if (selection.eq(state3.selection))
     return false;
   let effect;
   if (page.selfScroll) {
-    let startPos = view.coordsAtPos(state2.selection.main.head);
+    let startPos = view.coordsAtPos(state3.selection.main.head);
     let scrollRect = view.scrollDOM.getBoundingClientRect();
     let scrollTop = scrollRect.top + page.marginTop, scrollBottom = scrollRect.bottom - page.marginBottom;
     if (startPos && startPos.top > scrollTop && startPos.bottom < scrollBottom)
       effect = EditorView.scrollIntoView(selection.main.head, { y: "start", yMargin: startPos.top - scrollTop });
   }
-  view.dispatch(setSel(state2, selection), { effects: effect });
+  view.dispatch(setSel(state3, selection), { effects: effect });
   return true;
 }
 var cursorPageUp = (view) => cursorByPage(view, false);
@@ -16808,9 +16808,9 @@ var cursorLineBoundaryLeft = (view) => moveSel(view, (range) => moveByLineBounda
 var cursorLineBoundaryRight = (view) => moveSel(view, (range) => moveByLineBoundary(view, range, ltrAtCursor(view)));
 var cursorLineStart = (view) => moveSel(view, (range) => EditorSelection.cursor(view.lineBlockAt(range.head).from, 1));
 var cursorLineEnd = (view) => moveSel(view, (range) => EditorSelection.cursor(view.lineBlockAt(range.head).to, -1));
-function toMatchingBracket(state2, dispatch, extend) {
-  let found = false, selection = updateSel(state2.selection, (range) => {
-    let matching = matchBrackets(state2, range.head, -1) || matchBrackets(state2, range.head, 1) || range.head > 0 && matchBrackets(state2, range.head - 1, 1) || range.head < state2.doc.length && matchBrackets(state2, range.head + 1, -1);
+function toMatchingBracket(state3, dispatch, extend) {
+  let found = false, selection = updateSel(state3.selection, (range) => {
+    let matching = matchBrackets(state3, range.head, -1) || matchBrackets(state3, range.head, 1) || range.head > 0 && matchBrackets(state3, range.head - 1, 1) || range.head < state3.doc.length && matchBrackets(state3, range.head + 1, -1);
     if (!matching || !matching.end)
       return range;
     found = true;
@@ -16819,10 +16819,10 @@ function toMatchingBracket(state2, dispatch, extend) {
   });
   if (!found)
     return false;
-  dispatch(setSel(state2, selection));
+  dispatch(setSel(state3, selection));
   return true;
 }
-var cursorMatchingBracket = ({ state: state2, dispatch }) => toMatchingBracket(state2, dispatch, false);
+var cursorMatchingBracket = ({ state: state3, dispatch }) => toMatchingBracket(state3, dispatch, false);
 function extendSel(target, how) {
   let selection = updateSel(target.state.selection, (range) => {
     let head = how(range);
@@ -16861,34 +16861,34 @@ var selectLineBoundaryLeft = (view) => extendSel(view, (range) => moveByLineBoun
 var selectLineBoundaryRight = (view) => extendSel(view, (range) => moveByLineBoundary(view, range, ltrAtCursor(view)));
 var selectLineStart = (view) => extendSel(view, (range) => EditorSelection.cursor(view.lineBlockAt(range.head).from));
 var selectLineEnd = (view) => extendSel(view, (range) => EditorSelection.cursor(view.lineBlockAt(range.head).to));
-var cursorDocStart = ({ state: state2, dispatch }) => {
-  dispatch(setSel(state2, { anchor: 0 }));
+var cursorDocStart = ({ state: state3, dispatch }) => {
+  dispatch(setSel(state3, { anchor: 0 }));
   return true;
 };
-var cursorDocEnd = ({ state: state2, dispatch }) => {
-  dispatch(setSel(state2, { anchor: state2.doc.length }));
+var cursorDocEnd = ({ state: state3, dispatch }) => {
+  dispatch(setSel(state3, { anchor: state3.doc.length }));
   return true;
 };
-var selectDocStart = ({ state: state2, dispatch }) => {
-  dispatch(setSel(state2, { anchor: state2.selection.main.anchor, head: 0 }));
+var selectDocStart = ({ state: state3, dispatch }) => {
+  dispatch(setSel(state3, { anchor: state3.selection.main.anchor, head: 0 }));
   return true;
 };
-var selectDocEnd = ({ state: state2, dispatch }) => {
-  dispatch(setSel(state2, { anchor: state2.selection.main.anchor, head: state2.doc.length }));
+var selectDocEnd = ({ state: state3, dispatch }) => {
+  dispatch(setSel(state3, { anchor: state3.selection.main.anchor, head: state3.doc.length }));
   return true;
 };
-var selectAll = ({ state: state2, dispatch }) => {
-  dispatch(state2.update({ selection: { anchor: 0, head: state2.doc.length }, userEvent: "select" }));
+var selectAll = ({ state: state3, dispatch }) => {
+  dispatch(state3.update({ selection: { anchor: 0, head: state3.doc.length }, userEvent: "select" }));
   return true;
 };
-var selectLine = ({ state: state2, dispatch }) => {
-  let ranges = selectedLineBlocks(state2).map(({ from, to }) => EditorSelection.range(from, Math.min(to + 1, state2.doc.length)));
-  dispatch(state2.update({ selection: EditorSelection.create(ranges), userEvent: "select" }));
+var selectLine = ({ state: state3, dispatch }) => {
+  let ranges = selectedLineBlocks(state3).map(({ from, to }) => EditorSelection.range(from, Math.min(to + 1, state3.doc.length)));
+  dispatch(state3.update({ selection: EditorSelection.create(ranges), userEvent: "select" }));
   return true;
 };
-var selectParentSyntax = ({ state: state2, dispatch }) => {
-  let selection = updateSel(state2.selection, (range) => {
-    let tree = syntaxTree(state2), stack = tree.resolveStack(range.from, 1);
+var selectParentSyntax = ({ state: state3, dispatch }) => {
+  let selection = updateSel(state3.selection, (range) => {
+    let tree = syntaxTree(state3), stack = tree.resolveStack(range.from, 1);
     if (range.empty) {
       let stackBefore = tree.resolveStack(range.from, -1);
       if (stackBefore.node.from >= stack.node.from && stackBefore.node.to <= stack.node.to)
@@ -16901,15 +16901,15 @@ var selectParentSyntax = ({ state: state2, dispatch }) => {
     }
     return range;
   });
-  if (selection.eq(state2.selection))
+  if (selection.eq(state3.selection))
     return false;
-  dispatch(setSel(state2, selection));
+  dispatch(setSel(state3, selection));
   return true;
 };
 function addCursorVertically(view, forward) {
-  let { state: state2 } = view, sel = state2.selection, ranges = state2.selection.ranges.slice();
-  for (let range of state2.selection.ranges) {
-    let line = state2.doc.lineAt(range.head);
+  let { state: state3 } = view, sel = state3.selection, ranges = state3.selection.ranges.slice();
+  for (let range of state3.selection.ranges) {
+    let line = state3.doc.lineAt(range.head);
     if (forward ? line.to < view.state.doc.length : line.from > 0)
       for (let cur = range; ; ) {
         let next = view.moveVertically(cur, forward);
@@ -16926,27 +16926,27 @@ function addCursorVertically(view, forward) {
   }
   if (ranges.length == sel.ranges.length)
     return false;
-  view.dispatch(setSel(state2, EditorSelection.create(ranges, ranges.length - 1)));
+  view.dispatch(setSel(state3, EditorSelection.create(ranges, ranges.length - 1)));
   return true;
 }
 var addCursorAbove = (view) => addCursorVertically(view, false);
 var addCursorBelow = (view) => addCursorVertically(view, true);
-var simplifySelection = ({ state: state2, dispatch }) => {
-  let cur = state2.selection, selection = null;
+var simplifySelection = ({ state: state3, dispatch }) => {
+  let cur = state3.selection, selection = null;
   if (cur.ranges.length > 1)
     selection = EditorSelection.create([cur.main]);
   else if (!cur.main.empty)
     selection = EditorSelection.create([EditorSelection.cursor(cur.main.head)]);
   if (!selection)
     return false;
-  dispatch(setSel(state2, selection));
+  dispatch(setSel(state3, selection));
   return true;
 };
 function deleteBy(target, by) {
   if (target.state.readOnly)
     return false;
-  let event = "delete.selection", { state: state2 } = target;
-  let changes = state2.changeByRange((range) => {
+  let event = "delete.selection", { state: state3 } = target;
+  let changes = state3.changeByRange((range) => {
     let { from, to } = range;
     if (from == to) {
       let towards = by(range);
@@ -16967,10 +16967,10 @@ function deleteBy(target, by) {
   });
   if (changes.changes.empty)
     return false;
-  target.dispatch(state2.update(changes, {
+  target.dispatch(state3.update(changes, {
     scrollIntoView: true,
     userEvent: event,
-    effects: event == "delete.selection" ? EditorView.announce.of(state2.phrase("Selection deleted")) : void 0
+    effects: event == "delete.selection" ? EditorView.announce.of(state3.phrase("Selection deleted")) : void 0
   }));
   return true;
 }
@@ -16984,17 +16984,17 @@ function skipAtomic(target, pos, forward) {
   return pos;
 }
 var deleteByChar = (target, forward, byIndentUnit) => deleteBy(target, (range) => {
-  let pos = range.from, { state: state2 } = target, line = state2.doc.lineAt(pos), before, targetPos;
+  let pos = range.from, { state: state3 } = target, line = state3.doc.lineAt(pos), before, targetPos;
   if (byIndentUnit && !forward && pos > line.from && pos < line.from + 200 && !/[^ \t]/.test(before = line.text.slice(0, pos - line.from))) {
     if (before[before.length - 1] == "	")
       return pos - 1;
-    let col = countColumn(before, state2.tabSize), drop = col % getIndentUnit(state2) || getIndentUnit(state2);
+    let col = countColumn(before, state3.tabSize), drop = col % getIndentUnit(state3) || getIndentUnit(state3);
     for (let i = 0; i < drop && before[before.length - 1 - i] == " "; i++)
       pos--;
     targetPos = pos;
   } else {
     targetPos = findClusterBreak2(line.text, pos - line.from, forward, forward) + line.from;
-    if (targetPos == pos && line.number != (forward ? state2.doc.lines : 1))
+    if (targetPos == pos && line.number != (forward ? state3.doc.lines : 1))
       targetPos += forward ? 1 : -1;
     else if (!forward && /[\ufe00-\ufe0f]/.test(line.text.slice(targetPos - line.from, pos - line.from)))
       targetPos = findClusterBreak2(line.text, targetPos - line.from, false, false) + line.from;
@@ -17004,11 +17004,11 @@ var deleteByChar = (target, forward, byIndentUnit) => deleteBy(target, (range) =
 var deleteCharBackward = (view) => deleteByChar(view, false, true);
 var deleteCharForward = (view) => deleteByChar(view, true, false);
 var deleteByGroup = (target, forward) => deleteBy(target, (range) => {
-  let pos = range.head, { state: state2 } = target, line = state2.doc.lineAt(pos);
-  let categorize = state2.charCategorizer(pos);
+  let pos = range.head, { state: state3 } = target, line = state3.doc.lineAt(pos);
+  let categorize = state3.charCategorizer(pos);
   for (let cat = null; ; ) {
     if (pos == (forward ? line.to : line.from)) {
-      if (pos == range.head && line.number != (forward ? state2.doc.lines : 1))
+      if (pos == range.head && line.number != (forward ? state3.doc.lines : 1))
         pos += forward ? 1 : -1;
       break;
     }
@@ -17037,43 +17037,43 @@ var deleteLineBoundaryForward = (view) => deleteBy(view, (range) => {
   let lineStart = view.moveToLineBoundary(range, true).head;
   return range.head < lineStart ? lineStart : Math.min(view.state.doc.length, range.head + 1);
 });
-var splitLine = ({ state: state2, dispatch }) => {
-  if (state2.readOnly)
+var splitLine = ({ state: state3, dispatch }) => {
+  if (state3.readOnly)
     return false;
-  let changes = state2.changeByRange((range) => {
+  let changes = state3.changeByRange((range) => {
     return {
       changes: { from: range.from, to: range.to, insert: Text.of(["", ""]) },
       range: EditorSelection.cursor(range.from)
     };
   });
-  dispatch(state2.update(changes, { scrollIntoView: true, userEvent: "input" }));
+  dispatch(state3.update(changes, { scrollIntoView: true, userEvent: "input" }));
   return true;
 };
-var transposeChars = ({ state: state2, dispatch }) => {
-  if (state2.readOnly)
+var transposeChars = ({ state: state3, dispatch }) => {
+  if (state3.readOnly)
     return false;
-  let changes = state2.changeByRange((range) => {
-    if (!range.empty || range.from == 0 || range.from == state2.doc.length)
+  let changes = state3.changeByRange((range) => {
+    if (!range.empty || range.from == 0 || range.from == state3.doc.length)
       return { range };
-    let pos = range.from, line = state2.doc.lineAt(pos);
+    let pos = range.from, line = state3.doc.lineAt(pos);
     let from = pos == line.from ? pos - 1 : findClusterBreak2(line.text, pos - line.from, false) + line.from;
     let to = pos == line.to ? pos + 1 : findClusterBreak2(line.text, pos - line.from, true) + line.from;
     return {
-      changes: { from, to, insert: state2.doc.slice(pos, to).append(state2.doc.slice(from, pos)) },
+      changes: { from, to, insert: state3.doc.slice(pos, to).append(state3.doc.slice(from, pos)) },
       range: EditorSelection.cursor(to)
     };
   });
   if (changes.changes.empty)
     return false;
-  dispatch(state2.update(changes, { scrollIntoView: true, userEvent: "move.character" }));
+  dispatch(state3.update(changes, { scrollIntoView: true, userEvent: "move.character" }));
   return true;
 };
-function selectedLineBlocks(state2) {
+function selectedLineBlocks(state3) {
   let blocks = [], upto = -1;
-  for (let range of state2.selection.ranges) {
-    let startLine = state2.doc.lineAt(range.from), endLine = state2.doc.lineAt(range.to);
+  for (let range of state3.selection.ranges) {
+    let startLine = state3.doc.lineAt(range.from), endLine = state3.doc.lineAt(range.to);
     if (!range.empty && range.to == endLine.from)
-      endLine = state2.doc.lineAt(range.to - 1);
+      endLine = state3.doc.lineAt(range.to - 1);
     if (upto >= startLine.number) {
       let prev = blocks[blocks.length - 1];
       prev.to = endLine.to;
@@ -17085,63 +17085,63 @@ function selectedLineBlocks(state2) {
   }
   return blocks;
 }
-function moveLine(state2, dispatch, forward) {
-  if (state2.readOnly)
+function moveLine(state3, dispatch, forward) {
+  if (state3.readOnly)
     return false;
   let changes = [], ranges = [];
-  for (let block2 of selectedLineBlocks(state2)) {
-    if (forward ? block2.to == state2.doc.length : block2.from == 0)
+  for (let block2 of selectedLineBlocks(state3)) {
+    if (forward ? block2.to == state3.doc.length : block2.from == 0)
       continue;
-    let nextLine = state2.doc.lineAt(forward ? block2.to + 1 : block2.from - 1);
+    let nextLine = state3.doc.lineAt(forward ? block2.to + 1 : block2.from - 1);
     let size = nextLine.length + 1;
     if (forward) {
-      changes.push({ from: block2.to, to: nextLine.to }, { from: block2.from, insert: nextLine.text + state2.lineBreak });
+      changes.push({ from: block2.to, to: nextLine.to }, { from: block2.from, insert: nextLine.text + state3.lineBreak });
       for (let r of block2.ranges)
-        ranges.push(EditorSelection.range(Math.min(state2.doc.length, r.anchor + size), Math.min(state2.doc.length, r.head + size)));
+        ranges.push(EditorSelection.range(Math.min(state3.doc.length, r.anchor + size), Math.min(state3.doc.length, r.head + size)));
     } else {
-      changes.push({ from: nextLine.from, to: block2.from }, { from: block2.to, insert: state2.lineBreak + nextLine.text });
+      changes.push({ from: nextLine.from, to: block2.from }, { from: block2.to, insert: state3.lineBreak + nextLine.text });
       for (let r of block2.ranges)
         ranges.push(EditorSelection.range(r.anchor - size, r.head - size));
     }
   }
   if (!changes.length)
     return false;
-  dispatch(state2.update({
+  dispatch(state3.update({
     changes,
     scrollIntoView: true,
-    selection: EditorSelection.create(ranges, state2.selection.mainIndex),
+    selection: EditorSelection.create(ranges, state3.selection.mainIndex),
     userEvent: "move.line"
   }));
   return true;
 }
-var moveLineUp = ({ state: state2, dispatch }) => moveLine(state2, dispatch, false);
-var moveLineDown = ({ state: state2, dispatch }) => moveLine(state2, dispatch, true);
-function copyLine(state2, dispatch, forward) {
-  if (state2.readOnly)
+var moveLineUp = ({ state: state3, dispatch }) => moveLine(state3, dispatch, false);
+var moveLineDown = ({ state: state3, dispatch }) => moveLine(state3, dispatch, true);
+function copyLine(state3, dispatch, forward) {
+  if (state3.readOnly)
     return false;
   let changes = [];
-  for (let block2 of selectedLineBlocks(state2)) {
+  for (let block2 of selectedLineBlocks(state3)) {
     if (forward)
-      changes.push({ from: block2.from, insert: state2.doc.slice(block2.from, block2.to) + state2.lineBreak });
+      changes.push({ from: block2.from, insert: state3.doc.slice(block2.from, block2.to) + state3.lineBreak });
     else
-      changes.push({ from: block2.to, insert: state2.lineBreak + state2.doc.slice(block2.from, block2.to) });
+      changes.push({ from: block2.to, insert: state3.lineBreak + state3.doc.slice(block2.from, block2.to) });
   }
-  dispatch(state2.update({ changes, scrollIntoView: true, userEvent: "input.copyline" }));
+  dispatch(state3.update({ changes, scrollIntoView: true, userEvent: "input.copyline" }));
   return true;
 }
-var copyLineUp = ({ state: state2, dispatch }) => copyLine(state2, dispatch, false);
-var copyLineDown = ({ state: state2, dispatch }) => copyLine(state2, dispatch, true);
+var copyLineUp = ({ state: state3, dispatch }) => copyLine(state3, dispatch, false);
+var copyLineDown = ({ state: state3, dispatch }) => copyLine(state3, dispatch, true);
 var deleteLine = (view) => {
   if (view.state.readOnly)
     return false;
-  let { state: state2 } = view, changes = state2.changes(selectedLineBlocks(state2).map(({ from, to }) => {
+  let { state: state3 } = view, changes = state3.changes(selectedLineBlocks(state3).map(({ from, to }) => {
     if (from > 0)
       from--;
-    else if (to < state2.doc.length)
+    else if (to < state3.doc.length)
       to++;
     return { from, to };
   }));
-  let selection = updateSel(state2.selection, (range) => {
+  let selection = updateSel(state3.selection, (range) => {
     let dist2 = void 0;
     if (view.lineWrapping) {
       let block2 = view.lineBlockAt(range.head), pos = view.coordsAtPos(range.head, range.assoc || 1);
@@ -17153,109 +17153,109 @@ var deleteLine = (view) => {
   view.dispatch({ changes, selection, scrollIntoView: true, userEvent: "delete.line" });
   return true;
 };
-function isBetweenBrackets(state2, pos) {
-  if (/\(\)|\[\]|\{\}/.test(state2.sliceDoc(pos - 1, pos + 1)))
+function isBetweenBrackets(state3, pos) {
+  if (/\(\)|\[\]|\{\}/.test(state3.sliceDoc(pos - 1, pos + 1)))
     return { from: pos, to: pos };
-  let context = syntaxTree(state2).resolveInner(pos);
+  let context = syntaxTree(state3).resolveInner(pos);
   let before = context.childBefore(pos), after = context.childAfter(pos), closedBy;
-  if (before && after && before.to <= pos && after.from >= pos && (closedBy = before.type.prop(NodeProp.closedBy)) && closedBy.indexOf(after.name) > -1 && state2.doc.lineAt(before.to).from == state2.doc.lineAt(after.from).from && !/\S/.test(state2.sliceDoc(before.to, after.from)))
+  if (before && after && before.to <= pos && after.from >= pos && (closedBy = before.type.prop(NodeProp.closedBy)) && closedBy.indexOf(after.name) > -1 && state3.doc.lineAt(before.to).from == state3.doc.lineAt(after.from).from && !/\S/.test(state3.sliceDoc(before.to, after.from)))
     return { from: before.to, to: after.from };
   return null;
 }
 var insertNewlineAndIndent = /* @__PURE__ */ newlineAndIndent(false);
 var insertBlankLine = /* @__PURE__ */ newlineAndIndent(true);
 function newlineAndIndent(atEof) {
-  return ({ state: state2, dispatch }) => {
-    if (state2.readOnly)
+  return ({ state: state3, dispatch }) => {
+    if (state3.readOnly)
       return false;
-    let changes = state2.changeByRange((range) => {
-      let { from, to } = range, line = state2.doc.lineAt(from);
-      let explode = !atEof && from == to && isBetweenBrackets(state2, from);
+    let changes = state3.changeByRange((range) => {
+      let { from, to } = range, line = state3.doc.lineAt(from);
+      let explode = !atEof && from == to && isBetweenBrackets(state3, from);
       if (atEof)
-        from = to = (to <= line.to ? line : state2.doc.lineAt(to)).to;
-      let cx = new IndentContext(state2, { simulateBreak: from, simulateDoubleBreak: !!explode });
+        from = to = (to <= line.to ? line : state3.doc.lineAt(to)).to;
+      let cx = new IndentContext(state3, { simulateBreak: from, simulateDoubleBreak: !!explode });
       let indent = getIndentation(cx, from);
       if (indent == null)
-        indent = countColumn(/^\s*/.exec(state2.doc.lineAt(from).text)[0], state2.tabSize);
+        indent = countColumn(/^\s*/.exec(state3.doc.lineAt(from).text)[0], state3.tabSize);
       while (to < line.to && /\s/.test(line.text[to - line.from]))
         to++;
       if (explode)
         ({ from, to } = explode);
       else if (from > line.from && from < line.from + 100 && !/\S/.test(line.text.slice(0, from)))
         from = line.from;
-      let insert2 = ["", indentString(state2, indent)];
+      let insert2 = ["", indentString(state3, indent)];
       if (explode)
-        insert2.push(indentString(state2, cx.lineIndent(line.from, -1)));
+        insert2.push(indentString(state3, cx.lineIndent(line.from, -1)));
       return {
         changes: { from, to, insert: Text.of(insert2) },
         range: EditorSelection.cursor(from + 1 + insert2[1].length)
       };
     });
-    dispatch(state2.update(changes, { scrollIntoView: true, userEvent: "input" }));
+    dispatch(state3.update(changes, { scrollIntoView: true, userEvent: "input" }));
     return true;
   };
 }
-function changeBySelectedLine(state2, f) {
+function changeBySelectedLine(state3, f) {
   let atLine = -1;
-  return state2.changeByRange((range) => {
+  return state3.changeByRange((range) => {
     let changes = [];
     for (let pos = range.from; pos <= range.to; ) {
-      let line = state2.doc.lineAt(pos);
+      let line = state3.doc.lineAt(pos);
       if (line.number > atLine && (range.empty || range.to > line.from)) {
         f(line, changes, range);
         atLine = line.number;
       }
       pos = line.to + 1;
     }
-    let changeSet = state2.changes(changes);
+    let changeSet = state3.changes(changes);
     return {
       changes,
       range: EditorSelection.range(changeSet.mapPos(range.anchor, 1), changeSet.mapPos(range.head, 1))
     };
   });
 }
-var indentSelection = ({ state: state2, dispatch }) => {
-  if (state2.readOnly)
+var indentSelection = ({ state: state3, dispatch }) => {
+  if (state3.readOnly)
     return false;
   let updated = /* @__PURE__ */ Object.create(null);
-  let context = new IndentContext(state2, { overrideIndentation: (start) => {
+  let context = new IndentContext(state3, { overrideIndentation: (start) => {
     let found = updated[start];
     return found == null ? -1 : found;
   } });
-  let changes = changeBySelectedLine(state2, (line, changes2, range) => {
+  let changes = changeBySelectedLine(state3, (line, changes2, range) => {
     let indent = getIndentation(context, line.from);
     if (indent == null)
       return;
     if (!/\S/.test(line.text))
       indent = 0;
     let cur = /^\s*/.exec(line.text)[0];
-    let norm = indentString(state2, indent);
+    let norm = indentString(state3, indent);
     if (cur != norm || range.from < line.from + cur.length) {
       updated[line.from] = indent;
       changes2.push({ from: line.from, to: line.from + cur.length, insert: norm });
     }
   });
   if (!changes.changes.empty)
-    dispatch(state2.update(changes, { userEvent: "indent" }));
+    dispatch(state3.update(changes, { userEvent: "indent" }));
   return true;
 };
-var indentMore = ({ state: state2, dispatch }) => {
-  if (state2.readOnly)
+var indentMore = ({ state: state3, dispatch }) => {
+  if (state3.readOnly)
     return false;
-  dispatch(state2.update(changeBySelectedLine(state2, (line, changes) => {
-    changes.push({ from: line.from, insert: state2.facet(indentUnit) });
+  dispatch(state3.update(changeBySelectedLine(state3, (line, changes) => {
+    changes.push({ from: line.from, insert: state3.facet(indentUnit) });
   }), { userEvent: "input.indent" }));
   return true;
 };
-var indentLess = ({ state: state2, dispatch }) => {
-  if (state2.readOnly)
+var indentLess = ({ state: state3, dispatch }) => {
+  if (state3.readOnly)
     return false;
-  dispatch(state2.update(changeBySelectedLine(state2, (line, changes) => {
+  dispatch(state3.update(changeBySelectedLine(state3, (line, changes) => {
     let space4 = /^\s*/.exec(line.text)[0];
     if (!space4)
       return;
-    let col = countColumn(space4, state2.tabSize), keep = 0;
-    let insert2 = indentString(state2, Math.max(0, col - getIndentUnit(state2)));
+    let col = countColumn(space4, state3.tabSize), keep = 0;
+    let insert2 = indentString(state3, Math.max(0, col - getIndentUnit(state3)));
     while (keep < space4.length && keep < insert2.length && space4.charCodeAt(keep) == insert2.charCodeAt(keep))
       keep++;
     changes.push({ from: line.from + keep, to: line.from + space4.length, insert: insert2.slice(keep) });
@@ -17339,8 +17339,8 @@ var CompletionContext = class {
   completion sources—in the editor, the extension will create
   these for you.)
   */
-  constructor(state2, pos, explicit, view) {
-    this.state = state2;
+  constructor(state3, pos, explicit, view) {
+    this.state = state3;
     this.pos = pos;
     this.explicit = explicit;
     this.view = view;
@@ -17596,14 +17596,14 @@ var Snippet = class _Snippet {
     this.lines = lines;
     this.fieldPositions = fieldPositions;
   }
-  instantiate(state2, pos) {
+  instantiate(state3, pos) {
     let text = [], lineStart = [pos];
-    let lineObj = state2.doc.lineAt(pos), baseIndent = /^\s*/.exec(lineObj.text)[0];
+    let lineObj = state3.doc.lineAt(pos), baseIndent = /^\s*/.exec(lineObj.text)[0];
     for (let line of this.lines) {
       if (text.length) {
         let indent = baseIndent, tabs = /^\t*/.exec(line)[0].length;
         for (let i = 0; i < tabs; i++)
-          indent += state2.facet(indentUnit);
+          indent += state3.facet(indentUnit);
         lineStart.push(pos + indent.length - tabs);
         line = indent + line.slice(tabs);
       }
@@ -17737,12 +17737,12 @@ function snippet(template) {
   };
 }
 function moveField(dir) {
-  return ({ state: state2, dispatch }) => {
-    let active = state2.field(snippetState, false);
+  return ({ state: state3, dispatch }) => {
+    let active = state3.field(snippetState, false);
     if (!active || dir < 0 && active.active == 0)
       return false;
     let next = active.active + dir, last = dir > 0 && !active.ranges.some((r) => r.field == next + dir);
-    dispatch(state2.update({
+    dispatch(state3.update({
       selection: fieldSelection(active.ranges, next),
       effects: setActive.of(last ? null : new ActiveSnippet(active.ranges, next)),
       scrollIntoView: true
@@ -17750,11 +17750,11 @@ function moveField(dir) {
     return true;
   };
 }
-var clearSnippet = ({ state: state2, dispatch }) => {
-  let active = state2.field(snippetState, false);
+var clearSnippet = ({ state: state3, dispatch }) => {
+  let active = state3.field(snippetState, false);
   if (!active)
     return false;
-  dispatch(state2.update({ effects: setActive.of(null) }));
+  dispatch(state3.update({ effects: setActive.of(null) }));
   return true;
 };
 var nextSnippetField = /* @__PURE__ */ moveField(1);
@@ -17768,7 +17768,7 @@ var snippetKeymap = /* @__PURE__ */ Facet.define({
     return maps.length ? maps[0] : defaultSnippetKeymap;
   }
 });
-var addSnippetKeymap = /* @__PURE__ */ Prec.highest(/* @__PURE__ */ keymap.compute([snippetKeymap], (state2) => state2.facet(snippetKeymap)));
+var addSnippetKeymap = /* @__PURE__ */ Prec.highest(/* @__PURE__ */ keymap.compute([snippetKeymap], (state3) => state3.facet(snippetKeymap)));
 function snippetCompletion(template, completion) {
   return { ...completion, apply: snippet(template) };
 }
@@ -19846,10 +19846,10 @@ var Stack = class _Stack {
   /**
   @internal
   */
-  constructor(p, stack, state2, reducePos, pos, score, buffer, bufferBase, curContext, lookAhead = 0, parent) {
+  constructor(p, stack, state3, reducePos, pos, score, buffer, bufferBase, curContext, lookAhead = 0, parent) {
     this.p = p;
     this.stack = stack;
-    this.state = state2;
+    this.state = state3;
     this.reducePos = reducePos;
     this.pos = pos;
     this.score = score;
@@ -19869,9 +19869,9 @@ var Stack = class _Stack {
   /**
   @internal
   */
-  static start(p, state2, pos = 0) {
+  static start(p, state3, pos = 0) {
     let cx = p.parser.context;
-    return new _Stack(p, [], state2, pos, pos, 0, [], 0, cx ? new StackContext(cx, cx.start) : null, 0, null);
+    return new _Stack(p, [], state3, pos, pos, 0, [], 0, cx ? new StackContext(cx, cx.start) : null, 0, null);
   }
   /**
   The stack's current [context](#lr.ContextTracker) value, if
@@ -19887,9 +19887,9 @@ var Stack = class _Stack {
   /**
   @internal
   */
-  pushState(state2, start) {
+  pushState(state3, start) {
     this.stack.push(this.state, start, this.bufferBase + this.buffer.length);
-    this.state = state2;
+    this.state = state3;
   }
   // Apply a reduce action
   /**
@@ -20177,11 +20177,11 @@ var Stack = class _Stack {
   */
   findForcedReduction() {
     let { parser: parser6 } = this.p, seen = [];
-    let explore = (state2, depth) => {
-      if (seen.includes(state2))
+    let explore = (state3, depth) => {
+      if (seen.includes(state3))
         return;
-      seen.push(state2);
-      return parser6.allActions(state2, (action) => {
+      seen.push(state3);
+      return parser6.allActions(state3, (action) => {
         if (action & (262144 | 131072)) ;
         else if (action & 65536) {
           let rDepth = (action >> 19) - depth;
@@ -20699,12 +20699,12 @@ var ExternalTokenizer = class {
   }
 };
 function readToken(data2, input2, stack, group, precTable, precOffset) {
-  let state2 = 0, groupMask = 1 << group, { dialect } = stack.p.parser;
+  let state3 = 0, groupMask = 1 << group, { dialect } = stack.p.parser;
   scan: for (; ; ) {
-    if ((groupMask & data2[state2]) == 0)
+    if ((groupMask & data2[state3]) == 0)
       break;
-    let accEnd = data2[state2 + 1];
-    for (let i = state2 + 3; i < accEnd; i += 2)
+    let accEnd = data2[state3 + 1];
+    for (let i = state3 + 3; i < accEnd; i += 2)
       if ((data2[i + 1] & groupMask) > 0) {
         let term = data2[i];
         if (dialect.allows(term) && (input2.token.value == -1 || input2.token.value == term || overrides(term, input2.token.value, precTable, precOffset))) {
@@ -20712,9 +20712,9 @@ function readToken(data2, input2, stack, group, precTable, precOffset) {
           break;
         }
       }
-    let next = input2.next, low = 0, high = data2[state2 + 2];
+    let next = input2.next, low = 0, high = data2[state3 + 2];
     if (input2.next < 0 && high > low && data2[accEnd + high * 3 - 3] == 65535) {
-      state2 = data2[accEnd + high * 3 - 1];
+      state3 = data2[accEnd + high * 3 - 1];
       continue scan;
     }
     for (; low < high; ) {
@@ -20726,7 +20726,7 @@ function readToken(data2, input2, stack, group, precTable, precOffset) {
       else if (next >= to)
         low = mid + 1;
       else {
-        state2 = data2[index + 2];
+        state3 = data2[index + 2];
         input2.advance();
         continue scan;
       }
@@ -20948,10 +20948,10 @@ var TokenCache = class {
     return index;
   }
   addActions(stack, token, end, index) {
-    let { state: state2 } = stack, { parser: parser6 } = stack.p, { data: data2 } = parser6;
+    let { state: state3 } = stack, { parser: parser6 } = stack.p, { data: data2 } = parser6;
     for (let set = 0; set < 2; set++) {
       for (let i = parser6.stateSlot(
-        state2,
+        state3,
         set ? 2 : 1
         /* ParseState.Actions */
       ); ; i += 3) {
@@ -21357,7 +21357,7 @@ var LRParser = class _LRParser extends Parser {
   /**
   Get a goto table entry @internal
   */
-  getGoto(state2, term, loose = false) {
+  getGoto(state3, term, loose = false) {
     let table = this.goto;
     if (term >= table[0])
       return -1;
@@ -21367,7 +21367,7 @@ var LRParser = class _LRParser extends Parser {
       if (last && loose)
         return target;
       for (let end = pos + (groupTag >> 1); pos < end; pos++)
-        if (table[pos] == state2)
+        if (table[pos] == state3)
           return target;
       if (last)
         return -1;
@@ -21376,11 +21376,11 @@ var LRParser = class _LRParser extends Parser {
   /**
   Check if this state has an action for a given terminal @internal
   */
-  hasAction(state2, terminal) {
+  hasAction(state3, terminal) {
     let data2 = this.data;
     for (let set = 0; set < 2; set++) {
       for (let i = this.stateSlot(
-        state2,
+        state3,
         set ? 2 : 1
         /* ParseState.Actions */
       ), next; ; i += 3) {
@@ -21401,15 +21401,15 @@ var LRParser = class _LRParser extends Parser {
   /**
   @internal
   */
-  stateSlot(state2, slot) {
-    return this.states[state2 * 6 + slot];
+  stateSlot(state3, slot) {
+    return this.states[state3 * 6 + slot];
   }
   /**
   @internal
   */
-  stateFlag(state2, flag) {
+  stateFlag(state3, flag) {
     return (this.stateSlot(
-      state2,
+      state3,
       0
       /* ParseState.Flags */
     ) & flag) > 0;
@@ -21417,21 +21417,21 @@ var LRParser = class _LRParser extends Parser {
   /**
   @internal
   */
-  validAction(state2, action) {
-    return !!this.allActions(state2, (a) => a == action ? true : null);
+  validAction(state3, action) {
+    return !!this.allActions(state3, (a) => a == action ? true : null);
   }
   /**
   @internal
   */
-  allActions(state2, action) {
+  allActions(state3, action) {
     let deflt = this.stateSlot(
-      state2,
+      state3,
       4
       /* ParseState.DefaultReduce */
     );
     let result = deflt ? action(deflt) : void 0;
     for (let i = this.stateSlot(
-      state2,
+      state3,
       1
       /* ParseState.Actions */
     ); result == null; i += 3) {
@@ -21449,10 +21449,10 @@ var LRParser = class _LRParser extends Parser {
   Get the states that can follow this one through shift actions or
   goto jumps. @internal
   */
-  nextStates(state2) {
+  nextStates(state3) {
     let result = [];
     for (let i = this.stateSlot(
-      state2,
+      state3,
       1
       /* ParseState.Actions */
     ); ; i += 3) {
@@ -21816,15 +21816,15 @@ var endTag = new ExternalTokenizer((input2, stack) => {
 function contentTokenizer(tag2, textToken, endToken) {
   let lastState = 2 + tag2.length;
   return new ExternalTokenizer((input2) => {
-    for (let state2 = 0, matchedLen = 0, i = 0; ; i++) {
+    for (let state3 = 0, matchedLen = 0, i = 0; ; i++) {
       if (input2.next < 0) {
         if (i) input2.acceptToken(textToken);
         break;
       }
-      if (state2 == 0 && input2.next == lessThan || state2 == 1 && input2.next == slash || state2 >= 2 && state2 < lastState && input2.next == tag2.charCodeAt(state2 - 2)) {
-        state2++;
+      if (state3 == 0 && input2.next == lessThan || state3 == 1 && input2.next == slash || state3 >= 2 && state3 < lastState && input2.next == tag2.charCodeAt(state3 - 2)) {
+        state3++;
         matchedLen++;
-      } else if (state2 == lastState && input2.next == greaterThan) {
+      } else if (state3 == lastState && input2.next == greaterThan) {
         if (i > matchedLen)
           input2.acceptToken(textToken, -matchedLen);
         else
@@ -21834,7 +21834,7 @@ function contentTokenizer(tag2, textToken, endToken) {
         input2.acceptToken(textToken, 1);
         break;
       } else {
-        state2 = matchedLen = 0;
+        state3 = matchedLen = 0;
       }
       input2.advance();
     }
@@ -22921,18 +22921,18 @@ function variableNames(doc2, node, isVariable) {
   }
 }
 var defineCSSCompletionSource = (isVariable) => (context) => {
-  let { state: state2, pos } = context, node = syntaxTree(state2).resolveInner(pos, -1);
-  let isDash = node.type.isError && node.from == node.to - 1 && state2.doc.sliceString(node.from, node.to) == "-";
+  let { state: state3, pos } = context, node = syntaxTree(state3).resolveInner(pos, -1);
+  let isDash = node.type.isError && node.from == node.to - 1 && state3.doc.sliceString(node.from, node.to) == "-";
   if (node.name == "PropertyName" || (isDash || node.name == "TagName") && /^(Block|Styles)$/.test(node.resolve(node.to).name))
     return { from: node.from, options: properties(), validFor: identifier2 };
   if (node.name == "ValueName")
     return { from: node.from, options: values, validFor: identifier2 };
   if (node.name == "PseudoClassName")
     return { from: node.from, options: pseudoClasses, validFor: identifier2 };
-  if (isVariable(node) || (context.explicit || isDash) && isVarArg(node, state2.doc))
+  if (isVariable(node) || (context.explicit || isDash) && isVarArg(node, state3.doc))
     return {
       from: isVariable(node) || isDash ? node.from : pos,
-      options: variableNames(state2.doc, astTop(node), isVariable),
+      options: variableNames(state3.doc, astTop(node), isVariable),
       validFor: variable
     };
   if (node.name == "TagName") {
@@ -23456,24 +23456,24 @@ var android2 = typeof navigator == "object" && /* @__PURE__ */ /Android\b/.test(
 var autoCloseTags = /* @__PURE__ */ EditorView.inputHandler.of((view, from, to, text, defaultInsert) => {
   if ((android2 ? view.composing : view.compositionStarted) || view.state.readOnly || from != to || text != ">" && text != "/" || !javascriptLanguage.isActiveAt(view.state, from, -1))
     return false;
-  let base2 = defaultInsert(), { state: state2 } = base2;
-  let closeTags = state2.changeByRange((range) => {
+  let base2 = defaultInsert(), { state: state3 } = base2;
+  let closeTags = state3.changeByRange((range) => {
     var _a2;
-    let { head } = range, around = syntaxTree(state2).resolveInner(head - 1, -1), name2;
+    let { head } = range, around = syntaxTree(state3).resolveInner(head - 1, -1), name2;
     if (around.name == "JSXStartTag")
       around = around.parent;
-    if (state2.doc.sliceString(head - 1, head) != text || around.name == "JSXAttributeValue" && around.to > head) ;
+    if (state3.doc.sliceString(head - 1, head) != text || around.name == "JSXAttributeValue" && around.to > head) ;
     else if (text == ">" && around.name == "JSXFragmentTag") {
       return { range, changes: { from: head, insert: `</>` } };
     } else if (text == "/" && around.name == "JSXStartCloseTag") {
       let empty2 = around.parent, base3 = empty2.parent;
-      if (base3 && empty2.from == head - 2 && ((name2 = elementName(state2.doc, base3.firstChild, head)) || ((_a2 = base3.firstChild) === null || _a2 === void 0 ? void 0 : _a2.name) == "JSXFragmentTag")) {
+      if (base3 && empty2.from == head - 2 && ((name2 = elementName(state3.doc, base3.firstChild, head)) || ((_a2 = base3.firstChild) === null || _a2 === void 0 ? void 0 : _a2.name) == "JSXFragmentTag")) {
         let insert2 = `${name2}>`;
         return { range: EditorSelection.cursor(head + insert2.length, -1), changes: { from: head, insert: insert2 } };
       }
     } else if (text == ">") {
       let openTag = findOpenTag(around);
-      if (openTag && openTag.name == "JSXOpenTag" && !/^\/?>|^<\//.test(state2.doc.sliceString(head, head + 2)) && (name2 = elementName(state2.doc, openTag, head)))
+      if (openTag && openTag.name == "JSXOpenTag" && !/^\/?>|^<\//.test(state3.doc.sliceString(head, head + 2)) && (name2 = elementName(state3.doc, openTag, head)))
         return { range, changes: { from: head, insert: `</${name2}>` } };
     }
     return { range };
@@ -23482,7 +23482,7 @@ var autoCloseTags = /* @__PURE__ */ EditorView.inputHandler.of((view, from, to, 
     return false;
   view.dispatch([
     base2,
-    state2.update(closeTags, { userEvent: "input.complete", scrollIntoView: true })
+    state3.update(closeTags, { userEvent: "input.complete", scrollIntoView: true })
   ]);
   return true;
 });
@@ -23959,13 +23959,13 @@ function openTags(doc2, tree) {
   return open;
 }
 var identifier3 = /^[:\-\.\w\u00b7-\uffff]*$/;
-function completeTag(state2, schema, tree, from, to) {
-  let end = /\s*>/.test(state2.sliceDoc(to, to + 5)) ? "" : ">";
+function completeTag(state3, schema, tree, from, to) {
+  let end = /\s*>/.test(state3.sliceDoc(to, to + 5)) ? "" : ">";
   let parent = findParentElement(tree, tree.name == "StartTag" || tree.name == "TagName");
   return {
     from,
     to,
-    options: allowedChildren(state2.doc, parent, schema).map((tagName) => ({ label: tagName, type: "type" })).concat(openTags(state2.doc, tree).map((tag2, i) => ({
+    options: allowedChildren(state3.doc, parent, schema).map((tagName) => ({ label: tagName, type: "type" })).concat(openTags(state3.doc, tree).map((tag2, i) => ({
       label: "/" + tag2,
       apply: "/" + tag2 + end,
       type: "type",
@@ -23974,25 +23974,25 @@ function completeTag(state2, schema, tree, from, to) {
     validFor: /^\/?[:\-\.\w\u00b7-\uffff]*$/
   };
 }
-function completeCloseTag(state2, tree, from, to) {
-  let end = /\s*>/.test(state2.sliceDoc(to, to + 5)) ? "" : ">";
+function completeCloseTag(state3, tree, from, to) {
+  let end = /\s*>/.test(state3.sliceDoc(to, to + 5)) ? "" : ">";
   return {
     from,
     to,
-    options: openTags(state2.doc, tree).map((tag2, i) => ({ label: tag2, apply: tag2 + end, type: "type", boost: 99 - i })),
+    options: openTags(state3.doc, tree).map((tag2, i) => ({ label: tag2, apply: tag2 + end, type: "type", boost: 99 - i })),
     validFor: identifier3
   };
 }
-function completeStartTag(state2, schema, tree, pos) {
+function completeStartTag(state3, schema, tree, pos) {
   let options2 = [], level = 0;
-  for (let tagName of allowedChildren(state2.doc, tree, schema))
+  for (let tagName of allowedChildren(state3.doc, tree, schema))
     options2.push({ label: "<" + tagName, type: "type" });
-  for (let open of openTags(state2.doc, tree))
+  for (let open of openTags(state3.doc, tree))
     options2.push({ label: "</" + open + ">", type: "type", boost: 99 - level++ });
   return { from: pos, to: pos, options: options2, validFor: /^<\/?[:\-\.\w\u00b7-\uffff]*$/ };
 }
-function completeAttrName(state2, schema, tree, from, to) {
-  let elt2 = findParentElement(tree), info = elt2 ? schema.tags[elementName2(state2.doc, elt2)] : null;
+function completeAttrName(state3, schema, tree, from, to) {
+  let elt2 = findParentElement(tree), info = elt2 ? schema.tags[elementName2(state3.doc, elt2)] : null;
   let localAttrs = info && info.attrs ? Object.keys(info.attrs) : [];
   let names = info && info.globalAttrs === false ? localAttrs : localAttrs.length ? localAttrs.concat(schema.globalAttrNames) : schema.globalAttrNames;
   return {
@@ -24002,23 +24002,23 @@ function completeAttrName(state2, schema, tree, from, to) {
     validFor: identifier3
   };
 }
-function completeAttrValue(state2, schema, tree, from, to) {
+function completeAttrValue(state3, schema, tree, from, to) {
   var _a2;
   let nameNode = (_a2 = tree.parent) === null || _a2 === void 0 ? void 0 : _a2.getChild("AttributeName");
   let options2 = [], token = void 0;
   if (nameNode) {
-    let attrName = state2.sliceDoc(nameNode.from, nameNode.to);
+    let attrName = state3.sliceDoc(nameNode.from, nameNode.to);
     let attrs = schema.globalAttrs[attrName];
     if (!attrs) {
-      let elt2 = findParentElement(tree), info = elt2 ? schema.tags[elementName2(state2.doc, elt2)] : null;
+      let elt2 = findParentElement(tree), info = elt2 ? schema.tags[elementName2(state3.doc, elt2)] : null;
       attrs = (info === null || info === void 0 ? void 0 : info.attrs) && info.attrs[attrName];
     }
     if (attrs) {
-      let base2 = state2.sliceDoc(from, to).toLowerCase(), quoteStart = '"', quoteEnd = '"';
+      let base2 = state3.sliceDoc(from, to).toLowerCase(), quoteStart = '"', quoteEnd = '"';
       if (/^['"]/.test(base2)) {
         token = base2[0] == '"' ? /^[^"]*$/ : /^[^']*$/;
         quoteStart = "";
-        quoteEnd = state2.sliceDoc(to, to + 1) == base2[0] ? "" : base2[0];
+        quoteEnd = state3.sliceDoc(to, to + 1) == base2[0] ? "" : base2[0];
         base2 = base2.slice(1);
         from++;
       } else {
@@ -24031,7 +24031,7 @@ function completeAttrValue(state2, schema, tree, from, to) {
   return { from, to, options: options2, validFor: token };
 }
 function htmlCompletionFor(schema, context) {
-  let { state: state2, pos } = context, tree = syntaxTree(state2).resolveInner(pos, -1), around = tree.resolve(pos);
+  let { state: state3, pos } = context, tree = syntaxTree(state3).resolveInner(pos, -1), around = tree.resolve(pos);
   for (let scan = pos, before; around == tree && (before = tree.childBefore(scan)); ) {
     let last = before.lastChild;
     if (!last || !last.type.isError || last.from < last.to)
@@ -24040,17 +24040,17 @@ function htmlCompletionFor(schema, context) {
     scan = last.from;
   }
   if (tree.name == "TagName") {
-    return tree.parent && /CloseTag$/.test(tree.parent.name) ? completeCloseTag(state2, tree, tree.from, pos) : completeTag(state2, schema, tree, tree.from, pos);
+    return tree.parent && /CloseTag$/.test(tree.parent.name) ? completeCloseTag(state3, tree, tree.from, pos) : completeTag(state3, schema, tree, tree.from, pos);
   } else if (tree.name == "StartTag" || tree.name == "IncompleteTag") {
-    return completeTag(state2, schema, tree, pos, pos);
+    return completeTag(state3, schema, tree, pos, pos);
   } else if (tree.name == "StartCloseTag" || tree.name == "IncompleteCloseTag") {
-    return completeCloseTag(state2, tree, pos, pos);
+    return completeCloseTag(state3, tree, pos, pos);
   } else if (tree.name == "OpenTag" || tree.name == "SelfClosingTag" || tree.name == "AttributeName") {
-    return completeAttrName(state2, schema, tree, tree.name == "AttributeName" ? tree.from : pos, pos);
+    return completeAttrName(state3, schema, tree, tree.name == "AttributeName" ? tree.from : pos, pos);
   } else if (tree.name == "Is" || tree.name == "AttributeValue" || tree.name == "UnquotedAttributeValue") {
-    return completeAttrValue(state2, schema, tree, tree.name == "Is" ? pos : tree.from, pos);
+    return completeAttrValue(state3, schema, tree, tree.name == "Is" ? pos : tree.from, pos);
   } else if (context.explicit && (around.name == "Element" || around.name == "Text" || around.name == "Document")) {
-    return completeStartTag(state2, schema, tree, pos);
+    return completeStartTag(state3, schema, tree, pos);
   } else {
     return null;
   }
@@ -24179,22 +24179,22 @@ var selfClosers2 = /* @__PURE__ */ new Set(/* @__PURE__ */ "area base br col com
 var autoCloseTags2 = /* @__PURE__ */ EditorView.inputHandler.of((view, from, to, text, insertTransaction) => {
   if (view.composing || view.state.readOnly || from != to || text != ">" && text != "/" || !htmlLanguage.isActiveAt(view.state, from, -1))
     return false;
-  let base2 = insertTransaction(), { state: state2 } = base2;
-  let closeTags = state2.changeByRange((range) => {
+  let base2 = insertTransaction(), { state: state3 } = base2;
+  let closeTags = state3.changeByRange((range) => {
     var _a2, _b, _c;
-    let didType = state2.doc.sliceString(range.from - 1, range.to) == text;
-    let { head } = range, after = syntaxTree(state2).resolveInner(head, -1), name2;
+    let didType = state3.doc.sliceString(range.from - 1, range.to) == text;
+    let { head } = range, after = syntaxTree(state3).resolveInner(head, -1), name2;
     if (didType && text == ">" && after.name == "EndTag") {
       let tag2 = after.parent;
-      if (((_b = (_a2 = tag2.parent) === null || _a2 === void 0 ? void 0 : _a2.lastChild) === null || _b === void 0 ? void 0 : _b.name) != "CloseTag" && (name2 = elementName2(state2.doc, tag2.parent, head)) && !selfClosers2.has(name2)) {
-        let to2 = head + (state2.doc.sliceString(head, head + 1) === ">" ? 1 : 0);
+      if (((_b = (_a2 = tag2.parent) === null || _a2 === void 0 ? void 0 : _a2.lastChild) === null || _b === void 0 ? void 0 : _b.name) != "CloseTag" && (name2 = elementName2(state3.doc, tag2.parent, head)) && !selfClosers2.has(name2)) {
+        let to2 = head + (state3.doc.sliceString(head, head + 1) === ">" ? 1 : 0);
         let insert2 = `</${name2}>`;
         return { range, changes: { from: head, to: to2, insert: insert2 } };
       }
     } else if (didType && text == "/" && after.name == "IncompleteCloseTag") {
       let tag2 = after.parent;
-      if (after.from == head - 2 && ((_c = tag2.lastChild) === null || _c === void 0 ? void 0 : _c.name) != "CloseTag" && (name2 = elementName2(state2.doc, tag2, head)) && !selfClosers2.has(name2)) {
-        let to2 = head + (state2.doc.sliceString(head, head + 1) === ">" ? 1 : 0);
+      if (after.from == head - 2 && ((_c = tag2.lastChild) === null || _c === void 0 ? void 0 : _c.name) != "CloseTag" && (name2 = elementName2(state3.doc, tag2, head)) && !selfClosers2.has(name2)) {
+        let to2 = head + (state3.doc.sliceString(head, head + 1) === ">" ? 1 : 0);
         let insert2 = `${name2}>`;
         return {
           range: EditorSelection.cursor(head + insert2.length, -1),
@@ -24208,7 +24208,7 @@ var autoCloseTags2 = /* @__PURE__ */ EditorView.inputHandler.of((view, from, to,
     return false;
   view.dispatch([
     base2,
-    state2.update(closeTags, {
+    state3.update(closeTags, {
       userEvent: "input.complete",
       scrollIntoView: true
     })
@@ -24222,7 +24222,7 @@ var headingProp = /* @__PURE__ */ new NodeProp();
 var commonmark = /* @__PURE__ */ parser.configure({
   props: [
     /* @__PURE__ */ foldNodeProp.add((type) => {
-      return !type.is("Block") || type.is("Document") || isHeading(type) != null || isList(type) ? void 0 : (tree, state2) => ({ from: state2.doc.lineAt(tree.from).to, to: tree.to });
+      return !type.is("Block") || type.is("Document") || isHeading(type) != null || isList(type) ? void 0 : (tree, state3) => ({ from: state3.doc.lineAt(tree.from).to, to: tree.to });
     }),
     /* @__PURE__ */ headingProp.add(isHeading),
     /* @__PURE__ */ indentNodeProp.add({
@@ -24250,8 +24250,8 @@ function findSectionEnd(headerNode, level) {
   }
   return last.to;
 }
-var headerIndent = /* @__PURE__ */ foldService.of((state2, start, end) => {
-  for (let node = syntaxTree(state2).resolveInner(end, -1); node; node = node.parent) {
+var headerIndent = /* @__PURE__ */ foldService.of((state3, start, end) => {
+  for (let node = syntaxTree(state3).resolveInner(end, -1); node; node = node.parent) {
     if (node.from < start)
       break;
     let heading3 = node.type.prop(headingProp);
@@ -24270,7 +24270,7 @@ var commonmarkLanguage = /* @__PURE__ */ mkLang(commonmark);
 var extended = /* @__PURE__ */ commonmark.configure([GFM, Subscript, Superscript, Emoji, {
   props: [
     /* @__PURE__ */ foldNodeProp.add({
-      Table: (tree, state2) => ({ from: state2.doc.lineAt(tree.from).to, to: tree.to })
+      Table: (tree, state3) => ({ from: state3.doc.lineAt(tree.from).to, to: tree.to })
     })
   ]
 }]);
@@ -24374,9 +24374,9 @@ function renumberList(after, doc2, changes, offset = 0) {
     node = next;
   }
 }
-function normalizeIndent(content2, state2) {
+function normalizeIndent(content2, state3) {
   let blank = /^[ \t]*/.exec(content2)[0].length;
-  if (!blank || state2.facet(indentUnit) != "	")
+  if (!blank || state3.facet(indentUnit) != "	")
     return content2;
   let col = countColumn(content2, 4, blank);
   let space4 = "";
@@ -24391,10 +24391,10 @@ function normalizeIndent(content2, state2) {
   }
   return space4 + content2.slice(blank);
 }
-var insertNewlineContinueMarkupCommand = (config = {}) => ({ state: state2, dispatch }) => {
-  let tree = syntaxTree(state2), { doc: doc2 } = state2;
-  let dont = null, changes = state2.changeByRange((range) => {
-    if (!range.empty || !markdownLanguage.isActiveAt(state2, range.from, -1) && !markdownLanguage.isActiveAt(state2, range.from, 1))
+var insertNewlineContinueMarkupCommand = (config = {}) => ({ state: state3, dispatch }) => {
+  let tree = syntaxTree(state3), { doc: doc2 } = state3;
+  let dont = null, changes = state3.changeByRange((range) => {
+    if (!range.empty || !markdownLanguage.isActiveAt(state3, range.from, -1) && !markdownLanguage.isActiveAt(state3, range.from, 1))
       return dont = { range };
     let pos = range.from, line = doc2.lineAt(pos);
     let context = getContext(tree.resolveInner(pos, -1), doc2);
@@ -24424,17 +24424,17 @@ var insertNewlineContinueMarkupCommand = (config = {}) => ({ state: state2, disp
           renumberList(next.item, doc2, changes3);
         return { range: EditorSelection.cursor(delTo + insert3.length), changes: changes3 };
       } else {
-        let insert3 = blankLine(context, state2, line);
+        let insert3 = blankLine(context, state3, line);
         return {
           range: EditorSelection.cursor(pos + insert3.length + 1),
-          changes: { from: line.from, insert: insert3 + state2.lineBreak }
+          changes: { from: line.from, insert: insert3 + state3.lineBreak }
         };
       }
     }
     if (inner.node.name == "Blockquote" && emptyLine && line.from) {
       let prevLine = doc2.lineAt(line.from - 1), quoted = />\s*$/.exec(prevLine.text);
       if (quoted && quoted.index == inner.from) {
-        let changes3 = state2.changes([
+        let changes3 = state3.changes([
           { from: prevLine.from + quoted.index, to: prevLine.to },
           { from: line.from + inner.from, to: line.to }
         ]);
@@ -24454,15 +24454,15 @@ var insertNewlineContinueMarkupCommand = (config = {}) => ({ state: state2, disp
     let from = pos;
     while (from > line.from && /\s/.test(line.text.charAt(from - line.from - 1)))
       from--;
-    insert2 = normalizeIndent(insert2, state2);
-    if (nonTightList(inner.node, state2.doc))
-      insert2 = blankLine(context, state2, line) + state2.lineBreak + insert2;
-    changes2.push({ from, to: pos, insert: state2.lineBreak + insert2 });
+    insert2 = normalizeIndent(insert2, state3);
+    if (nonTightList(inner.node, state3.doc))
+      insert2 = blankLine(context, state3, line) + state3.lineBreak + insert2;
+    changes2.push({ from, to: pos, insert: state3.lineBreak + insert2 });
     return { range: EditorSelection.cursor(from + insert2.length + 1), changes: changes2 };
   });
   if (dont)
     return false;
-  dispatch(state2.update(changes, { scrollIntoView: true, userEvent: "input" }));
+  dispatch(state3.update(changes, { scrollIntoView: true, userEvent: "input" }));
   return true;
 };
 var insertNewlineContinueMarkup = /* @__PURE__ */ insertNewlineContinueMarkupCommand();
@@ -24479,12 +24479,12 @@ function nonTightList(node, doc2) {
   let empty2 = /^[\s>]*$/.test(line1.text);
   return line1.number + (empty2 ? 0 : 1) < line2.number;
 }
-function blankLine(context, state2, line) {
+function blankLine(context, state3, line) {
   let insert2 = "";
   for (let i = 0, e = context.length - 2; i <= e; i++) {
     insert2 += context[i].blank(i < e ? countColumn(line.text, 4, context[i + 1].from) - insert2.length : null, i < e);
   }
-  return normalizeIndent(insert2, state2);
+  return normalizeIndent(insert2, state3);
 }
 function contextNodeForDelete(tree, pos) {
   let node = tree.resolveInner(pos, -1), scan = pos;
@@ -24504,11 +24504,11 @@ function contextNodeForDelete(tree, pos) {
   }
   return node;
 }
-var deleteMarkupBackward = ({ state: state2, dispatch }) => {
-  let tree = syntaxTree(state2);
-  let dont = null, changes = state2.changeByRange((range) => {
-    let pos = range.from, { doc: doc2 } = state2;
-    if (range.empty && markdownLanguage.isActiveAt(state2, range.from)) {
+var deleteMarkupBackward = ({ state: state3, dispatch }) => {
+  let tree = syntaxTree(state3);
+  let dont = null, changes = state3.changeByRange((range) => {
+    let pos = range.from, { doc: doc2 } = state3;
+    if (range.empty && markdownLanguage.isActiveAt(state3, range.from)) {
       let line = doc2.lineAt(pos);
       let context = getContext(contextNodeForDelete(tree, pos), doc2);
       if (context.length) {
@@ -24527,7 +24527,7 @@ var deleteMarkupBackward = ({ state: state2, dispatch }) => {
           if (inner.item && inner.node.from < inner.item.from && /\S/.test(line.text.slice(inner.from, inner.to))) {
             let insert2 = inner.blank(countColumn(line.text, 4, inner.to) - countColumn(line.text, 4, inner.from));
             if (start == line.from)
-              insert2 = normalizeIndent(insert2, state2);
+              insert2 = normalizeIndent(insert2, state3);
             return {
               range: EditorSelection.cursor(start + insert2.length),
               changes: { from: start, to: line.from + inner.to, insert: insert2 }
@@ -24542,7 +24542,7 @@ var deleteMarkupBackward = ({ state: state2, dispatch }) => {
   });
   if (dont)
     return false;
-  dispatch(state2.update(changes, { scrollIntoView: true, userEvent: "delete" }));
+  dispatch(state3.update(changes, { scrollIntoView: true, userEvent: "delete" }));
   return true;
 };
 var markdownKeymap = [
@@ -24574,10 +24574,10 @@ function markdown(config = {}) {
   return new LanguageSupport(lang, support);
 }
 function htmlTagCompletion(context) {
-  let { state: state2, pos } = context, m = /<[:\-\.\w\u00b7-\uffff]*$/.exec(state2.sliceDoc(pos - 25, pos));
+  let { state: state3, pos } = context, m = /<[:\-\.\w\u00b7-\uffff]*$/.exec(state3.sliceDoc(pos - 25, pos));
   if (!m)
     return null;
-  let tree = syntaxTree(state2).resolveInner(pos, -1);
+  let tree = syntaxTree(state3).resolveInner(pos, -1);
   while (tree && !tree.type.isTop) {
     if (tree.name == "CodeBlock" || tree.name == "FencedCode" || tree.name == "ProcessingInstructionBlock" || tree.name == "CommentBlock" || tree.name == "Link" || tree.name == "Image")
       return null;
@@ -24940,19 +24940,19 @@ function createLineDialog(view) {
     let match = /^([+-])?(\d+)?(:\d+)?(%)?$/.exec(input2.value);
     if (!match)
       return;
-    let { state: state2 } = view, startLine = state2.doc.lineAt(state2.selection.main.head);
+    let { state: state3 } = view, startLine = state3.doc.lineAt(state3.selection.main.head);
     let [, sign, ln, cl, percent2] = match;
     let col = cl ? +cl.slice(1) : 0;
     let line2 = ln ? +ln : startLine.number;
     if (ln && percent2) {
       let pc = line2 / 100;
       if (sign)
-        pc = pc * (sign == "-" ? -1 : 1) + startLine.number / state2.doc.lines;
-      line2 = Math.round(state2.doc.lines * pc);
+        pc = pc * (sign == "-" ? -1 : 1) + startLine.number / state3.doc.lines;
+      line2 = Math.round(state3.doc.lines * pc);
     } else if (ln && sign) {
       line2 = line2 * (sign == "-" ? -1 : 1) + startLine.number;
     }
-    let docLine = state2.doc.line(Math.max(1, Math.min(state2.doc.lines, line2)));
+    let docLine = state3.doc.line(Math.max(1, Math.min(state3.doc.lines, line2)));
     let selection = EditorSelection.cursor(docLine.from + Math.max(0, Math.min(col, docLine.length)));
     view.dispatch({
       effects: [dialogEffect.of(false), EditorView.scrollIntoView(selection.from, { y: "center" })],
@@ -25005,29 +25005,29 @@ var baseTheme$12 = /* @__PURE__ */ EditorView.baseTheme({
     }
   }
 });
-var selectWord = ({ state: state2, dispatch }) => {
-  let { selection } = state2;
-  let newSel = EditorSelection.create(selection.ranges.map((range) => state2.wordAt(range.head) || EditorSelection.cursor(range.head)), selection.mainIndex);
+var selectWord = ({ state: state3, dispatch }) => {
+  let { selection } = state3;
+  let newSel = EditorSelection.create(selection.ranges.map((range) => state3.wordAt(range.head) || EditorSelection.cursor(range.head)), selection.mainIndex);
   if (newSel.eq(selection))
     return false;
-  dispatch(state2.update({ selection: newSel }));
+  dispatch(state3.update({ selection: newSel }));
   return true;
 };
-function findNextOccurrence(state2, query) {
-  let { main, ranges } = state2.selection;
-  let word = state2.wordAt(main.head), fullWord = word && word.from == main.from && word.to == main.to;
-  for (let cycled = false, cursor = new SearchCursor(state2.doc, query, ranges[ranges.length - 1].to); ; ) {
+function findNextOccurrence(state3, query) {
+  let { main, ranges } = state3.selection;
+  let word = state3.wordAt(main.head), fullWord = word && word.from == main.from && word.to == main.to;
+  for (let cycled = false, cursor = new SearchCursor(state3.doc, query, ranges[ranges.length - 1].to); ; ) {
     cursor.next();
     if (cursor.done) {
       if (cycled)
         return null;
-      cursor = new SearchCursor(state2.doc, query, 0, Math.max(0, ranges[ranges.length - 1].from - 1));
+      cursor = new SearchCursor(state3.doc, query, 0, Math.max(0, ranges[ranges.length - 1].from - 1));
       cycled = true;
     } else {
       if (cycled && ranges.some((r) => r.from == cursor.value.from))
         continue;
       if (fullWord) {
-        let word2 = state2.wordAt(cursor.value.from);
+        let word2 = state3.wordAt(cursor.value.from);
         if (!word2 || word2.from != cursor.value.from || word2.to != cursor.value.to)
           continue;
       }
@@ -25035,18 +25035,18 @@ function findNextOccurrence(state2, query) {
     }
   }
 }
-var selectNextOccurrence = ({ state: state2, dispatch }) => {
-  let { ranges } = state2.selection;
+var selectNextOccurrence = ({ state: state3, dispatch }) => {
+  let { ranges } = state3.selection;
   if (ranges.some((sel) => sel.from === sel.to))
-    return selectWord({ state: state2, dispatch });
-  let searchedText = state2.sliceDoc(ranges[0].from, ranges[0].to);
-  if (state2.selection.ranges.some((r) => state2.sliceDoc(r.from, r.to) != searchedText))
+    return selectWord({ state: state3, dispatch });
+  let searchedText = state3.sliceDoc(ranges[0].from, ranges[0].to);
+  if (state3.selection.ranges.some((r) => state3.sliceDoc(r.from, r.to) != searchedText))
     return false;
-  let range = findNextOccurrence(state2, searchedText);
+  let range = findNextOccurrence(state3, searchedText);
   if (!range)
     return false;
-  dispatch(state2.update({
-    selection: state2.selection.addRange(EditorSelection.range(range.from, range.to), false),
+  dispatch(state3.update({
+    selection: state3.selection.addRange(EditorSelection.range(range.from, range.to), false),
     effects: EditorView.scrollIntoView(range.to)
   }));
   return true;
@@ -25103,8 +25103,8 @@ var SearchQuery = class {
   Get a search cursor for this query, searching through the given
   range in the given state.
   */
-  getCursor(state2, from = 0, to) {
-    let st = state2.doc ? state2 : EditorState.create({ doc: state2 });
+  getCursor(state3, from = 0, to) {
+    let st = state3.doc ? state3 : EditorState.create({ doc: state3 });
     if (to == null)
       to = st.doc.length;
     return this.regexp ? regexpCursor(this, st, from, to) : stringCursor(this, st, from, to);
@@ -25115,8 +25115,8 @@ var QueryType2 = class {
     this.spec = spec;
   }
 };
-function stringCursor(spec, state2, from, to) {
-  return new SearchCursor(state2.doc, spec.unquoted, from, to, spec.caseSensitive ? void 0 : (x) => x.toLowerCase(), spec.wholeWord ? stringWordTest(state2.doc, state2.charCategorizer(state2.selection.main.head)) : void 0);
+function stringCursor(spec, state3, from, to) {
+  return new SearchCursor(state3.doc, spec.unquoted, from, to, spec.caseSensitive ? void 0 : (x) => x.toLowerCase(), spec.wholeWord ? stringWordTest(state3.doc, state3.charCategorizer(state3.selection.main.head)) : void 0);
 }
 function stringWordTest(doc2, categorizer) {
   return (from, to, buf, bufPos) => {
@@ -25131,20 +25131,20 @@ var StringQuery = class extends QueryType2 {
   constructor(spec) {
     super(spec);
   }
-  nextMatch(state2, curFrom, curTo) {
-    let cursor = stringCursor(this.spec, state2, curTo, state2.doc.length).nextOverlapping();
+  nextMatch(state3, curFrom, curTo) {
+    let cursor = stringCursor(this.spec, state3, curTo, state3.doc.length).nextOverlapping();
     if (cursor.done) {
-      let end = Math.min(state2.doc.length, curFrom + this.spec.unquoted.length);
-      cursor = stringCursor(this.spec, state2, 0, end).nextOverlapping();
+      let end = Math.min(state3.doc.length, curFrom + this.spec.unquoted.length);
+      cursor = stringCursor(this.spec, state3, 0, end).nextOverlapping();
     }
     return cursor.done || cursor.value.from == curFrom && cursor.value.to == curTo ? null : cursor.value;
   }
   // Searching in reverse is, rather than implementing an inverted search
   // cursor, done by scanning chunk after chunk forward.
-  prevMatchInRange(state2, from, to) {
+  prevMatchInRange(state3, from, to) {
     for (let pos = to; ; ) {
       let start = Math.max(from, pos - 1e4 - this.spec.unquoted.length);
-      let cursor = stringCursor(this.spec, state2, start, pos), range = null;
+      let cursor = stringCursor(this.spec, state3, start, pos), range = null;
       while (!cursor.nextOverlapping().done)
         range = cursor.value;
       if (range)
@@ -25154,17 +25154,17 @@ var StringQuery = class extends QueryType2 {
       pos -= 1e4;
     }
   }
-  prevMatch(state2, curFrom, curTo) {
-    let found = this.prevMatchInRange(state2, 0, curFrom);
+  prevMatch(state3, curFrom, curTo) {
+    let found = this.prevMatchInRange(state3, 0, curFrom);
     if (!found)
-      found = this.prevMatchInRange(state2, Math.max(0, curTo - this.spec.unquoted.length), state2.doc.length);
+      found = this.prevMatchInRange(state3, Math.max(0, curTo - this.spec.unquoted.length), state3.doc.length);
     return found && (found.from != curFrom || found.to != curTo) ? found : null;
   }
   getReplacement(_result) {
     return this.spec.unquote(this.spec.replace);
   }
-  matchAll(state2, limit) {
-    let cursor = stringCursor(this.spec, state2, 0, state2.doc.length), ranges = [];
+  matchAll(state3, limit) {
+    let cursor = stringCursor(this.spec, state3, 0, state3.doc.length), ranges = [];
     while (!cursor.next().done) {
       if (ranges.length >= limit)
         return null;
@@ -25172,16 +25172,16 @@ var StringQuery = class extends QueryType2 {
     }
     return ranges;
   }
-  highlight(state2, from, to, add2) {
-    let cursor = stringCursor(this.spec, state2, Math.max(0, from - this.spec.unquoted.length), Math.min(to + this.spec.unquoted.length, state2.doc.length));
+  highlight(state3, from, to, add2) {
+    let cursor = stringCursor(this.spec, state3, Math.max(0, from - this.spec.unquoted.length), Math.min(to + this.spec.unquoted.length, state3.doc.length));
     while (!cursor.next().done)
       add2(cursor.value.from, cursor.value.to);
   }
 };
-function regexpCursor(spec, state2, from, to) {
-  return new RegExpCursor(state2.doc, spec.search, {
+function regexpCursor(spec, state3, from, to) {
+  return new RegExpCursor(state3.doc, spec.search, {
     ignoreCase: !spec.caseSensitive,
-    test: spec.wholeWord ? regexpWordTest(state2.charCategorizer(state2.selection.main.head)) : void 0
+    test: spec.wholeWord ? regexpWordTest(state3.charCategorizer(state3.selection.main.head)) : void 0
   }, from, to);
 }
 function charBefore(str, index) {
@@ -25194,20 +25194,20 @@ function regexpWordTest(categorizer) {
   return (_from, _to, match) => !match[0].length || (categorizer(charBefore(match.input, match.index)) != CharCategory.Word || categorizer(charAfter(match.input, match.index)) != CharCategory.Word) && (categorizer(charAfter(match.input, match.index + match[0].length)) != CharCategory.Word || categorizer(charBefore(match.input, match.index + match[0].length)) != CharCategory.Word);
 }
 var RegExpQuery = class extends QueryType2 {
-  nextMatch(state2, curFrom, curTo) {
-    let cursor = regexpCursor(this.spec, state2, curTo, state2.doc.length).next();
+  nextMatch(state3, curFrom, curTo) {
+    let cursor = regexpCursor(this.spec, state3, curTo, state3.doc.length).next();
     if (cursor.done)
-      cursor = regexpCursor(this.spec, state2, 0, curFrom).next();
+      cursor = regexpCursor(this.spec, state3, 0, curFrom).next();
     return cursor.done ? null : cursor.value;
   }
-  prevMatchInRange(state2, from, to) {
+  prevMatchInRange(state3, from, to) {
     for (let size = 1; ; size++) {
       let start = Math.max(
         from,
         to - size * 1e4
         /* FindPrev.ChunkSize */
       );
-      let cursor = regexpCursor(this.spec, state2, start, to), range = null;
+      let cursor = regexpCursor(this.spec, state3, start, to), range = null;
       while (!cursor.next().done)
         range = cursor.value;
       if (range && (start == from || range.from > start + 10))
@@ -25216,8 +25216,8 @@ var RegExpQuery = class extends QueryType2 {
         return null;
     }
   }
-  prevMatch(state2, curFrom, curTo) {
-    return this.prevMatchInRange(state2, 0, curFrom) || this.prevMatchInRange(state2, curTo, state2.doc.length);
+  prevMatch(state3, curFrom, curTo) {
+    return this.prevMatchInRange(state3, 0, curFrom) || this.prevMatchInRange(state3, curTo, state3.doc.length);
   }
   getReplacement(result) {
     return this.spec.unquote(this.spec.replace).replace(/\$([$&]|\d+)/g, (m, i) => {
@@ -25233,8 +25233,8 @@ var RegExpQuery = class extends QueryType2 {
       return m;
     });
   }
-  matchAll(state2, limit) {
-    let cursor = regexpCursor(this.spec, state2, 0, state2.doc.length), ranges = [];
+  matchAll(state3, limit) {
+    let cursor = regexpCursor(this.spec, state3, 0, state3.doc.length), ranges = [];
     while (!cursor.next().done) {
       if (ranges.length >= limit)
         return null;
@@ -25242,12 +25242,12 @@ var RegExpQuery = class extends QueryType2 {
     }
     return ranges;
   }
-  highlight(state2, from, to, add2) {
-    let cursor = regexpCursor(this.spec, state2, Math.max(
+  highlight(state3, from, to, add2) {
+    let cursor = regexpCursor(this.spec, state3, Math.max(
       0,
       from - 250
       /* RegExp.HighlightMargin */
-    ), Math.min(to + 250, state2.doc.length));
+    ), Math.min(to + 250, state3.doc.length));
     while (!cursor.next().done)
       add2(cursor.value.from, cursor.value.to);
   }
@@ -25255,8 +25255,8 @@ var RegExpQuery = class extends QueryType2 {
 var setSearchQuery = /* @__PURE__ */ StateEffect.define();
 var togglePanel = /* @__PURE__ */ StateEffect.define();
 var searchState = /* @__PURE__ */ StateField.define({
-  create(state2) {
-    return new SearchState(defaultQuery(state2).create(), null);
+  create(state3) {
+    return new SearchState(defaultQuery(state3).create(), null);
   },
   update(value, tr) {
     for (let effect of tr.effects) {
@@ -25283,9 +25283,9 @@ var searchHighlighter = /* @__PURE__ */ ViewPlugin.fromClass(class {
     this.decorations = this.highlight(view.state.field(searchState));
   }
   update(update) {
-    let state2 = update.state.field(searchState);
-    if (state2 != update.startState.field(searchState) || update.docChanged || update.selectionSet || update.viewportChanged)
-      this.decorations = this.highlight(state2);
+    let state3 = update.state.field(searchState);
+    if (state3 != update.startState.field(searchState) || update.docChanged || update.selectionSet || update.viewportChanged)
+      this.decorations = this.highlight(state3);
   }
   highlight({ query, panel }) {
     if (!panel || !query.spec.valid)
@@ -25308,8 +25308,8 @@ var searchHighlighter = /* @__PURE__ */ ViewPlugin.fromClass(class {
 });
 function searchCommand(f) {
   return (view) => {
-    let state2 = view.state.field(searchState, false);
-    return state2 && state2.query.spec.valid ? f(view, state2) : openSearchPanel(view);
+    let state3 = view.state.field(searchState, false);
+    return state3 && state3.query.spec.valid ? f(view, state3) : openSearchPanel(view);
   };
 }
 var findNext = /* @__PURE__ */ searchCommand((view, { query }) => {
@@ -25328,8 +25328,8 @@ var findNext = /* @__PURE__ */ searchCommand((view, { query }) => {
   return true;
 });
 var findPrevious = /* @__PURE__ */ searchCommand((view, { query }) => {
-  let { state: state2 } = view, { from } = state2.selection.main;
-  let prev = query.prevMatch(state2, from, from);
+  let { state: state3 } = view, { from } = state3.selection.main;
+  let prev = query.prevMatch(state3, from, from);
   if (!prev)
     return false;
   let selection = EditorSelection.single(prev.from, prev.to);
@@ -25352,46 +25352,46 @@ var selectMatches = /* @__PURE__ */ searchCommand((view, { query }) => {
   });
   return true;
 });
-var selectSelectionMatches = ({ state: state2, dispatch }) => {
-  let sel = state2.selection;
+var selectSelectionMatches = ({ state: state3, dispatch }) => {
+  let sel = state3.selection;
   if (sel.ranges.length > 1 || sel.main.empty)
     return false;
   let { from, to } = sel.main;
   let ranges = [], main = 0;
-  for (let cur = new SearchCursor(state2.doc, state2.sliceDoc(from, to)); !cur.next().done; ) {
+  for (let cur = new SearchCursor(state3.doc, state3.sliceDoc(from, to)); !cur.next().done; ) {
     if (ranges.length > 1e3)
       return false;
     if (cur.value.from == from)
       main = ranges.length;
     ranges.push(EditorSelection.range(cur.value.from, cur.value.to));
   }
-  dispatch(state2.update({
+  dispatch(state3.update({
     selection: EditorSelection.create(ranges, main),
     userEvent: "select.search.matches"
   }));
   return true;
 };
 var replaceNext = /* @__PURE__ */ searchCommand((view, { query }) => {
-  let { state: state2 } = view, { from, to } = state2.selection.main;
-  if (state2.readOnly)
+  let { state: state3 } = view, { from, to } = state3.selection.main;
+  if (state3.readOnly)
     return false;
-  let match = query.nextMatch(state2, from, from);
+  let match = query.nextMatch(state3, from, from);
   if (!match)
     return false;
   let next = match;
   let changes = [], selection, replacement;
   let effects = [];
   if (next.from == from && next.to == to) {
-    replacement = state2.toText(query.getReplacement(next));
+    replacement = state3.toText(query.getReplacement(next));
     changes.push({ from: next.from, to: next.to, insert: replacement });
-    next = query.nextMatch(state2, next.from, next.to);
-    effects.push(EditorView.announce.of(state2.phrase("replaced match on line $", state2.doc.lineAt(from).number) + "."));
+    next = query.nextMatch(state3, next.from, next.to);
+    effects.push(EditorView.announce.of(state3.phrase("replaced match on line $", state3.doc.lineAt(from).number) + "."));
   }
   let changeSet = view.state.changes(changes);
   if (next) {
     selection = EditorSelection.single(next.from, next.to).map(changeSet);
     effects.push(announceMatch(view, next));
-    effects.push(state2.facet(searchConfigFacet).scrollToMatch(selection.main, view));
+    effects.push(state3.facet(searchConfigFacet).scrollToMatch(selection.main, view));
   }
   view.dispatch({
     changes: changeSet,
@@ -25421,13 +25421,13 @@ var replaceAll = /* @__PURE__ */ searchCommand((view, { query }) => {
 function createSearchPanel(view) {
   return view.state.facet(searchConfigFacet).createPanel(view);
 }
-function defaultQuery(state2, fallback) {
+function defaultQuery(state3, fallback) {
   var _a2, _b, _c, _d, _e;
-  let sel = state2.selection.main;
-  let selText = sel.empty || sel.to > sel.from + 100 ? "" : state2.sliceDoc(sel.from, sel.to);
+  let sel = state3.selection.main;
+  let selText = sel.empty || sel.to > sel.from + 100 ? "" : state3.sliceDoc(sel.from, sel.to);
   if (fallback && !selText)
     return fallback;
-  let config = state2.facet(searchConfigFacet);
+  let config = state3.facet(searchConfigFacet);
   return new SearchQuery({
     search: ((_a2 = fallback === null || fallback === void 0 ? void 0 : fallback.literal) !== null && _a2 !== void 0 ? _a2 : config.literal) ? selText : selText.replace(/\n/g, "\\n"),
     caseSensitive: (_b = fallback === null || fallback === void 0 ? void 0 : fallback.caseSensitive) !== null && _b !== void 0 ? _b : config.caseSensitive,
@@ -25446,11 +25446,11 @@ function selectSearchInput(view) {
     input2.select();
 }
 var openSearchPanel = (view) => {
-  let state2 = view.state.field(searchState, false);
-  if (state2 && state2.panel) {
+  let state3 = view.state.field(searchState, false);
+  if (state3 && state3.panel) {
     let searchInput = getSearchInput(view);
     if (searchInput && searchInput != view.root.activeElement) {
-      let query = defaultQuery(view.state, state2.query.spec);
+      let query = defaultQuery(view.state, state3.query.spec);
       if (query.valid)
         view.dispatch({ effects: setSearchQuery.of(query) });
       searchInput.focus();
@@ -25459,14 +25459,14 @@ var openSearchPanel = (view) => {
   } else {
     view.dispatch({ effects: [
       togglePanel.of(true),
-      state2 ? setSearchQuery.of(defaultQuery(view.state, state2.query.spec)) : StateEffect.appendConfig.of(searchExtensions)
+      state3 ? setSearchQuery.of(defaultQuery(view.state, state3.query.spec)) : StateEffect.appendConfig.of(searchExtensions)
     ] });
   }
   return true;
 };
 var closeSearchPanel = (view) => {
-  let state2 = view.state.field(searchState, false);
-  if (!state2 || !state2.panel)
+  let state3 = view.state.field(searchState, false);
+  if (!state3 || !state3.panel)
     return false;
   let panel = getPanel(view, createSearchPanel);
   if (panel && panel.dom.contains(view.root.activeElement))
@@ -25963,12 +25963,12 @@ function countLeadingSpaces(text) {
   const match = text.match(/^\s*/);
   return match ? match[0].length : 0;
 }
-function linesInSelection(state2) {
+function linesInSelection(state3) {
   const seen = /* @__PURE__ */ new Set();
   const out = [];
-  for (const r of state2.selection.ranges) {
-    let line = state2.doc.lineAt(r.from).number;
-    const endLine = state2.doc.lineAt(r.to).number;
+  for (const r of state3.selection.ranges) {
+    let line = state3.doc.lineAt(r.from).number;
+    const endLine = state3.doc.lineAt(r.to).number;
     for (; line <= endLine; line++) {
       if (!seen.has(line)) {
         seen.add(line);
@@ -26078,11 +26078,11 @@ function makeListPrefix(parsed, overrides2 = {}) {
 }
 function listEnterCommandFactory(indentString2) {
   return function listEnterCommand(view) {
-    const { state: state2 } = view;
-    if (state2.selection.ranges.length !== 1) return false;
-    const range = state2.selection.main;
+    const { state: state3 } = view;
+    if (state3.selection.ranges.length !== 1) return false;
+    const range = state3.selection.main;
     if (!range.empty) return false;
-    const line = state2.doc.lineAt(range.head);
+    const line = state3.doc.lineAt(range.head);
     const parsed = parseListLine(line.text);
     if (!parsed) return false;
     const cursorOffset = range.head - line.from;
@@ -26128,12 +26128,12 @@ ${prefix}`;
 }
 function listIndentCommandFactory(indentString2) {
   return function listIndentCommand(view) {
-    const { state: state2 } = view;
-    const selectedLines = linesInSelection(state2);
+    const { state: state3 } = view;
+    const selectedLines = linesInSelection(state3);
     if (!selectedLines.length) return indentMore(view);
     const targets = [];
     for (const lineNumber of selectedLines) {
-      const ln = state2.doc.line(lineNumber);
+      const ln = state3.doc.line(lineNumber);
       const parsed = parseListLine(ln.text);
       if (!parsed) return indentMore(view);
       targets.push(ln);
@@ -26150,12 +26150,12 @@ function listIndentCommandFactory(indentString2) {
 }
 function listOutdentCommandFactory(indentString2) {
   return function listOutdentCommand(view) {
-    const { state: state2 } = view;
-    const selectedLines = linesInSelection(state2);
+    const { state: state3 } = view;
+    const selectedLines = linesInSelection(state3);
     if (!selectedLines.length) return indentLess(view);
     const changes = [];
     for (const lineNumber of selectedLines) {
-      const ln = state2.doc.line(lineNumber);
+      const ln = state3.doc.line(lineNumber);
       const parsed = parseListLine(ln.text);
       if (!parsed) return indentLess(view);
       if (!parsed.indentLength) return indentLess(view);
@@ -26190,10 +26190,10 @@ function createListKeymap(indentString2 = "  ") {
     }
   ]));
 }
-function analyzeListStructure(state2) {
+function analyzeListStructure(state3) {
   const builder = new RangeSetBuilder();
   const numberingChanges = [];
-  const doc2 = state2.doc;
+  const doc2 = state3.doc;
   const levels = [];
   const allLevels = [];
   const lineInfos = [];
@@ -26347,12 +26347,12 @@ var autoNumberAnnotation = Annotation.define();
 var todoAutoCompleteHandler = EditorView.inputHandler.of((view, from, to, text) => {
   if (text !== "[") return false;
   if (from !== to) return false;
-  const { state: state2 } = view;
-  if (state2.selection.ranges.length !== 1 || !state2.selection.main.empty) return false;
-  const line = state2.doc.lineAt(from);
-  const prefix = state2.doc.sliceString(line.from, from);
+  const { state: state3 } = view;
+  if (state3.selection.ranges.length !== 1 || !state3.selection.main.empty) return false;
+  const line = state3.doc.lineAt(from);
+  const prefix = state3.doc.sliceString(line.from, from);
   if (TODO_AUTOCOMPLETE_PREFIX_RE.test(prefix)) {
-    const suffix = state2.doc.sliceString(from, line.to);
+    const suffix = state3.doc.sliceString(from, line.to);
     if (TODO_AUTOCOMPLETE_SUFFIX_RE.test(suffix)) return false;
     const hasContentSuffix = /\S/.test(suffix);
     const replaceTo = hasContentSuffix ? line.to : to;
@@ -26652,7 +26652,7 @@ function startEditor(shell2, opts = {}) {
   const templateName = isTemplate ? rawTemplateName || "Untitled Template" : null;
   const initialText = typeof opts.initialContent === "string" ? opts.initialContent : "";
   const initialSchedule = isTemplate ? cloneTemplateSchedule(opts.templateSchedule) : null;
-  const state2 = {
+  const state3 = {
     title: opts.title || (isTemplate ? templateName : (/* @__PURE__ */ new Date()).toLocaleString()),
     id: opts.id ?? (isTemplate ? templateName : null),
     date: isTemplate ? null : typeof opts.date === "string" ? opts.date : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
@@ -26698,7 +26698,7 @@ function startEditor(shell2, opts = {}) {
     root.style.gap = "8px";
     const header = document.createElement("div");
     header.className = "writer-header soft";
-    header.textContent = isTemplate ? `TEMPLATE - ${state2.templateName ?? templateName}` : `JOURNAL - ${fmtBannerDate(state2.date)}`;
+    header.textContent = isTemplate ? `TEMPLATE - ${state3.templateName ?? templateName}` : `JOURNAL - ${fmtBannerDate(state3.date)}`;
     const help = document.createElement("div");
     help.className = "writer-help muted";
     const saveCombo = isMac ? "CMD + S" : "CTRL + S";
@@ -26813,12 +26813,12 @@ function startEditor(shell2, opts = {}) {
     }
   }
   function scheduleAutosave(immediate = false) {
-    if (!autosaveEnabled2 || isTemplate || !state2.dirty || !cmView) return;
+    if (!autosaveEnabled2 || isTemplate || !state3.dirty || !cmView) return;
     cancelAutosaveTimer();
     const delay = immediate ? 0 : AUTOSAVE_DELAY;
     autosaveTimer = setTimeout(async () => {
       autosaveTimer = null;
-      if (!autosaveEnabled2 || isTemplate || !state2.dirty || !cmView) return;
+      if (!autosaveEnabled2 || isTemplate || !state3.dirty || !cmView) return;
       if (autosaveInFlight) {
         scheduleAutosave();
         return;
@@ -26826,12 +26826,12 @@ function startEditor(shell2, opts = {}) {
       autosaveInFlight = true;
       try {
         const ok2 = await save({ silent: true });
-        if (!ok2 && autosaveEnabled2 && state2.dirty) {
+        if (!ok2 && autosaveEnabled2 && state3.dirty) {
           scheduleAutosave();
         }
       } finally {
         autosaveInFlight = false;
-        if (autosaveEnabled2 && state2.dirty && !autosaveTimer) {
+        if (autosaveEnabled2 && state3.dirty && !autosaveTimer) {
           scheduleAutosave();
         }
       }
@@ -26843,7 +26843,7 @@ function startEditor(shell2, opts = {}) {
     autosaveEnabled2 = next;
     if (!autosaveEnabled2) {
       cancelAutosaveTimer();
-    } else if (state2.dirty) {
+    } else if (state3.dirty) {
       scheduleAutosave();
     }
   }
@@ -26902,7 +26902,7 @@ function startEditor(shell2, opts = {}) {
     shell2.print(`<span class="info">${shell2.esc(msg)}</span>`);
   }
   function summary() {
-    const lines = state2.buffer.length;
+    const lines = state3.buffer.length;
     return `${lines} line${lines === 1 ? "" : "s"}`;
   }
   const retroTheme2 = EditorView.theme({
@@ -26938,7 +26938,8 @@ function startEditor(shell2, opts = {}) {
       display: "inline-flex",
       alignItems: "center",
       justifyContent: "center",
-      minWidth: "2ch",
+      minWidth: "calc(var(--editor-line-height, 1.5) * 0.9em)",
+      minHeight: "calc(var(--editor-line-height, 1.5) * 0.9em)",
       cursor: "pointer",
       background: "transparent",
       zIndex: 2,
@@ -26961,7 +26962,7 @@ function startEditor(shell2, opts = {}) {
       display: "grid",
       gridTemplateColumns: "calc(var(--list-indent-ch, 0) * 1ch) calc(var(--list-marker-ch, 2) * 1ch) minmax(0, 1fr)",
       columnGap: "calc(var(--list-gap-ch, 0.5) * 1ch)",
-      alignItems: "start"
+      alignItems: "center"
     },
     ".cm-line.cm-list-line .cm-list-indent": {
       gridColumn: "1",
@@ -26970,8 +26971,9 @@ function startEditor(shell2, opts = {}) {
     },
     ".cm-line.cm-list-line .cm-list-marker": {
       gridColumn: "2",
-      display: "block",
-      justifySelf: "end",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "flex-end",
       whiteSpace: "pre",
       textAlign: "right",
       fontVariantNumeric: "tabular-nums lining-nums",
@@ -27166,10 +27168,10 @@ function startEditor(shell2, opts = {}) {
     const cur = update.state.doc.toString();
     if (cur === savedSnapshot) {
       if (unsaved) clearUnsaved();
-      state2.dirty = false;
+      state3.dirty = false;
     } else {
       if (!unsaved) markUnsaved();
-      state2.dirty = true;
+      state3.dirty = true;
       if (autosaveEnabled2) {
         scheduleAutosave();
       }
@@ -27309,10 +27311,10 @@ function startEditor(shell2, opts = {}) {
       return;
     }
     const text = cmView.state.doc.toString();
-    state2.buffer = text.split("\n");
+    state3.buffer = text.split("\n");
     try {
       if (window.db && typeof window.db.upsert === "function") {
-        await window.db.upsert(state2.date, text);
+        await window.db.upsert(state3.date, text);
         savedSnapshot = text;
       }
     } catch (err) {
@@ -27327,7 +27329,7 @@ function startEditor(shell2, opts = {}) {
     }
     clearUnsaved();
     if (!silent) showToast2("Saved");
-    state2.dirty = false;
+    state3.dirty = false;
     return true;
   }
   function showTemplateSavedToast() {
@@ -27773,24 +27775,24 @@ function startEditor(shell2, opts = {}) {
       return;
     }
     const text = cmView.state.doc.toString();
-    state2.buffer = text.split("\n");
+    state3.buffer = text.split("\n");
     showTemplateModal({
       onSave: async (name2, schedule) => {
         const saved = await window.db.saveTemplate(name2, text, schedule);
         const nextSchedule = saved && saved.schedule ? cloneTemplateSchedule(saved.schedule) : cloneTemplateSchedule(schedule);
-        state2.templateSchedule = nextSchedule;
-        state2.templateName = name2;
-        state2.id = name2;
-        state2.title = `Template: ${name2}`;
+        state3.templateSchedule = nextSchedule;
+        state3.templateName = name2;
+        state3.id = name2;
+        state3.title = `Template: ${name2}`;
         const headerEl = document.querySelector(".writer-header");
         if (headerEl) headerEl.textContent = `TEMPLATE - ${name2}`;
         if (cmView) savedSnapshot = cmView.state.doc.toString();
         clearUnsaved();
-        state2.dirty = false;
+        state3.dirty = false;
         showTemplateSavedToast();
       },
-      initialValue: isTemplate ? state2.templateName ?? templateName ?? "" : "",
-      initialSchedule: state2.templateSchedule
+      initialValue: isTemplate ? state3.templateName ?? templateName ?? "" : "",
+      initialSchedule: state3.templateSchedule
     });
   }
   function showConfirmModal(message, onYes, onNo) {
@@ -27883,7 +27885,7 @@ function startEditor(shell2, opts = {}) {
     btnNo.addEventListener("click", reject);
   }
   function requestExit() {
-    if (state2.dirty || unsaved) {
+    if (state3.dirty || unsaved) {
       if (autosaveEnabled2 && !isTemplate) {
         save({ silent: true }).then((ok2) => {
           if (!ok2) {
@@ -27912,7 +27914,7 @@ function startEditor(shell2, opts = {}) {
     }
     if (cmView) {
       const text = cmView.state.doc.toString();
-      state2.buffer = text.split("\n");
+      state3.buffer = text.split("\n");
     }
     restoreEditorDom();
     shell2.exit();
@@ -27952,7 +27954,7 @@ function startEditor(shell2, opts = {}) {
     shell2.resetPrompt();
     return null;
   }
-  const startDoc = state2.buffer.join("\n");
+  const startDoc = state3.buffer.join("\n");
   savedSnapshot = startDoc;
   try {
     cmView = new EditorView({
@@ -27985,7 +27987,7 @@ function startEditor(shell2, opts = {}) {
   window.addEventListener("keydown", onHotkey, true);
   const program = {
     async consume(_line) {
-      state2.dirty = true;
+      state3.dirty = true;
     },
     setAutosave(enabled) {
       setAutosaveEnabled(enabled);
@@ -28214,7 +28216,7 @@ var retroTheme = EditorView.theme({
   "&": { backgroundColor: "var(--editor-bg)", color: "var(--editor-fg)", height: "100%" },
   ".cm-content": {
     caretColor: "var(--editor-caret)",
-    fontFamily: "var(--font-editor, var(--font-mono))",
+    fontFamily: "var(--font-writer, var(--font-editor, var(--font-mono)))",
     fontSize: "var(--editor-font-size)",
     lineHeight: "var(--editor-line-height)"
   },
@@ -28238,7 +28240,8 @@ var retroTheme = EditorView.theme({
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    minWidth: "2ch",
+    minWidth: "calc(var(--editor-line-height, 1.5) * 0.9em)",
+    minHeight: "calc(var(--editor-line-height, 1.5) * 0.9em)",
     cursor: "pointer",
     background: "transparent",
     zIndex: 2,
@@ -28261,7 +28264,7 @@ var retroTheme = EditorView.theme({
     display: "grid",
     gridTemplateColumns: "calc(var(--list-indent-ch, 0) * 1ch) calc(var(--list-marker-ch, 2) * 1ch) minmax(0, 1fr)",
     columnGap: "calc(var(--list-gap-ch, 0.5) * 1ch)",
-    alignItems: "start"
+    alignItems: "center"
   },
   ".cm-line.cm-list-line .cm-list-indent": {
     gridColumn: "1",
@@ -28270,8 +28273,9 @@ var retroTheme = EditorView.theme({
   },
   ".cm-line.cm-list-line .cm-list-marker": {
     gridColumn: "2",
-    display: "block",
-    justifySelf: "end",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
     whiteSpace: "pre",
     textAlign: "right",
     fontVariantNumeric: "tabular-nums lining-nums",
@@ -28283,7 +28287,7 @@ var retroTheme = EditorView.theme({
     gridColumn: "3",
     minWidth: 0,
     whiteSpace: "pre-wrap",
-    lineHeight: "1.5",
+    lineHeight: "var(--editor-line-height, 1.5)",
     wordBreak: "break-word"
   },
   '.cm-line.cm-list-line .cm-list-content[data-list-empty="true"]': {
@@ -28526,6 +28530,21 @@ function showToast(message, variant = "info", id2 = "writerToast") {
 }
 function startWriter(shell2, opts = {}) {
   const writerAPI = window?.db?.writer;
+  const STATUS_COLOR_OPTIONS = [
+    "#0c4390",
+    "#5999f2",
+    "#ff8b8b",
+    "#ff6f69",
+    "#ffbb1b",
+    "#ffd981",
+    "#37bc22",
+    "#9bf18e",
+    "#6731b1",
+    "#a26ded",
+    "#6c757d",
+    "#4e4e4e"
+  ];
+  const statusesSupported = !!(writerAPI && typeof writerAPI.listStatuses === "function");
   if (!writerAPI || typeof writerAPI.list !== "function") {
     shell2.print('<div class="error">Writer is unavailable in this environment.</div>');
     return null;
@@ -28537,7 +28556,7 @@ function startWriter(shell2, opts = {}) {
   const screenEl = document.getElementById("screen");
   const titleEl = document.querySelector(".title");
   const titlebar = document.querySelector(".titlebar");
-  const state2 = {
+  const state3 = {
     docs: [],
     folders: [],
     current: null,
@@ -28579,8 +28598,43 @@ function startWriter(shell2, opts = {}) {
     folderDragIntent: null,
     inboxFolderId: null,
     panelPreference: null,
-    expandedFolders: /* @__PURE__ */ new Set()
+    expandedFolders: /* @__PURE__ */ new Set(),
+    bootstrappedSelection: false,
+    statuses: [],
+    defaultStatusId: null,
+    statusesLoaded: false,
+    statusMenuEl: null,
+    statusMenuDocId: null,
+    statusMenuTrigger: null,
+    colorPickerEl: null,
+    draggingStatusId: null,
+    contextDismissHandlers: {},
+    scrollPositions: /* @__PURE__ */ new Map(),
+    editorFocusHandler: null
   };
+  function rememberCurrentScrollPosition(docId = state3.current?.id) {
+    if (!state3.cmView) return;
+    const targetId = docId != null ? docId : null;
+    if (targetId == null) return;
+    const scroller = getScrollContainer(state3.cmView);
+    if (!scroller) return;
+    const top2 = scroller.scrollTop;
+    if (!Number.isFinite(top2)) return;
+    state3.scrollPositions.set(targetId, top2);
+  }
+  function getSavedScrollPosition(docId) {
+    if (docId == null) return 0;
+    if (!state3.scrollPositions.has(docId)) return 0;
+    const value = state3.scrollPositions.get(docId);
+    return Number.isFinite(value) ? Math.max(0, value) : 0;
+  }
+  function pruneScrollPositions() {
+    if (!(state3.scrollPositions instanceof Map)) return;
+    const validIds = new Set(state3.docs.map((doc2) => doc2.id));
+    for (const key of state3.scrollPositions.keys()) {
+      if (!validIds.has(key)) state3.scrollPositions.delete(key);
+    }
+  }
   function computeWordCount(text) {
     if (!text) return 0;
     const trimmed = text.trim();
@@ -28590,9 +28644,9 @@ function startWriter(shell2, opts = {}) {
   }
   function updateWordCountFromText(text) {
     const count2 = computeWordCount(text || "");
-    state2.currentWordCount = count2;
-    if (state2.wordCountEl) {
-      state2.wordCountEl.textContent = `${count2.toLocaleString()} word${count2 === 1 ? "" : "s"}`;
+    state3.currentWordCount = count2;
+    if (state3.wordCountEl) {
+      state3.wordCountEl.textContent = `${count2.toLocaleString()} word${count2 === 1 ? "" : "s"}`;
     }
   }
   function normalizeFolderId(value) {
@@ -28603,11 +28657,58 @@ function startWriter(shell2, opts = {}) {
   }
   function normalizeDoc(doc2) {
     if (!doc2) return null;
+    const statusId = doc2.status_id == null ? getDefaultStatusId() : doc2.status_id;
     return {
       ...doc2,
       folder_id: doc2.folder_id == null ? null : doc2.folder_id,
-      order_index: typeof doc2.order_index === "number" ? doc2.order_index : 0
+      order_index: typeof doc2.order_index === "number" ? doc2.order_index : 0,
+      status_id: statusId == null ? getDefaultStatusId() : statusId
     };
+  }
+  function sanitizeStatusColor(color) {
+    if (typeof color !== "string") return "transparent";
+    let value = color.trim();
+    if (/^transparent$/i.test(value)) return "transparent";
+    if (/^#[0-9a-fA-F]{3}$/.test(value)) {
+      const r = value[1];
+      const g = value[2];
+      const b = value[3];
+      value = `#${r}${r}${g}${g}${b}${b}`;
+    }
+    if (/^#[0-9a-fA-F]{6}$/.test(value) || /^#[0-9a-fA-F]{8}$/.test(value)) {
+      return value.toLowerCase();
+    }
+    return "transparent";
+  }
+  function normalizeStatus(status) {
+    if (!status || status.id == null) return null;
+    return {
+      id: status.id,
+      name: status.name || "None",
+      color: sanitizeStatusColor(status.color || ""),
+      is_builtin: status.is_builtin === true || status.is_builtin === 1,
+      order_index: typeof status.order_index === "number" ? status.order_index : 0
+    };
+  }
+  function getDefaultStatusId() {
+    if (state3.defaultStatusId != null) return state3.defaultStatusId;
+    const builtin = state3.statuses.find((status) => status.is_builtin);
+    if (builtin) {
+      state3.defaultStatusId = builtin.id;
+      return builtin.id;
+    }
+    if (state3.statuses.length) {
+      state3.defaultStatusId = state3.statuses[0].id;
+      return state3.defaultStatusId;
+    }
+    return null;
+  }
+  function getStatusById(id2) {
+    const numeric = Number(id2);
+    const match = state3.statuses.find((status) => Number(status.id) === numeric);
+    if (match) return match;
+    const fallbackId = getDefaultStatusId();
+    return state3.statuses.find((status) => status.id === fallbackId) || null;
   }
   function normalizeFolder(folder) {
     if (!folder) return null;
@@ -28627,10 +28728,10 @@ function startWriter(shell2, opts = {}) {
   }
   function foldersOrderedForParent(parentId, excludeId = null) {
     const normalized = normalizeFolderId(parentId);
-    return state2.folders.filter((folder) => normalizeFolderId(folder.parent_id) === normalized && folder.id !== excludeId && !isInboxFolder(folder.id)).sort(orderSortFolders);
+    return state3.folders.filter((folder) => normalizeFolderId(folder.parent_id) === normalized && folder.id !== excludeId && !isInboxFolder(folder.id)).sort(orderSortFolders);
   }
   function isInboxFolder(id2) {
-    return state2.inboxFolderId != null && id2 === state2.inboxFolderId;
+    return state3.inboxFolderId != null && id2 === state3.inboxFolderId;
   }
   function orderSort(a, b) {
     const diff = (a.order_index ?? 0) - (b.order_index ?? 0);
@@ -28639,7 +28740,7 @@ function startWriter(shell2, opts = {}) {
   }
   function docsOrderedForFolder(folderId, excludeId = null) {
     const normalized = normalizeFolderId(folderId);
-    return state2.docs.filter((doc2) => normalizeFolderId(doc2.folder_id) === normalized && doc2.id !== excludeId).sort(orderSort);
+    return state3.docs.filter((doc2) => normalizeFolderId(doc2.folder_id) === normalized && doc2.id !== excludeId).sort(orderSort);
   }
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -28668,7 +28769,7 @@ function startWriter(shell2, opts = {}) {
     }
   }
   function applyDocumentMove(docId, destinationFolderId, targetIndex = null) {
-    const doc2 = state2.docs.find((d) => d.id === docId);
+    const doc2 = state3.docs.find((d) => d.id === docId);
     if (!doc2) return;
     const sourceFolder = normalizeFolderId(doc2.folder_id);
     const destFolder = normalizeFolderId(destinationFolderId);
@@ -28704,7 +28805,7 @@ function startWriter(shell2, opts = {}) {
   }
   function moveFolderWithOrdering(folderId, destinationParentId, anchorId = null, before = true) {
     if (isInboxFolder(folderId)) return;
-    const folder = state2.folders.find((f) => f.id === folderId);
+    const folder = state3.folders.find((f) => f.id === folderId);
     if (!folder) return;
     const destParent = normalizeFolderId(destinationParentId);
     if (destParent === folderId) return;
@@ -28737,40 +28838,40 @@ function startWriter(shell2, opts = {}) {
     while (current != null && !visited.has(current)) {
       if (current === targetId) return true;
       visited.add(current);
-      const folder = state2.folders.find((f) => f.id === current);
+      const folder = state3.folders.find((f) => f.id === current);
       current = folder ? folder.parent_id == null ? null : folder.parent_id : null;
     }
     return false;
   }
   function updateSidebarClasses() {
-    const filesOpen = !state2.fileCollapsed;
-    const foldersOpen = !state2.folderCollapsed;
+    const filesOpen = !state3.fileCollapsed;
+    const foldersOpen = !state3.folderCollapsed;
     const hasAny = filesOpen || foldersOpen;
-    if (state2.rootEl) {
-      state2.rootEl.classList.toggle("files-open", filesOpen);
-      state2.rootEl.classList.toggle("folders-open", foldersOpen);
-      state2.rootEl.classList.toggle("panels-hidden", !hasAny);
+    if (state3.rootEl) {
+      state3.rootEl.classList.toggle("files-open", filesOpen);
+      state3.rootEl.classList.toggle("folders-open", foldersOpen);
+      state3.rootEl.classList.toggle("panels-hidden", !hasAny);
     }
-    if (state2.navigationEl) {
-      state2.navigationEl.classList.toggle("collapsed", !hasAny);
+    if (state3.navigationEl) {
+      state3.navigationEl.classList.toggle("collapsed", !hasAny);
     }
-    if (state2.toggleBtn) {
-      state2.toggleBtn.setAttribute("aria-pressed", !hasAny ? "true" : "false");
+    if (state3.toggleBtn) {
+      state3.toggleBtn.setAttribute("aria-pressed", !hasAny ? "true" : "false");
     }
   }
   function setPanelVisibility(updates = {}, options2 = {}) {
     const remember = !!options2.remember;
     const width = options2.width ?? window.innerWidth ?? 0;
     if (Object.prototype.hasOwnProperty.call(updates, "folder")) {
-      state2.folderCollapsed = !!updates.folder;
+      state3.folderCollapsed = !!updates.folder;
     }
     if (Object.prototype.hasOwnProperty.call(updates, "file")) {
-      state2.fileCollapsed = !!updates.file;
+      state3.fileCollapsed = !!updates.file;
     }
     if (remember) {
-      state2.panelPreference = {
-        folder: state2.folderCollapsed,
-        file: state2.fileCollapsed,
+      state3.panelPreference = {
+        folder: state3.folderCollapsed,
+        file: state3.fileCollapsed,
         width
       };
     }
@@ -28780,7 +28881,7 @@ function startWriter(shell2, opts = {}) {
     return String(str ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
   }
   function captureDOMSnapshot() {
-    state2.domSnapshot = {
+    state3.domSnapshot = {
       outputHTML: outputEl ? outputEl.innerHTML : "",
       inputDisplay: inputWrapEl ? inputWrapEl.style.display : "",
       caretDisplay: caretEl ? caretEl.style.display : "",
@@ -28793,7 +28894,7 @@ function startWriter(shell2, opts = {}) {
     if (outputEl) outputEl.innerHTML = "";
     if (screenEl) screenEl.classList.add("locked");
     if (titleEl) {
-      state2.originalTitleText = titleEl.textContent || "";
+      state3.originalTitleText = titleEl.textContent || "";
       titleEl.textContent = "console-writer";
       titleEl.style.opacity = "0.6";
     }
@@ -28804,60 +28905,60 @@ function startWriter(shell2, opts = {}) {
       toggleBtn.className = "writer-toggle";
       toggleBtn.title = "Toggle panels";
       toggleBtn.setAttribute("aria-label", "Toggle panels");
-      toggleBtn.setAttribute("aria-pressed", state2.folderCollapsed && state2.fileCollapsed ? "true" : "false");
+      toggleBtn.setAttribute("aria-pressed", state3.folderCollapsed && state3.fileCollapsed ? "true" : "false");
       toggleBtn.innerHTML = '<span class="writer-toggle-icon" aria-hidden="true"></span>';
       toggleBtn.addEventListener("click", toggleNavigation);
       titlebar.insertBefore(toggleBtn, titlebar.firstChild);
-      state2.toggleBtn = toggleBtn;
-      state2.titlebarInsertions.push(toggleBtn);
+      state3.toggleBtn = toggleBtn;
+      state3.titlebarInsertions.push(toggleBtn);
       const help = document.createElement("span");
       help.className = "writer-title-help muted";
       help.textContent = isMac ? "\u2318+S save \xB7 Ctrl+X exit" : "Ctrl+S save \xB7 Ctrl+Q exit";
       titlebar.appendChild(help);
-      state2.titleHelpEl = help;
-      state2.titlebarInsertions.push(help);
+      state3.titleHelpEl = help;
+      state3.titlebarInsertions.push(help);
       const wordCount = document.createElement("span");
-      wordCount.className = "writer-word-count muted";
+      wordCount.className = "writer-word-count";
       wordCount.textContent = "0 words";
       titlebar.appendChild(wordCount);
-      state2.wordCountEl = wordCount;
-      state2.titlebarInsertions.push(wordCount);
-      updateWordCountFromText(state2.cmView ? state2.cmView.state.doc.toString() : "");
+      state3.wordCountEl = wordCount;
+      state3.titlebarInsertions.push(wordCount);
+      updateWordCountFromText(state3.cmView ? state3.cmView.state.doc.toString() : "");
     }
   }
   function restoreConsole() {
     if (screenEl) screenEl.classList.remove("locked");
-    if (state2.rootEl && state2.rootEl.parentElement) {
-      state2.rootEl.parentElement.removeChild(state2.rootEl);
+    if (state3.rootEl && state3.rootEl.parentElement) {
+      state3.rootEl.parentElement.removeChild(state3.rootEl);
     }
-    if (outputEl && state2.domSnapshot) outputEl.innerHTML = state2.domSnapshot.outputHTML;
-    if (inputWrapEl && state2.domSnapshot) inputWrapEl.style.display = state2.domSnapshot.inputDisplay;
-    if (caretEl && state2.domSnapshot) caretEl.style.display = state2.domSnapshot.caretDisplay;
-    if (screenEl && state2.domSnapshot) screenEl.style.padding = state2.domSnapshot.screenPadding;
+    if (outputEl && state3.domSnapshot) outputEl.innerHTML = state3.domSnapshot.outputHTML;
+    if (inputWrapEl && state3.domSnapshot) inputWrapEl.style.display = state3.domSnapshot.inputDisplay;
+    if (caretEl && state3.domSnapshot) caretEl.style.display = state3.domSnapshot.caretDisplay;
+    if (screenEl && state3.domSnapshot) screenEl.style.padding = state3.domSnapshot.screenPadding;
     if (titleEl) {
-      if (state2.originalTitleText) titleEl.textContent = state2.originalTitleText;
+      if (state3.originalTitleText) titleEl.textContent = state3.originalTitleText;
       titleEl.style.opacity = "";
     }
-    state2.originalTitleText = "";
-    state2.wordCountEl = null;
+    state3.originalTitleText = "";
+    state3.wordCountEl = null;
     if (titlebar) {
       titlebar.classList.remove("writer-mode");
-      state2.titlebarInsertions.forEach((node) => {
+      state3.titlebarInsertions.forEach((node) => {
         if (node && node.parentElement) node.parentElement.removeChild(node);
       });
-      state2.titlebarInsertions = [];
+      state3.titlebarInsertions = [];
     }
-    if (state2.fileContextMenuEl && state2.fileContextMenuEl.parentElement) {
-      state2.fileContextMenuEl.parentElement.removeChild(state2.fileContextMenuEl);
-      state2.fileContextMenuEl = null;
+    if (state3.fileContextMenuEl && state3.fileContextMenuEl.parentElement) {
+      state3.fileContextMenuEl.parentElement.removeChild(state3.fileContextMenuEl);
+      state3.fileContextMenuEl = null;
     }
-    if (state2.folderContextMenuEl && state2.folderContextMenuEl.parentElement) {
-      state2.folderContextMenuEl.parentElement.removeChild(state2.folderContextMenuEl);
-      state2.folderContextMenuEl = null;
+    if (state3.folderContextMenuEl && state3.folderContextMenuEl.parentElement) {
+      state3.folderContextMenuEl.parentElement.removeChild(state3.folderContextMenuEl);
+      state3.folderContextMenuEl = null;
     }
   }
   function ensureFileContextMenu() {
-    if (state2.fileContextMenuEl) return state2.fileContextMenuEl;
+    if (state3.fileContextMenuEl) return state3.fileContextMenuEl;
     const menu = document.createElement("div");
     menu.className = "writer-context-menu";
     menu.innerHTML = `
@@ -28868,11 +28969,11 @@ function startWriter(shell2, opts = {}) {
             <button data-action="${MENU_ACTIONS.DELETE}" class="danger">Delete</button>
         `;
     document.body.appendChild(menu);
-    state2.fileContextMenuEl = menu;
+    state3.fileContextMenuEl = menu;
     return menu;
   }
   function ensureFolderContextMenu() {
-    if (state2.folderContextMenuEl) return state2.folderContextMenuEl;
+    if (state3.folderContextMenuEl) return state3.folderContextMenuEl;
     const menu = document.createElement("div");
     menu.className = "writer-context-menu";
     menu.innerHTML = `
@@ -28883,73 +28984,167 @@ function startWriter(shell2, opts = {}) {
         <button data-action="${FOLDER_ACTIONS.DELETE}" class="danger">Delete</button>
     `;
     document.body.appendChild(menu);
-    state2.folderContextMenuEl = menu;
+    state3.folderContextMenuEl = menu;
     return menu;
   }
   function ensureFolderAreaContextMenu() {
-    if (state2.folderAreaContextMenuEl) return state2.folderAreaContextMenuEl;
+    if (state3.folderAreaContextMenuEl) return state3.folderAreaContextMenuEl;
     const menu = document.createElement("div");
     menu.className = "writer-context-menu";
     menu.innerHTML = `<button data-action="new-folder">New folder</button>`;
     document.body.appendChild(menu);
-    state2.folderAreaContextMenuEl = menu;
+    state3.folderAreaContextMenuEl = menu;
     return menu;
   }
   function ensureFileAreaContextMenu() {
-    if (state2.fileAreaContextMenuEl) return state2.fileAreaContextMenuEl;
+    if (state3.fileAreaContextMenuEl) return state3.fileAreaContextMenuEl;
     const menu = document.createElement("div");
     menu.className = "writer-context-menu";
     menu.innerHTML = `<button data-action="new-file">New document</button>`;
     document.body.appendChild(menu);
-    state2.fileAreaContextMenuEl = menu;
+    state3.fileAreaContextMenuEl = menu;
     return menu;
   }
+  function positionContextMenu(menu, clientX, clientY) {
+    if (!menu) return;
+    const margin = 10;
+    const wasHidden = !menu.classList.contains("visible");
+    let prevDisplay = "";
+    let prevVisibility = "";
+    if (wasHidden) {
+      prevDisplay = menu.style.display;
+      prevVisibility = menu.style.visibility;
+      menu.style.display = "flex";
+      menu.style.visibility = "hidden";
+    }
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const clampedX = Math.max(margin, Math.min(clientX, viewportWidth - margin));
+    const clampedY = Math.max(margin, clientY);
+    menu.style.transform = "";
+    menu.style.left = `${Math.round(clampedX)}px`;
+    menu.style.top = `${Math.round(clampedY)}px`;
+    let rect = menu.getBoundingClientRect();
+    if (rect.right + margin > viewportWidth) {
+      const newLeft = Math.max(margin, viewportWidth - (rect.width || 0) - margin);
+      menu.style.left = `${Math.round(newLeft)}px`;
+      rect = menu.getBoundingClientRect();
+    }
+    if (rect.bottom + margin > viewportHeight) {
+      const newTop = Math.max(margin, viewportHeight - (rect.height || 0) - margin);
+      menu.style.top = `${Math.round(newTop)}px`;
+    }
+    if (wasHidden) {
+      menu.style.display = prevDisplay || "";
+      menu.style.visibility = prevVisibility || "";
+    }
+  }
   function closeContextMenu() {
-    if (state2.fileContextMenuEl) state2.fileContextMenuEl.classList.remove("visible");
-    if (state2.folderContextMenuEl) state2.folderContextMenuEl.classList.remove("visible");
-    if (state2.folderAreaContextMenuEl) state2.folderAreaContextMenuEl.classList.remove("visible");
-    if (state2.fileAreaContextMenuEl) state2.fileAreaContextMenuEl.classList.remove("visible");
+    closeStandardContextMenus2();
+    closeStatusMenu();
+  }
+  function closeStandardContextMenus2() {
+    ["file", "folder", "folderArea", "fileArea"].forEach(detachContextDismiss);
+    if (state3.fileContextMenuEl) state3.fileContextMenuEl.classList.remove("visible");
+    if (state3.folderContextMenuEl) state3.folderContextMenuEl.classList.remove("visible");
+    if (state3.folderAreaContextMenuEl) state3.folderAreaContextMenuEl.classList.remove("visible");
+    if (state3.fileAreaContextMenuEl) state3.fileAreaContextMenuEl.classList.remove("visible");
+  }
+  function attachContextDismiss(menu, key) {
+    if (!menu || !key) return;
+    detachContextDismiss(key);
+    const handler = (event) => {
+      const target = event.target;
+      if (target && menu.contains(target)) return;
+      detachContextDismiss(key);
+      menu.classList.remove("visible");
+    };
+    state3.contextDismissHandlers[key] = handler;
+    setTimeout(() => {
+      if (state3.contextDismissHandlers[key] === handler) {
+        document.addEventListener("click", handler, true);
+      }
+    }, 0);
+  }
+  function detachContextDismiss(key) {
+    if (!key) return;
+    const handler = state3.contextDismissHandlers[key];
+    if (handler) {
+      document.removeEventListener("click", handler, true);
+      delete state3.contextDismissHandlers[key];
+    }
+  }
+  function positionMenuNear(menu, triggerRect) {
+    if (!menu || !triggerRect) return;
+    let prevDisplay = "";
+    let prevVisibility = "";
+    const wasHidden = !menu.classList.contains("visible");
+    if (wasHidden) {
+      prevDisplay = menu.style.display;
+      prevVisibility = menu.style.visibility;
+      menu.style.display = "flex";
+      menu.style.visibility = "hidden";
+    }
+    const menuRect = menu.getBoundingClientRect();
+    const width = menuRect.width || menu.offsetWidth || 0;
+    const height = menuRect.height || menu.offsetHeight || 0;
+    const margin = 10;
+    let left = triggerRect.left;
+    let top2 = triggerRect.bottom;
+    if (left + width + margin > (window.innerWidth || 0)) {
+      left = Math.max(margin, (window.innerWidth || 0) - width - margin);
+    }
+    if (top2 + height + margin > (window.innerHeight || 0)) {
+      top2 = triggerRect.top - height;
+    }
+    if (top2 < margin) top2 = margin;
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top2)}px`;
+    if (wasHidden) {
+      menu.style.display = prevDisplay || "";
+      menu.style.visibility = prevVisibility || "";
+    }
   }
   function markDirty() {
-    if (state2.dirty) return;
-    state2.dirty = true;
-    if (state2.current) {
-      const item = state2.listEl?.querySelector(`[data-id="${state2.current.id}"]`);
+    if (state3.dirty) return;
+    state3.dirty = true;
+    if (state3.current) {
+      const item = state3.listEl?.querySelector(`[data-id="${state3.current.id}"]`);
       if (item) item.classList.add("dirty");
     }
   }
   function clearDirty(snapshot) {
-    state2.dirty = false;
-    if (typeof snapshot === "string") state2.savedSnapshot = snapshot;
-    if (state2.current) {
-      const item = state2.listEl?.querySelector(`[data-id="${state2.current.id}"]`);
+    state3.dirty = false;
+    if (typeof snapshot === "string") state3.savedSnapshot = snapshot;
+    if (state3.current) {
+      const item = state3.listEl?.querySelector(`[data-id="${state3.current.id}"]`);
       if (item) item.classList.remove("dirty");
     }
     cancelAutosaveTimer();
   }
   function cancelAutosaveTimer() {
-    if (state2.autosaveTimer) {
-      clearTimeout(state2.autosaveTimer);
-      state2.autosaveTimer = null;
+    if (state3.autosaveTimer) {
+      clearTimeout(state3.autosaveTimer);
+      state3.autosaveTimer = null;
     }
   }
   function scheduleAutosave(immediate = false) {
-    if (!state2.autosaveEnabled || !state2.dirty || !state2.current || !state2.cmView) return;
+    if (!state3.autosaveEnabled || !state3.dirty || !state3.current || !state3.cmView) return;
     cancelAutosaveTimer();
-    const delay = immediate ? 0 : state2.autosaveDelay;
-    state2.autosaveTimer = setTimeout(async () => {
-      state2.autosaveTimer = null;
-      if (!state2.autosaveEnabled || !state2.dirty || !state2.current || !state2.cmView) return;
-      if (state2.autosaveInFlight) {
+    const delay = immediate ? 0 : state3.autosaveDelay;
+    state3.autosaveTimer = setTimeout(async () => {
+      state3.autosaveTimer = null;
+      if (!state3.autosaveEnabled || !state3.dirty || !state3.current || !state3.cmView) return;
+      if (state3.autosaveInFlight) {
         scheduleAutosave();
         return;
       }
-      state2.autosaveInFlight = true;
+      state3.autosaveInFlight = true;
       try {
         await saveCurrentDocument({ silent: true, refreshList: false });
       } finally {
-        state2.autosaveInFlight = false;
-        if (state2.autosaveEnabled && state2.dirty && !state2.autosaveTimer) {
+        state3.autosaveInFlight = false;
+        if (state3.autosaveEnabled && state3.dirty && !state3.autosaveTimer) {
           scheduleAutosave();
         }
       }
@@ -28957,11 +29152,11 @@ function startWriter(shell2, opts = {}) {
   }
   function setAutosaveEnabled(enabled) {
     const next = !!enabled;
-    if (state2.autosaveEnabled === next) return;
-    state2.autosaveEnabled = next;
+    if (state3.autosaveEnabled === next) return;
+    state3.autosaveEnabled = next;
     if (!next) {
       cancelAutosaveTimer();
-    } else if (state2.dirty) {
+    } else if (state3.dirty) {
       scheduleAutosave();
     }
   }
@@ -29072,12 +29267,12 @@ function startWriter(shell2, opts = {}) {
     const unsavedTracker = EditorView.updateListener.of((update) => {
       if (!(update && update.docChanged)) return;
       const cur = update.state.doc.toString();
-      if (cur === state2.savedSnapshot) {
+      if (cur === state3.savedSnapshot) {
         clearDirty();
-        state2.dirty = false;
+        state3.dirty = false;
       } else {
         markDirty();
-        if (state2.autosaveEnabled) {
+        if (state3.autosaveEnabled) {
           scheduleAutosave();
         }
       }
@@ -29121,10 +29316,12 @@ function startWriter(shell2, opts = {}) {
     ];
   }
   function attachGlobalListeners() {
-    window.addEventListener("click", closeContextMenu, true);
+    window.addEventListener("click", handleGlobalClick, true);
+    window.addEventListener("pointerdown", handleStandardContextPointer, true);
+    window.addEventListener("pointerdown", handleGlobalStatusPointer, true);
     window.addEventListener("contextmenu", (e) => {
-      const inFiles = state2.listEl && state2.listEl.contains(e.target);
-      const inFolders = state2.folderListEl && state2.folderListEl.contains(e.target);
+      const inFiles = state3.listEl && state3.listEl.contains(e.target);
+      const inFolders = state3.folderListEl && state3.folderListEl.contains(e.target);
       if (!inFiles && !inFolders) {
         closeContextMenu();
       }
@@ -29133,7 +29330,9 @@ function startWriter(shell2, opts = {}) {
     window.addEventListener("resize", handleResponsivePanels, { passive: true });
   }
   function detachGlobalListeners() {
-    window.removeEventListener("click", closeContextMenu, true);
+    window.removeEventListener("click", handleGlobalClick, true);
+    window.removeEventListener("pointerdown", handleStandardContextPointer, true);
+    window.removeEventListener("pointerdown", handleGlobalStatusPointer, true);
     window.removeEventListener("keydown", onHotkey, true);
     window.removeEventListener("resize", handleResponsivePanels, { passive: true });
   }
@@ -29158,18 +29357,21 @@ function startWriter(shell2, opts = {}) {
         return;
       }
     }
-    if (e.key === "Escape") closeContextMenu();
+    if (e.key === "Escape") {
+      closeContextMenu();
+      closeStatusMenu();
+    }
   }
   function toggleNavigation() {
     const width = window.innerWidth || 0;
-    if (state2.fileCollapsed && state2.folderCollapsed) {
+    if (state3.fileCollapsed && state3.folderCollapsed) {
       setPanelVisibility({ file: false, folder: true }, { remember: true, width });
-    } else if (!state2.fileCollapsed && state2.folderCollapsed) {
+    } else if (!state3.fileCollapsed && state3.folderCollapsed) {
       setPanelVisibility({ folder: false }, { remember: true, width });
     } else {
       setPanelVisibility({ file: true, folder: true }, { remember: true, width });
       try {
-        state2.cmView && state2.cmView.dom && state2.cmView.dom.blur();
+        state3.cmView && state3.cmView.dom && state3.cmView.dom.blur();
       } catch (_) {
       }
     }
@@ -29225,13 +29427,13 @@ function startWriter(shell2, opts = {}) {
     main.appendChild(navigation);
     main.appendChild(editor);
     root.appendChild(main);
-    state2.rootEl = root;
-    state2.navigationEl = navigation;
-    state2.folderSectionEl = navigation.querySelector(".writer-folders");
-    state2.fileSectionEl = navigation.querySelector(".writer-files");
-    state2.folderListEl = navigation.querySelector(".writer-folder-tree");
-    state2.listEl = navigation.querySelector(".writer-file-list");
-    state2.fileHeaderLabel = navigation.querySelector(".writer-files-title");
+    state3.rootEl = root;
+    state3.navigationEl = navigation;
+    state3.folderSectionEl = navigation.querySelector(".writer-folders");
+    state3.fileSectionEl = navigation.querySelector(".writer-files");
+    state3.folderListEl = navigation.querySelector(".writer-folder-tree");
+    state3.listEl = navigation.querySelector(".writer-file-list");
+    state3.fileHeaderLabel = navigation.querySelector(".writer-files-title");
     const folderBody = navigation.querySelector(".writer-folders-body");
     const fileBody = navigation.querySelector(".writer-files-body");
     if (folderBody) folderBody.addEventListener("contextmenu", onFolderAreaContextMenu);
@@ -29248,13 +29450,14 @@ function startWriter(shell2, opts = {}) {
         createFolder(null, { forceRoot: true });
       });
     }
-    if (state2.folderListEl) {
-      state2.folderListEl.addEventListener("click", onFolderClick);
-      state2.folderListEl.addEventListener("contextmenu", onFolderContextMenu);
+    if (state3.folderListEl) {
+      state3.folderListEl.addEventListener("click", onFolderClick);
+      state3.folderListEl.addEventListener("contextmenu", onFolderContextMenu);
     }
-    if (state2.listEl) {
-      state2.listEl.addEventListener("click", onFileClick);
-      state2.listEl.addEventListener("contextmenu", onFileContextMenu);
+    if (state3.listEl) {
+      state3.listEl.addEventListener("click", onStatusTriggerClick);
+      state3.listEl.addEventListener("click", onFileClick);
+      state3.listEl.addEventListener("contextmenu", onFileContextMenu);
     }
     updateSidebarClasses();
     updateFileHeaderLabel();
@@ -29271,20 +29474,35 @@ function startWriter(shell2, opts = {}) {
     handleResponsivePanels(true);
     const paneEl = document.getElementById("writerEditorPane");
     if (!paneEl) throw new Error("Writer editor pane missing");
-    state2.cmView = new EditorView({
+    state3.cmView = new EditorView({
       state: EditorState.create({ doc: "", extensions: buildExtensions() }),
       parent: paneEl
     });
+    if (state3.editorFocusHandler && state3.cmView?.dom) {
+      try {
+        state3.cmView.dom.removeEventListener("focus", state3.editorFocusHandler, true);
+      } catch (_) {
+      }
+    }
+    state3.editorFocusHandler = () => {
+      if (!state3.cmView) return;
+      const docLen = state3.cmView.state.doc.length;
+      state3.cmView.dispatch({
+        selection: { anchor: docLen, head: docLen },
+        scrollIntoView: true
+      });
+    };
+    state3.cmView.dom.addEventListener("focus", state3.editorFocusHandler, true);
     updateWordCountFromText("");
-    INIT_SCROLL_SUPPRESS.add(state2.cmView);
-    state2.savedSnapshot = "";
+    INIT_SCROLL_SUPPRESS.add(state3.cmView);
+    state3.savedSnapshot = "";
     clearDirty("");
-    state2.emptyOverlayEl = document.getElementById("writerEmptyOverlay");
+    state3.emptyOverlayEl = document.getElementById("writerEmptyOverlay");
   }
   function redrawFileList() {
-    if (!state2.listEl) return;
+    if (!state3.listEl) return;
     const docs = getFilteredDocs();
-    state2.listEl.innerHTML = "";
+    state3.listEl.innerHTML = "";
     for (const doc2 of docs) {
       const item = document.createElement("li");
       item.className = "writer-file-item";
@@ -29292,14 +29510,22 @@ function startWriter(shell2, opts = {}) {
       item.dataset.folderId = doc2.folder_id == null ? "root" : String(doc2.folder_id);
       item.dataset.order = String(doc2.order_index ?? 0);
       item.setAttribute("draggable", "true");
-      if (state2.current && doc2.id === state2.current.id) item.classList.add("active");
+      if (state3.current && doc2.id === state3.current.id) item.classList.add("active");
+      const { label: statusLabel, color: statusColor } = getStatusVisual(doc2);
+      const disabledAttr = statusesSupported ? "" : " disabled";
+      const statusAria = `aria-label="Status: ${esc2(statusLabel)}"`;
       item.innerHTML = `
-                <div class="writer-file-title">${esc2(doc2.title)}</div>
-                <div class="writer-file-meta muted">${formatUpdatedAt(doc2.updated_at)}</div>
+                <div class="writer-file-main">
+                    <div class="writer-file-title">${esc2(doc2.title)}</div>
+                    <div class="writer-file-meta muted">${formatUpdatedAt(doc2.updated_at)}</div>
+                </div>
+                <button class="writer-file-status" type="button" data-doc-id="${String(doc2.id)}"${disabledAttr} ${statusAria} title="${esc2(statusLabel)}">
+                    <span class="writer-file-status-dot" style="--writer-status-color:${statusColor};"></span>
+                </button>
             `;
-      state2.listEl.appendChild(item);
+      state3.listEl.appendChild(item);
     }
-    const host = state2.listEl.parentElement;
+    const host = state3.listEl.parentElement;
     if (host) {
       const prevEmpty = host.querySelector(".writer-files-empty");
       if (prevEmpty) prevEmpty.remove();
@@ -29310,11 +29536,11 @@ function startWriter(shell2, opts = {}) {
         host.appendChild(empty2);
       }
     }
-    if (state2.current) setActiveListItem(state2.current.id);
+    if (state3.current) setActiveListItem(state3.current.id);
   }
   function setActiveListItem(id2) {
-    if (!state2.listEl) return;
-    state2.listEl.querySelectorAll(".writer-file-item").forEach((item) => {
+    if (!state3.listEl) return;
+    state3.listEl.querySelectorAll(".writer-file-item").forEach((item) => {
       if (item.dataset.id === String(id2)) item.classList.add("active");
       else item.classList.remove("active");
     });
@@ -29328,6 +29554,13 @@ function startWriter(shell2, opts = {}) {
     } catch (_) {
       return "";
     }
+  }
+  function getStatusVisual(doc2) {
+    const status = getStatusById(doc2?.status_id);
+    return {
+      label: status ? status.name : "None",
+      color: sanitizeStatusColor(status?.color || "")
+    };
   }
   function compareByUpdatedDesc(a, b) {
     const ta = a && a.updated_at ? new Date(a.updated_at).getTime() : 0;
@@ -29352,8 +29585,8 @@ function startWriter(shell2, opts = {}) {
     return map;
   }
   function renderFolderTree() {
-    if (!state2.folderListEl) return;
-    const folders = Array.isArray(state2.folders) ? state2.folders.slice() : [];
+    if (!state3.folderListEl) return;
+    const folders = Array.isArray(state3.folders) ? state3.folders.slice() : [];
     const childrenMap = buildFolderChildrenMap(folders);
     const renderNode = (folder, { isInbox = false } = {}) => {
       const rawChildren = isInbox ? [] : childrenMap.get(folder.id) || [];
@@ -29381,67 +29614,67 @@ function startWriter(shell2, opts = {}) {
     };
     const rootChildren = (childrenMap.get(null) || []).filter((child) => !isInboxFolder(child.id));
     let html3 = "";
-    const inbox = state2.inboxFolderId != null ? state2.folders.find((f) => f.id === state2.inboxFolderId) : null;
+    const inbox = state3.inboxFolderId != null ? state3.folders.find((f) => f.id === state3.inboxFolderId) : null;
     if (inbox) {
       html3 += renderNode(inbox, { isInbox: true });
     }
     if (rootChildren.length) {
       html3 += rootChildren.map((child) => renderNode(child)).join("");
     }
-    state2.folderListEl.innerHTML = html3;
+    state3.folderListEl.innerHTML = html3;
     highlightActiveFolder();
   }
   function highlightActiveFolder() {
-    if (!state2.folderListEl) return;
-    state2.folderListEl.querySelectorAll(".writer-folder-item").forEach((item) => item.classList.remove("active"));
-    const targetId = state2.selectedFolderId === "all" ? state2.inboxFolderId : state2.selectedFolderId;
+    if (!state3.folderListEl) return;
+    state3.folderListEl.querySelectorAll(".writer-folder-item").forEach((item) => item.classList.remove("active"));
+    const targetId = state3.selectedFolderId === "all" ? state3.inboxFolderId : state3.selectedFolderId;
     if (targetId == null) return;
-    const active = state2.folderListEl.querySelector(`.writer-folder-item[data-folder-id="${targetId}"]`);
+    const active = state3.folderListEl.querySelector(`.writer-folder-item[data-folder-id="${targetId}"]`);
     if (active) active.classList.add("active");
   }
   function activeFolderDisplayName() {
-    const targetId = state2.selectedFolderId === "all" ? state2.inboxFolderId : state2.selectedFolderId;
+    const targetId = state3.selectedFolderId === "all" ? state3.inboxFolderId : state3.selectedFolderId;
     if (targetId == null) return "Files";
-    const folder = state2.folders.find((f) => f.id === targetId);
+    const folder = state3.folders.find((f) => f.id === targetId);
     if (folder && folder.name) return folder.name;
     return "Files";
   }
   function updateFileHeaderLabel() {
-    if (!state2.fileHeaderLabel) return;
-    state2.fileHeaderLabel.textContent = activeFolderDisplayName();
+    if (!state3.fileHeaderLabel) return;
+    state3.fileHeaderLabel.textContent = activeFolderDisplayName();
   }
   function isFolderExpanded(id2) {
     if (id2 == null) return false;
     const numeric = Number(id2);
-    return Number.isFinite(numeric) && state2.expandedFolders.has(numeric);
+    return Number.isFinite(numeric) && state3.expandedFolders.has(numeric);
   }
   function setFolderExpanded(id2, expanded) {
     if (id2 == null) return;
     const numeric = Number(id2);
     if (!Number.isFinite(numeric)) return;
-    if (expanded) state2.expandedFolders.add(numeric);
-    else state2.expandedFolders.delete(numeric);
+    if (expanded) state3.expandedFolders.add(numeric);
+    else state3.expandedFolders.delete(numeric);
   }
   function toggleFolderExpanded(id2) {
     if (id2 == null) return;
     const numeric = Number(id2);
     if (!Number.isFinite(numeric)) return;
-    if (state2.expandedFolders.has(numeric)) state2.expandedFolders.delete(numeric);
-    else state2.expandedFolders.add(numeric);
+    if (state3.expandedFolders.has(numeric)) state3.expandedFolders.delete(numeric);
+    else state3.expandedFolders.add(numeric);
   }
   function ensureFolderPathExpanded(folderId) {
     const target = normalizeFolderId(folderId);
     if (target == null) return;
     let current = getFolderParentId(target);
     while (current != null) {
-      state2.expandedFolders.add(current);
+      state3.expandedFolders.add(current);
       current = getFolderParentId(current);
     }
   }
   function pruneInvalidExpandedFolders() {
-    const valid = new Set(state2.folders.map((f) => f.id));
-    state2.expandedFolders.forEach((id2) => {
-      if (!valid.has(id2)) state2.expandedFolders.delete(id2);
+    const valid = new Set(state3.folders.map((f) => f.id));
+    state3.expandedFolders.forEach((id2) => {
+      if (!valid.has(id2)) state3.expandedFolders.delete(id2);
     });
   }
   function resolveFolderId(value) {
@@ -29452,86 +29685,185 @@ function startWriter(shell2, opts = {}) {
   }
   function getFolderById(id2) {
     if (id2 == null) return null;
-    return state2.folders.find((f) => f.id === id2) || null;
+    return state3.folders.find((f) => f.id === id2) || null;
   }
   function getFolderParentId(id2) {
     const folder = getFolderById(id2);
     return folder ? normalizeFolderId(folder.parent_id) : null;
   }
   function getFilteredDocs() {
-    const activeFolder = state2.selectedFolderId === "all" ? state2.inboxFolderId : state2.selectedFolderId;
+    const activeFolder = state3.selectedFolderId === "all" ? state3.inboxFolderId : state3.selectedFolderId;
     if (!activeFolder) {
-      return state2.docs.slice().sort(compareByUpdatedDesc);
+      return state3.docs.slice().sort(compareByUpdatedDesc);
     }
     const target = normalizeFolderId(activeFolder);
-    return state2.docs.filter((doc2) => normalizeFolderId(doc2.folder_id) === target).slice().sort((a, b) => {
+    return state3.docs.filter((doc2) => normalizeFolderId(doc2.folder_id) === target).slice().sort((a, b) => {
       const orderDiff = (a.order_index ?? 0) - (b.order_index ?? 0);
       if (orderDiff !== 0) return orderDiff;
       return (a.id ?? 0) - (b.id ?? 0);
     });
   }
-  function setSelectedFolder(folderId, { fromDocument = false } = {}) {
-    let resolved = resolveFolderId(folderId);
-    if (resolved === "all" && state2.inboxFolderId != null) {
-      resolved = state2.inboxFolderId;
-    } else if (resolved !== "all" && !state2.folders.some((folder) => folder.id === resolved)) {
-      resolved = state2.inboxFolderId ?? "all";
+  async function ensureSafeToLeaveDocument({ silentAutosave = false } = {}) {
+    if (!state3.dirty) return true;
+    if (state3.autosaveEnabled) {
+      const saved = await saveCurrentDocument({ silent: silentAutosave, refreshList: true });
+      return !!saved;
     }
-    state2.selectedFolderId = resolved;
+    const result = await confirmModal({
+      title: "Unsaved changes",
+      message: "Save changes before switching documents?",
+      confirmLabel: "Save",
+      cancelLabel: "Discard"
+    });
+    if (result === "confirm") {
+      const saved = await saveCurrentDocument();
+      return !!saved;
+    }
+    clearDirty();
+    return true;
+  }
+  function showNoSelectionAfterFolderChange() {
+    (async () => {
+      const proceed = await ensureSafeToLeaveDocument({ silentAutosave: true });
+      if (!proceed) return;
+      showNoSelectionOverlay();
+    })();
+  }
+  function setSelectedFolder(folderId, { fromDocument = false, skipAutoOpen = false } = {}) {
+    const previous = state3.selectedFolderId;
+    let resolved = resolveFolderId(folderId);
+    if (resolved === "all" && state3.inboxFolderId != null) {
+      resolved = state3.inboxFolderId;
+    } else if (resolved !== "all" && !state3.folders.some((folder) => folder.id === resolved)) {
+      resolved = state3.inboxFolderId ?? "all";
+    }
+    state3.selectedFolderId = resolved;
     if (resolved !== "all" && resolved != null) {
       ensureFolderPathExpanded(resolved);
     }
     highlightActiveFolder();
     updateFileHeaderLabel();
     redrawFileList();
-    if (fromDocument && state2.current) {
-      setActiveListItem(state2.current.id);
+    if (fromDocument && state3.current) {
+      setActiveListItem(state3.current.id);
+      return;
+    }
+    const changed = previous !== resolved;
+    if (!changed) return;
+    if (skipAutoOpen) {
+      showNoSelectionOverlay();
+      return;
+    }
+    const docs = getFilteredDocs();
+    if (!docs.length) {
+      showNoSelectionAfterFolderChange();
+      return;
+    }
+    const firstDoc = docs[0];
+    if (firstDoc && firstDoc.id != null) {
+      openDocument(firstDoc.id);
+    } else {
+      showNoSelectionOverlay();
     }
   }
   async function loadFolders() {
     if (!writerAPI || typeof writerAPI.listFolders !== "function") {
-      state2.folders = [];
+      state3.folders = [];
       renderFolderTree();
       return;
     }
     try {
       const rows = await writerAPI.listFolders();
-      state2.folders = Array.isArray(rows) ? rows.map(normalizeFolder) : [];
+      state3.folders = Array.isArray(rows) ? rows.map(normalizeFolder) : [];
       await ensureInboxFolderExists();
-      state2.folders.sort(orderSortFolders);
+      state3.folders.sort(orderSortFolders);
       pruneInvalidExpandedFolders();
-      if ((state2.selectedFolderId === "all" || state2.selectedFolderId == null) && state2.inboxFolderId != null) {
-        state2.selectedFolderId = state2.inboxFolderId;
+      if ((state3.selectedFolderId === "all" || state3.selectedFolderId == null) && state3.inboxFolderId != null) {
+        state3.selectedFolderId = state3.inboxFolderId;
       }
-      if (state2.selectedFolderId && state2.selectedFolderId !== "all") {
-        ensureFolderPathExpanded(state2.selectedFolderId);
+      if (state3.selectedFolderId && state3.selectedFolderId !== "all") {
+        ensureFolderPathExpanded(state3.selectedFolderId);
       }
       renderFolderTree();
       updateFileHeaderLabel();
     } catch (err) {
       shell2.print(`<div class="error">Failed to load folders: ${esc2(err?.message || err)}</div>`);
-      state2.folders = [];
-      state2.expandedFolders.clear();
+      state3.folders = [];
+      state3.expandedFolders.clear();
       renderFolderTree();
       updateFileHeaderLabel();
     }
   }
+  async function loadStatuses(prefetched = void 0) {
+    if (!statusesSupported) {
+      state3.statuses = [{
+        id: 0,
+        name: "None",
+        color: "transparent",
+        is_builtin: true,
+        order_index: 0
+      }];
+      state3.defaultStatusId = 0;
+      state3.statusesLoaded = true;
+      state3.docs = state3.docs.map(normalizeDoc);
+      if (state3.listEl) redrawFileList();
+      return state3.statuses;
+    }
+    try {
+      let rows = prefetched;
+      if (!Array.isArray(rows)) {
+        rows = await writerAPI.listStatuses();
+      }
+      const normalized = Array.isArray(rows) ? rows.map(normalizeStatus).filter(Boolean) : [];
+      normalized.sort((a, b) => {
+        if (a.order_index !== b.order_index) return a.order_index - b.order_index;
+        return (a.id ?? 0) - (b.id ?? 0);
+      });
+      if (!normalized.some((status) => status.is_builtin)) {
+        normalized.unshift({
+          id: 0,
+          name: "None",
+          color: "transparent",
+          is_builtin: true,
+          order_index: 0
+        });
+      }
+      state3.statuses = normalized;
+      const builtin = normalized.find((status) => status.is_builtin);
+      state3.defaultStatusId = builtin ? builtin.id : normalized[0]?.id ?? null;
+      state3.statusesLoaded = true;
+    } catch (err) {
+      console.error("Failed to load writer statuses:", err);
+      state3.statuses = [{
+        id: 0,
+        name: "None",
+        color: "transparent",
+        is_builtin: true,
+        order_index: 0
+      }];
+      state3.defaultStatusId = 0;
+      state3.statusesLoaded = true;
+    }
+    state3.docs = state3.docs.map(normalizeDoc);
+    if (state3.listEl) redrawFileList();
+    return state3.statuses;
+  }
   async function ensureInboxFolderExists() {
-    let inbox = state2.folders.find((f) => (f.name_lower || "") === "inbox" && f.parent_id == null);
+    let inbox = state3.folders.find((f) => (f.name_lower || "") === "inbox" && f.parent_id == null);
     if (inbox) {
-      state2.inboxFolderId = inbox.id;
+      state3.inboxFolderId = inbox.id;
       return;
     }
     if (!writerAPI || typeof writerAPI.createFolder !== "function") {
-      state2.inboxFolderId = null;
+      state3.inboxFolderId = null;
       return;
     }
     try {
       const created = await writerAPI.createFolder({ name: "Inbox", parentId: null });
       if (created && created.id != null) {
         inbox = normalizeFolder(created);
-        state2.folders.push(inbox);
-        state2.inboxFolderId = inbox.id;
+        state3.folders.push(inbox);
+        state3.inboxFolderId = inbox.id;
       }
     } catch (_) {
     }
@@ -29601,9 +29933,9 @@ function startWriter(shell2, opts = {}) {
     closeContextMenu();
     const menu = ensureFolderContextMenu();
     menu.dataset.folderId = String(folderId);
-    menu.style.left = `${e.clientX}px`;
-    menu.style.top = `${e.clientY}px`;
+    positionContextMenu(menu, e.clientX, e.clientY);
     menu.classList.add("visible");
+    attachContextDismiss(menu, "folder");
     const isInbox = isInboxFolder(folderId);
     menu.querySelectorAll("button").forEach((btn) => {
       const action = btn.dataset.action;
@@ -29630,6 +29962,7 @@ function startWriter(shell2, opts = {}) {
     menu.style.left = `${e.clientX}px`;
     menu.style.top = `${e.clientY}px`;
     menu.classList.add("visible");
+    attachContextDismiss(menu, "folderArea");
     const btn = menu.querySelector('button[data-action="new-folder"]');
     if (btn) {
       btn.onclick = () => {
@@ -29665,7 +29998,7 @@ function startWriter(shell2, opts = {}) {
   }
   async function createFolder(parentId = null, { forceRoot = false } = {}) {
     if (!writerAPI || typeof writerAPI.createFolder !== "function") return null;
-    const resolvedParent = forceRoot ? null : parentId == null ? state2.selectedFolderId === "all" ? null : state2.selectedFolderId : parentId;
+    const resolvedParent = forceRoot ? null : parentId == null ? state3.selectedFolderId === "all" ? null : state3.selectedFolderId : parentId;
     if (resolvedParent != null && isInboxFolder(resolvedParent)) {
       showToast("Inbox cannot contain folders", "warn");
       return null;
@@ -29694,7 +30027,7 @@ function startWriter(shell2, opts = {}) {
   }
   async function renameFolder(id2) {
     if (!writerAPI || typeof writerAPI.renameFolder !== "function") return;
-    const folder = state2.folders.find((f) => f.id === id2);
+    const folder = state3.folders.find((f) => f.id === id2);
     if (!folder) return;
     if (isInboxFolder(id2)) {
       showToast("Inbox cannot be renamed", "warn");
@@ -29718,9 +30051,9 @@ function startWriter(shell2, opts = {}) {
     }
   }
   function bindFileDnDHandlers() {
-    if (!state2.listEl || state2.fileListDndBound) return;
-    state2.fileListDndBound = true;
-    const el = state2.listEl;
+    if (!state3.listEl || state3.fileListDndBound) return;
+    state3.fileListDndBound = true;
+    const el = state3.listEl;
     el.addEventListener("dragstart", handleFileDragStart);
     el.addEventListener("dragover", handleFileDragOver);
     el.addEventListener("drop", handleFileDrop);
@@ -29731,7 +30064,7 @@ function startWriter(shell2, opts = {}) {
     if (!item) return;
     const id2 = Number(item.dataset.id);
     if (!Number.isFinite(id2)) return;
-    state2.draggingDocId = id2;
+    state3.draggingDocId = id2;
     item.classList.add("dragging");
     try {
       e.dataTransfer.effectAllowed = "move";
@@ -29740,34 +30073,34 @@ function startWriter(shell2, opts = {}) {
     }
   }
   function handleFileDragOver(e) {
-    if (state2.draggingDocId == null) return;
-    const activeFolder = state2.selectedFolderId === "all" ? state2.inboxFolderId : state2.selectedFolderId;
+    if (state3.draggingDocId == null) return;
+    const activeFolder = state3.selectedFolderId === "all" ? state3.inboxFolderId : state3.selectedFolderId;
     if (!activeFolder) return;
     e.preventDefault();
     clearDocDropIndicators();
     const item = e.target.closest(".writer-file-item");
     if (!item) return;
     const targetId = Number(item.dataset.id);
-    if (!Number.isFinite(targetId) || targetId === state2.draggingDocId) return;
+    if (!Number.isFinite(targetId) || targetId === state3.draggingDocId) return;
     const rect = item.getBoundingClientRect();
     const before = e.clientY - rect.top < rect.height / 2;
     item.classList.add(before ? "drag-over-before" : "drag-over-after");
-    if (state2.listEl) {
-      state2.listEl.dataset.dropTargetId = String(targetId);
-      state2.listEl.dataset.dropBefore = before ? "1" : "0";
+    if (state3.listEl) {
+      state3.listEl.dataset.dropTargetId = String(targetId);
+      state3.listEl.dataset.dropBefore = before ? "1" : "0";
     }
   }
   function handleFileDrop(e) {
-    if (state2.draggingDocId == null) return;
-    const activeFolder = state2.selectedFolderId === "all" ? state2.inboxFolderId : state2.selectedFolderId;
+    if (state3.draggingDocId == null) return;
+    const activeFolder = state3.selectedFolderId === "all" ? state3.inboxFolderId : state3.selectedFolderId;
     if (!activeFolder) {
       clearDocDragState();
       return;
     }
     e.preventDefault();
-    const docId = state2.draggingDocId;
-    const dropTargetId = state2.listEl?.dataset.dropTargetId ? Number(state2.listEl.dataset.dropTargetId) : null;
-    const before = state2.listEl?.dataset.dropBefore === "1";
+    const docId = state3.draggingDocId;
+    const dropTargetId = state3.listEl?.dataset.dropTargetId ? Number(state3.listEl.dataset.dropTargetId) : null;
+    const before = state3.listEl?.dataset.dropBefore === "1";
     const destFolder = normalizeFolderId(activeFolder);
     const docs = docsOrderedForFolder(destFolder, docId);
     let insertIndex = docs.length;
@@ -29780,26 +30113,26 @@ function startWriter(shell2, opts = {}) {
   }
   function handleFileDragEnd() {
     clearDocDragState();
-    state2.folderDropTarget = null;
+    state3.folderDropTarget = null;
   }
   function clearDocDropIndicators() {
-    if (!state2.listEl) return;
-    state2.listEl.querySelectorAll(".drag-over-before, .drag-over-after").forEach((el) => {
+    if (!state3.listEl) return;
+    state3.listEl.querySelectorAll(".drag-over-before, .drag-over-after").forEach((el) => {
       el.classList.remove("drag-over-before", "drag-over-after");
     });
-    if (state2.listEl.dataset.dropTargetId) delete state2.listEl.dataset.dropTargetId;
-    if (state2.listEl.dataset.dropBefore) delete state2.listEl.dataset.dropBefore;
+    if (state3.listEl.dataset.dropTargetId) delete state3.listEl.dataset.dropTargetId;
+    if (state3.listEl.dataset.dropBefore) delete state3.listEl.dataset.dropBefore;
   }
   function clearDocDragState() {
-    if (!state2.listEl) return;
-    state2.draggingDocId = null;
-    state2.listEl.querySelectorAll(".writer-file-item.dragging").forEach((el) => el.classList.remove("dragging"));
+    if (!state3.listEl) return;
+    state3.draggingDocId = null;
+    state3.listEl.querySelectorAll(".writer-file-item.dragging").forEach((el) => el.classList.remove("dragging"));
     clearDocDropIndicators();
   }
   function bindFolderDnDHandlers() {
-    if (!state2.folderListEl || state2.folderDndBound) return;
-    state2.folderDndBound = true;
-    const el = state2.folderListEl;
+    if (!state3.folderListEl || state3.folderDndBound) return;
+    state3.folderDndBound = true;
+    const el = state3.folderListEl;
     el.addEventListener("dragstart", handleFolderDragStart, true);
     el.addEventListener("dragover", handleFolderDragOver);
     el.addEventListener("drop", handleFolderDrop);
@@ -29823,8 +30156,8 @@ function startWriter(shell2, opts = {}) {
     if (!row) return;
     const id2 = folderIdFromRow(row);
     if (id2 == null) return;
-    state2.folderDropTarget = null;
-    state2.draggingFolderId = id2;
+    state3.folderDropTarget = null;
+    state3.draggingFolderId = id2;
     row.classList.add("dragging");
     try {
       e.dataTransfer.effectAllowed = "move";
@@ -29833,22 +30166,22 @@ function startWriter(shell2, opts = {}) {
     }
   }
   function handleFolderDragOver(e) {
-    const docDragging = state2.draggingDocId != null;
-    const folderDragging = state2.draggingFolderId != null;
+    const docDragging = state3.draggingDocId != null;
+    const folderDragging = state3.draggingFolderId != null;
     if (!docDragging && !folderDragging) return;
     const row = e.target.closest(".writer-folder-row");
     const targetId = row ? folderIdFromRow(row) : null;
     if (docDragging) {
       e.preventDefault();
       clearFolderDropIndicators();
-      state2.folderDropTarget = targetId;
+      state3.folderDropTarget = targetId;
       if (row) row.classList.add("drag-over-target");
-      else state2.folderDropTarget = null;
+      else state3.folderDropTarget = null;
       return;
     }
     if (!folderDragging) return;
-    if (targetId === state2.draggingFolderId) return;
-    if (targetId != null && isDescendantFolder(state2.draggingFolderId, targetId)) return;
+    if (targetId === state3.draggingFolderId) return;
+    if (targetId != null && isDescendantFolder(state3.draggingFolderId, targetId)) return;
     let intent = null;
     if (row && targetId != null) {
       const parentOfTarget = getFolderParentId(targetId);
@@ -29867,11 +30200,11 @@ function startWriter(shell2, opts = {}) {
     }
     if (!intent) return;
     if (intent.parentId != null && isInboxFolder(intent.parentId)) return;
-    if (intent.parentId === state2.draggingFolderId) return;
-    if (intent.parentId != null && isDescendantFolder(intent.parentId, state2.draggingFolderId)) return;
+    if (intent.parentId === state3.draggingFolderId) return;
+    if (intent.parentId != null && isDescendantFolder(intent.parentId, state3.draggingFolderId)) return;
     e.preventDefault();
     clearFolderDropIndicators();
-    state2.folderDragIntent = intent;
+    state3.folderDragIntent = intent;
     if (!row) return;
     if (intent.type === "position") {
       row.classList.add(intent.before ? "drag-over-before" : "drag-over-after");
@@ -29880,22 +30213,22 @@ function startWriter(shell2, opts = {}) {
     }
   }
   function handleFolderDrop(e) {
-    const docId = state2.draggingDocId;
+    const docId = state3.draggingDocId;
     if (docId != null) {
       e.preventDefault();
-      const destination = state2.folderDropTarget ?? state2.inboxFolderId ?? null;
+      const destination = state3.folderDropTarget ?? state3.inboxFolderId ?? null;
       applyDocumentMove(docId, destination, null);
       clearDocDragState();
       clearFolderDropIndicators();
-      state2.folderDropTarget = null;
+      state3.folderDropTarget = null;
       return;
     }
-    const folderId = state2.draggingFolderId;
+    const folderId = state3.draggingFolderId;
     if (folderId == null) return;
-    const intent = state2.folderDragIntent;
+    const intent = state3.folderDragIntent;
     if (!intent) {
       clearFolderDropIndicators();
-      state2.draggingFolderId = null;
+      state3.draggingFolderId = null;
       return;
     }
     e.preventDefault();
@@ -29905,27 +30238,27 @@ function startWriter(shell2, opts = {}) {
       moveFolderWithOrdering(folderId, intent.parentId, null, false);
     }
     clearFolderDropIndicators();
-    state2.draggingFolderId = null;
-    state2.folderDragIntent = null;
+    state3.draggingFolderId = null;
+    state3.folderDragIntent = null;
   }
   function handleFolderDragEnd() {
     clearFolderDropIndicators();
-    state2.draggingFolderId = null;
-    state2.folderDropTarget = null;
-    state2.folderDragIntent = null;
+    state3.draggingFolderId = null;
+    state3.folderDropTarget = null;
+    state3.folderDragIntent = null;
   }
   function clearFolderDropIndicators() {
-    if (!state2.folderListEl) return;
-    state2.folderListEl.querySelectorAll(".writer-folder-row.drag-over").forEach((row) => row.classList.remove("drag-over"));
-    state2.folderListEl.querySelectorAll(".writer-folder-row.drag-over-target").forEach((row) => row.classList.remove("drag-over-target"));
-    state2.folderListEl.querySelectorAll(".writer-folder-row.drag-over-before").forEach((row) => row.classList.remove("drag-over-before"));
-    state2.folderListEl.querySelectorAll(".writer-folder-row.drag-over-after").forEach((row) => row.classList.remove("drag-over-after"));
-    state2.folderListEl.querySelectorAll(".writer-folder-row.dragging").forEach((row) => row.classList.remove("dragging"));
-    state2.folderDragIntent = null;
+    if (!state3.folderListEl) return;
+    state3.folderListEl.querySelectorAll(".writer-folder-row.drag-over").forEach((row) => row.classList.remove("drag-over"));
+    state3.folderListEl.querySelectorAll(".writer-folder-row.drag-over-target").forEach((row) => row.classList.remove("drag-over-target"));
+    state3.folderListEl.querySelectorAll(".writer-folder-row.drag-over-before").forEach((row) => row.classList.remove("drag-over-before"));
+    state3.folderListEl.querySelectorAll(".writer-folder-row.drag-over-after").forEach((row) => row.classList.remove("drag-over-after"));
+    state3.folderListEl.querySelectorAll(".writer-folder-row.dragging").forEach((row) => row.classList.remove("dragging"));
+    state3.folderDragIntent = null;
   }
   async function duplicateFolder(id2) {
     if (!writerAPI || typeof writerAPI.duplicateFolder !== "function") return;
-    const folder = state2.folders.find((f) => f.id === id2);
+    const folder = state3.folders.find((f) => f.id === id2);
     if (!folder) return;
     if (isInboxFolder(id2)) {
       showToast("Inbox cannot be duplicated", "warn");
@@ -29943,7 +30276,7 @@ function startWriter(shell2, opts = {}) {
   }
   async function deleteFolder(id2) {
     if (!writerAPI || typeof writerAPI.deleteFolder !== "function") return;
-    const folder = state2.folders.find((f) => f.id === id2);
+    const folder = state3.folders.find((f) => f.id === id2);
     if (!folder) return;
     if (isInboxFolder(id2)) {
       showToast("Inbox cannot be deleted", "warn");
@@ -29957,11 +30290,12 @@ function startWriter(shell2, opts = {}) {
       danger: true
     });
     if (result !== "confirm") return;
+    const deletingActiveFolder = state3.current && normalizeFolderId(state3.current.folder_id) === normalizeFolderId(id2);
     try {
       await writerAPI.deleteFolder(id2);
       const nextSelection = "all";
       await loadFolders();
-      setSelectedFolder(nextSelection);
+      setSelectedFolder(nextSelection, { skipAutoOpen: !!deletingActiveFolder });
       await loadDocuments();
       showToast("Folder deleted", "warn");
     } catch (err) {
@@ -29998,29 +30332,29 @@ function startWriter(shell2, opts = {}) {
     }
   }
   function applyPreferenceIfAllowed(bucket) {
-    if (!state2.panelPreference) return false;
-    const prefBucket = bucketForWidth(state2.panelPreference.width ?? 0);
+    if (!state3.panelPreference) return false;
+    const prefBucket = bucketForWidth(state3.panelPreference.width ?? 0);
     if (bucketWeight(bucket) < bucketWeight(prefBucket)) return false;
     setPanelVisibility({
-      file: !!state2.panelPreference.file,
-      folder: !!state2.panelPreference.folder
+      file: !!state3.panelPreference.file,
+      folder: !!state3.panelPreference.folder
     });
     return true;
   }
   function handleResponsivePanels(force = false) {
     const width = window.innerWidth || 0;
-    const prevWidth = state2.lastWindowWidth ?? width;
+    const prevWidth = state3.lastWindowWidth ?? width;
     const prevBucket = bucketForWidth(prevWidth);
     const curBucket = bucketForWidth(width);
     if (force) {
       applyBreakpointDefaults(curBucket);
       applyPreferenceIfAllowed(curBucket);
-      state2.lastWindowWidth = width;
+      state3.lastWindowWidth = width;
       return;
     }
     if (curBucket === prevBucket) {
       applyPreferenceIfAllowed(curBucket);
-      state2.lastWindowWidth = width;
+      state3.lastWindowWidth = width;
       return;
     }
     const shrinking = bucketWeight(curBucket) < bucketWeight(prevBucket);
@@ -30029,142 +30363,122 @@ function startWriter(shell2, opts = {}) {
     } else if (!applyPreferenceIfAllowed(curBucket)) {
       applyBreakpointDefaults(curBucket);
     }
-    state2.lastWindowWidth = width;
-  }
-  function pickMostRecent(docs) {
-    if (!Array.isArray(docs) || !docs.length) return null;
-    const toTime = (d) => {
-      const u = d && d.updated_at ? new Date(d.updated_at).getTime() : NaN;
-      if (!Number.isNaN(u)) return u;
-      const c = d && d.created_at ? new Date(d.created_at).getTime() : NaN;
-      if (!Number.isNaN(c)) return c;
-      return typeof d.id === "number" ? d.id : -Infinity;
-    };
-    let best = docs[0];
-    let bestT = toTime(best);
-    for (let i = 1; i < docs.length; i++) {
-      const t2 = toTime(docs[i]);
-      if (t2 > bestT) {
-        best = docs[i];
-        bestT = t2;
-      }
-    }
-    return best;
+    state3.lastWindowWidth = width;
   }
   function setEmptyOverlayVisible(show) {
-    if (!state2.emptyOverlayEl) return;
-    state2.emptyOverlayEl.style.display = show ? "flex" : "none";
+    if (!state3.emptyOverlayEl) return;
+    state3.emptyOverlayEl.style.display = show ? "flex" : "none";
   }
   function showNoSelectionOverlay() {
+    rememberCurrentScrollPosition();
     setEmptyOverlayVisible(true);
-    if (state2.cmView) {
-      const len = state2.cmView.state.doc.length;
+    if (state3.cmView) {
+      const len = state3.cmView.state.doc.length;
       if (len > 0) {
-        state2.cmView.dispatch({ changes: { from: 0, to: len, insert: "" } });
+        state3.cmView.dispatch({ changes: { from: 0, to: len, insert: "" } });
       }
       try {
-        getScrollContainer(state2.cmView).scrollTop = 0;
+        getScrollContainer(state3.cmView).scrollTop = 0;
       } catch (_) {
       }
     }
-    state2.current = null;
-    state2.savedSnapshot = "";
+    state3.current = null;
+    state3.savedSnapshot = "";
     clearDirty("");
     updateWordCountFromText("");
   }
   async function loadDocuments(prefetchedDocs = void 0) {
+    if (!state3.statusesLoaded) {
+      try {
+        await loadStatuses();
+      } catch (_) {
+      }
+    }
     try {
       let docs = prefetchedDocs;
       if (!Array.isArray(docs)) {
         docs = await writerAPI.list();
       }
-      state2.docs = Array.isArray(docs) ? docs.map(normalizeDoc) : [];
+      state3.docs = Array.isArray(docs) ? docs.map(normalizeDoc) : [];
+      pruneScrollPositions();
       redrawFileList();
-      if (!state2.docs.length) {
+      if (!state3.docs.length) {
         showNoSelectionOverlay();
         return;
       }
-      if (state2.current && state2.docs.some((d) => d.id === state2.current.id)) {
-        setActiveListItem(state2.current.id);
+      if (state3.current && state3.docs.some((d) => d.id === state3.current.id)) {
+        setActiveListItem(state3.current.id);
         setEmptyOverlayVisible(false);
-        return;
-      }
-      let candidates = getFilteredDocs();
-      if (!candidates.length && state2.selectedFolderId !== state2.inboxFolderId) {
-        setSelectedFolder(state2.inboxFolderId ?? "all");
-        candidates = getFilteredDocs();
-      }
-      const target = pickMostRecent(candidates.length ? candidates : state2.docs);
-      if (target && target.id != null) {
-        await openDocument(target.id, { force: true });
-        setEmptyOverlayVisible(false);
-      } else {
-        showNoSelectionOverlay();
       }
     } catch (err) {
       shell2.print(`<div class="error">Failed to load writer documents: ${esc2(err?.message || err)}</div>`);
     }
   }
-  function setEditorContent(content2, title, snapshotOverride) {
-    if (!state2.cmView) return;
+  function setEditorContent(content2, title, snapshotOverride, options2 = {}) {
+    if (!state3.cmView) return;
     const doc2 = typeof content2 === "string" ? content2 : "";
-    state2.cmView.dispatch({
-      changes: { from: 0, to: state2.cmView.state.doc.length, insert: doc2 }
+    const desiredScrollTopRaw = typeof options2.scrollTop === "number" ? options2.scrollTop : 0;
+    const desiredScrollTop = Number.isFinite(desiredScrollTopRaw) ? Math.max(0, desiredScrollTopRaw) : 0;
+    state3.cmView.dispatch({
+      changes: { from: 0, to: state3.cmView.state.doc.length, insert: doc2 }
     });
-    const docLen = state2.cmView.state.doc.length;
-    state2.cmView.dispatch({ selection: { anchor: docLen }, scrollIntoView: true });
+    const docLen = state3.cmView.state.doc.length;
+    state3.cmView.dispatch({ selection: { anchor: docLen }, scrollIntoView: true });
     requestAnimationFrame(() => {
-      const scroller = getScrollContainer(state2.cmView);
+      const scroller = getScrollContainer(state3.cmView);
       if (!scroller) return;
-      const ch = scroller.clientHeight || Math.max(0, window.innerHeight || 0);
-      const csContainer = getComputedStyle(scroller);
-      const child = state2.cmView.scrollDOM;
-      const csChild = child && child !== scroller ? getComputedStyle(child) : csContainer;
-      const padBottomContainer = parseFloat(csContainer.paddingBottom || "0") || 0;
-      const padBottomChild = parseFloat(csChild.paddingBottom || "0") || 0;
-      const padBottom = Math.max(padBottomContainer, padBottomChild);
-      const contentBottom = Math.max(0, scroller.scrollHeight - padBottom);
-      const target = Math.max(0, contentBottom - Math.round(ch * 0.35));
-      scroller.scrollTop = target;
+      scroller.scrollTop = desiredScrollTop;
       requestAnimationFrame(() => {
-        INIT_SCROLL_SUPPRESS.delete(state2.cmView);
+        INIT_SCROLL_SUPPRESS.delete(state3.cmView);
       });
     });
-    state2.cmView.focus();
-    state2.cmView.dispatch({ selection: { anchor: 0 } });
-    state2.savedSnapshot = typeof snapshotOverride === "string" ? snapshotOverride : doc2;
-    clearDirty(state2.savedSnapshot);
+    state3.cmView.focus();
+    state3.cmView.dispatch({ selection: { anchor: 0 } });
+    state3.savedSnapshot = typeof snapshotOverride === "string" ? snapshotOverride : doc2;
+    clearDirty(state3.savedSnapshot);
     updateWordCountFromText(doc2);
   }
   async function openDocument(id2, { force = false } = {}) {
-    if (!force && state2.current && state2.current.id === id2) return;
-    if (!force && state2.dirty) {
-      const result = await confirmModal({
-        title: "Unsaved changes",
-        message: "Save changes before switching documents?",
-        confirmLabel: "Save",
-        cancelLabel: "Discard"
-      });
-      if (result === "confirm") {
-        const saved = await saveCurrentDocument();
-        if (!saved) return;
-      }
-      clearDirty();
+    closeStatusMenu();
+    if (!force && state3.current && state3.current.id === id2) return;
+    if (!force) {
+      const proceed = await ensureSafeToLeaveDocument({ silentAutosave: true });
+      if (!proceed) return;
     }
+    rememberCurrentScrollPosition();
+    setEmptyOverlayVisible(false);
     try {
       const doc2 = normalizeDoc(await writerAPI.get(id2));
       if (!doc2) return;
-      state2.current = doc2;
+      state3.current = doc2;
       const folderForDoc = doc2.folder_id == null ? "all" : doc2.folder_id;
       setSelectedFolder(folderForDoc, { fromDocument: true });
-      setEditorContent(doc2.content || "", doc2.title || "Untitled Document", doc2.content || "");
+      const savedScroll = getSavedScrollPosition(doc2.id);
+      setEditorContent(doc2.content || "", doc2.title || "Untitled Document", doc2.content || "", { scrollTop: savedScroll });
       updateWordCountFromText(doc2.content || "");
       setEmptyOverlayVisible(false);
     } catch (err) {
       shell2.print(`<div class="error">Unable to open document: ${esc2(err?.message || err)}</div>`);
     }
   }
+  function onStatusTriggerClick(e) {
+    if (!statusesSupported) return;
+    const btn = e.target.closest(".writer-file-status");
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const docId = Number(btn.dataset.docId);
+    if (!Number.isFinite(docId)) return;
+    const alreadyOpen = state3.statusMenuDocId === docId && state3.statusMenuEl?.classList.contains("visible");
+    const sameTrigger = state3.statusMenuTrigger === btn;
+    const justPicker = state3.colorPickerEl && state3.colorPickerEl.contains(e.target);
+    if (alreadyOpen && sameTrigger && justPicker) {
+      return;
+    }
+    openStatusMenu(docId, btn);
+  }
   function onFileClick(e) {
+    if (e.target.closest(".writer-file-status")) return;
     const li = e.target.closest(".writer-file-item");
     if (!li) return;
     const id2 = Number(li.dataset.id);
@@ -30180,9 +30494,9 @@ function startWriter(shell2, opts = {}) {
     closeContextMenu();
     const menu = ensureFileContextMenu();
     menu.dataset.fileId = String(id2);
-    menu.style.left = `${e.clientX}px`;
-    menu.style.top = `${e.clientY}px`;
     menu.classList.add("visible");
+    positionContextMenu(menu, e.clientX, e.clientY);
+    attachContextDismiss(menu, "file");
     menu.querySelectorAll("button").forEach((btn) => {
       btn.onclick = () => {
         const action = btn.dataset.action;
@@ -30197,15 +30511,399 @@ function startWriter(shell2, opts = {}) {
     e.stopPropagation();
     closeContextMenu();
     const menu = ensureFileAreaContextMenu();
-    menu.style.left = `${e.clientX}px`;
-    menu.style.top = `${e.clientY}px`;
     menu.classList.add("visible");
+    positionContextMenu(menu, e.clientX, e.clientY);
+    attachContextDismiss(menu, "fileArea");
     const btn = menu.querySelector('button[data-action="new-file"]');
     if (btn) {
       btn.onclick = () => {
         closeContextMenu();
         createNewDocument();
       };
+    }
+  }
+  function ensureStatusMenu() {
+    if (state3.statusMenuEl) return state3.statusMenuEl;
+    const menu = document.createElement("div");
+    menu.className = "writer-status-menu";
+    menu.innerHTML = `
+            <div class="writer-status-menu-list"></div>
+            <button type="button" class="writer-status-add">Add status</button>
+        `;
+    document.body.appendChild(menu);
+    const addBtn = menu.querySelector(".writer-status-add");
+    if (addBtn) addBtn.addEventListener("click", handleAddStatus);
+    state3.statusMenuEl = menu;
+    return menu;
+  }
+  function renderStatusMenu(docId) {
+    if (!state3.statusMenuEl) return;
+    const list2 = state3.statusMenuEl.querySelector(".writer-status-menu-list");
+    if (!list2) return;
+    list2.innerHTML = "";
+    const numericDocId = Number(docId);
+    const currentDoc = state3.docs.find((doc2) => doc2.id === numericDocId);
+    const activeStatusId = currentDoc ? currentDoc.status_id : getDefaultStatusId();
+    state3.statuses.forEach((status) => {
+      const row = document.createElement("div");
+      row.className = "writer-status-row";
+      row.dataset.statusId = String(status.id);
+      if (!status.is_builtin) {
+        row.dataset.draggable = "true";
+        row.setAttribute("draggable", "true");
+      }
+      if (status.id === activeStatusId) row.classList.add("active");
+      if (status.is_builtin) row.classList.add("builtin");
+      if (status.is_builtin) {
+        const swatch = document.createElement("span");
+        swatch.className = "writer-status-color-dot";
+        swatch.style.setProperty("--writer-status-color", sanitizeStatusColor(status.color));
+        row.appendChild(swatch);
+      } else {
+        const colorBtn = document.createElement("button");
+        colorBtn.type = "button";
+        colorBtn.className = "writer-status-color-btn";
+        colorBtn.style.setProperty("--writer-status-color", sanitizeStatusColor(status.color));
+        colorBtn.title = `Change color for ${status.name}`;
+        colorBtn.setAttribute("aria-label", `Change color for ${status.name}`);
+        colorBtn.addEventListener("click", async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const chosen = await pickStatusColor({
+            anchor: colorBtn,
+            selected: sanitizeStatusColor(status.color || ""),
+            host: state3.statusMenuEl,
+            quickSelect: true
+          });
+          if (!chosen) return;
+          await updateStatusColor(status.id, chosen, numericDocId);
+        });
+        row.appendChild(colorBtn);
+      }
+      const selectBtn = document.createElement("button");
+      selectBtn.type = "button";
+      selectBtn.className = "writer-status-select";
+      selectBtn.textContent = status.name;
+      selectBtn.addEventListener("click", () => handleStatusSelection(status.id, numericDocId));
+      row.appendChild(selectBtn);
+      if (!status.is_builtin) {
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "writer-status-remove";
+        removeBtn.textContent = "\u2212";
+        removeBtn.title = `Delete ${status.name}`;
+        removeBtn.setAttribute("aria-label", `Delete ${status.name}`);
+        removeBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          handleStatusRemove(status.id, row);
+        });
+        row.appendChild(removeBtn);
+      }
+      list2.appendChild(row);
+    });
+  }
+  function bindStatusDragHandlers() {
+    const list2 = state3.statusMenuEl?.querySelector(".writer-status-menu-list");
+    if (!list2 || list2.dataset.dragHandlers === "1") return;
+    list2.dataset.dragHandlers = "1";
+    list2.addEventListener("dragstart", handleStatusDragStart);
+    list2.addEventListener("dragover", handleStatusDragOver);
+    list2.addEventListener("drop", handleStatusDrop);
+    list2.addEventListener("dragend", handleStatusDragEnd);
+  }
+  function handleStatusDragStart(e) {
+    const row = e.target.closest(".writer-status-row");
+    if (!row || row.dataset.draggable !== "true") {
+      e.preventDefault();
+      return;
+    }
+    state3.draggingStatusId = Number(row.dataset.statusId);
+    row.classList.add("dragging");
+    try {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", String(state3.draggingStatusId));
+    } catch (_) {
+    }
+  }
+  function handleStatusDragOver(e) {
+    if (state3.draggingStatusId == null) return;
+    const row = e.target.closest(".writer-status-row");
+    if (!row || row.dataset.statusId === String(state3.draggingStatusId) || row.dataset.draggable !== "true") return;
+    e.preventDefault();
+    const list2 = state3.statusMenuEl?.querySelector(".writer-status-menu-list");
+    if (!list2) return;
+    clearStatusDragIndicators(list2);
+    const rect = row.getBoundingClientRect();
+    const before = e.clientY - rect.top < rect.height / 2;
+    row.classList.add(before ? "drag-over-before" : "drag-over-after");
+    list2.dataset.dropTargetId = row.dataset.statusId;
+    list2.dataset.dropBefore = before ? "1" : "0";
+  }
+  async function handleStatusDrop(e) {
+    if (state3.draggingStatusId == null) return;
+    e.preventDefault();
+    const list2 = state3.statusMenuEl?.querySelector(".writer-status-menu-list");
+    if (!list2) return;
+    const targetId = list2.dataset.dropTargetId ? Number(list2.dataset.dropTargetId) : null;
+    const before = list2.dataset.dropBefore === "1";
+    const dragId = state3.draggingStatusId;
+    clearStatusDragIndicators(list2);
+    state3.draggingStatusId = null;
+    if (!reorderStatusesLocally(dragId, targetId, before)) return;
+    renderStatusMenu(state3.statusMenuDocId);
+    bindStatusDragHandlers();
+    await persistStatusOrder();
+  }
+  function handleStatusDragEnd() {
+    const list2 = state3.statusMenuEl?.querySelector(".writer-status-menu-list");
+    if (!list2) return;
+    list2.querySelectorAll(".writer-status-row.dragging").forEach((row) => row.classList.remove("dragging"));
+    clearStatusDragIndicators(list2);
+    state3.draggingStatusId = null;
+    delete list2.dataset.dropTargetId;
+    delete list2.dataset.dropBefore;
+  }
+  function clearStatusDragIndicators(list2) {
+    if (!list2) return;
+    list2.querySelectorAll(".drag-over-before, .drag-over-after").forEach((row) => {
+      row.classList.remove("drag-over-before", "drag-over-after");
+    });
+  }
+  function reorderStatusesLocally(dragId, targetId, before) {
+    const statuses = state3.statuses.slice();
+    const fromIdx = statuses.findIndex((status) => status.id === dragId);
+    if (fromIdx === -1) return false;
+    const dragged = statuses.splice(fromIdx, 1)[0];
+    let insertIdx = targetId == null ? statuses.length : statuses.findIndex((status) => status.id === targetId);
+    if (insertIdx === -1) insertIdx = statuses.length;
+    if (!before && insertIdx < statuses.length) insertIdx += 1;
+    if (insertIdx < 0) insertIdx = 0;
+    statuses.splice(insertIdx, 0, dragged);
+    state3.statuses = statuses.map((status, idx) => ({ ...status, order_index: idx }));
+    return true;
+  }
+  async function persistStatusOrder() {
+    if (!writerAPI || typeof writerAPI.reorderStatuses !== "function") return;
+    const order = state3.statuses.filter((status) => !status.is_builtin).map((status) => status.id);
+    try {
+      await writerAPI.reorderStatuses(order);
+    } catch (err) {
+      console.warn("Failed to persist status order", err);
+    }
+  }
+  function openStatusMenu(docId, anchor) {
+    if (!statusesSupported) return;
+    state3.statusMenuDocId = Number(docId);
+    state3.statusMenuTrigger = anchor;
+    const menu = ensureStatusMenu();
+    renderStatusMenu(docId);
+    bindStatusDragHandlers();
+    positionStatusMenu(menu, anchor);
+    menu.classList.add("visible");
+    clampMenuToViewport(menu);
+  }
+  function positionStatusMenu(menu, anchor) {
+    if (!menu || !anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const scrollX = window.scrollX || 0;
+    const scrollY = window.scrollY || 0;
+    const targetLeft = rect.left + scrollX;
+    const belowTop = rect.bottom + scrollY;
+    const aboveTop = rect.top + scrollY - (menu.offsetHeight || 0);
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const spaceBelow = viewportHeight - rect.bottom;
+    const shouldFlip = spaceBelow < (menu.offsetHeight || 0);
+    menu.style.left = `${Math.round(targetLeft)}px`;
+    menu.style.top = `${Math.round(shouldFlip ? aboveTop : belowTop)}px`;
+  }
+  function clampMenuToViewport(menu) {
+    if (!menu) return;
+    const margin = 10;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const rect = menu.getBoundingClientRect();
+    let left = rect.left;
+    let top2 = rect.top;
+    if (rect.right + margin > viewportWidth) {
+      left = viewportWidth - rect.width - margin;
+    } else if (rect.left < margin) {
+      left = margin;
+    }
+    if (rect.bottom + margin > viewportHeight) {
+      top2 = viewportHeight - rect.height - margin;
+    } else if (rect.top < margin) {
+      top2 = margin;
+    }
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top2)}px`;
+  }
+  function closeStatusMenu() {
+    if (state3.statusMenuEl) state3.statusMenuEl.classList.remove("visible");
+    state3.statusMenuDocId = null;
+    state3.statusMenuTrigger = null;
+    if (state3.colorPickerEl && state3.colorPickerEl.parentElement) {
+      state3.colorPickerEl.parentElement.removeChild(state3.colorPickerEl);
+    }
+    state3.colorPickerEl = null;
+  }
+  function handleGlobalStatusPointer(e) {
+    if (!state3.statusMenuEl || !state3.statusMenuEl.classList.contains("visible")) return;
+    const target = e.target;
+    if (target.closest && target.closest(".cj-modal")) return;
+    if (state3.statusMenuEl.contains(target)) return;
+    if (state3.colorPickerEl && state3.colorPickerEl.contains(target)) return;
+    if (state3.statusMenuTrigger && state3.statusMenuTrigger.contains(target)) return;
+    if (state3.statusMenuEl === target || state3.colorPickerEl === target) return;
+    closeStatusMenu();
+  }
+  async function applyDocStatus(docId, statusId, { closeMenu = true } = {}) {
+    if (!statusesSupported || !writerAPI || typeof writerAPI.setStatus !== "function") return;
+    const numericDocId = Number(docId);
+    if (!Number.isInteger(numericDocId) || numericDocId <= 0) return;
+    try {
+      const updated = normalizeDoc(await writerAPI.setStatus(numericDocId, statusId));
+      state3.docs = state3.docs.map((doc2) => doc2.id === updated.id ? updated : doc2);
+      if (state3.current && state3.current.id === updated.id) {
+        state3.current = { ...state3.current, status_id: updated.status_id };
+      }
+      redrawFileList();
+    } catch (err) {
+      console.warn("[status] applyDocStatus failed", err);
+      showToast(err?.message || "Failed to update status", "error", "writerToastError");
+      return;
+    }
+    if (closeMenu) closeStatusMenu();
+  }
+  async function handleStatusSelection(statusId, docIdOverride = state3.statusMenuDocId) {
+    await applyDocStatus(docIdOverride, statusId);
+  }
+  async function handleAddStatus() {
+    if (!statusesSupported || !writerAPI || typeof writerAPI.createStatus !== "function") return;
+    const targetDocId = state3.statusMenuDocId;
+    const numericDocId = Number(targetDocId);
+    const canApplyToDoc = Number.isInteger(numericDocId) && numericDocId > 0;
+    const payload = await newStatusModal();
+    if (!payload) return;
+    const { name: name2, color } = payload;
+    try {
+      const created = await writerAPI.createStatus({ name: name2, color });
+      await loadStatuses();
+      if (created && created.id != null && canApplyToDoc) {
+        await applyDocStatus(numericDocId, created.id, { closeMenu: false });
+      }
+      if (state3.statusMenuEl && state3.statusMenuEl.classList.contains("visible")) {
+        renderStatusMenu(state3.statusMenuDocId);
+        bindStatusDragHandlers();
+      }
+    } catch (err) {
+      showToast(err?.message || "Failed to create status", "error", "writerToastError");
+    }
+  }
+  function pickStatusColor({ selected = STATUS_COLOR_OPTIONS[0], anchor = null, host = null, quickSelect = false } = {}) {
+    return new Promise((resolve) => {
+      const container = host && host.contains ? host : state3.statusMenuEl || document.body;
+      const picker = document.createElement("div");
+      picker.className = "writer-color-picker";
+      picker.innerHTML = `
+                <div class="writer-color-grid">
+                    ${STATUS_COLOR_OPTIONS.map((color) => `
+                        <button type="button" class="writer-color-option${sanitizeStatusColor(color) === sanitizeStatusColor(selected) ? " active" : ""}"
+                            data-color="${color}" style="--writer-color:${color};" aria-label="Select color ${color}"></button>
+                    `).join("")}
+                </div>
+                ${quickSelect ? "" : `
+                <div class="writer-color-actions">
+                    <button type="button" class="writer-color-confirm">Confirm</button>
+                    <button type="button" class="writer-color-close">Close</button>
+                </div>`}
+            `;
+      state3.colorPickerEl = picker;
+      if (container !== document.body) {
+        picker.classList.add("embedded");
+        container.appendChild(picker);
+      } else {
+        picker.classList.add("global");
+        document.body.appendChild(picker);
+      }
+      const place = () => {
+        const gap = 8;
+        if (anchor && anchor.getBoundingClientRect) {
+          const rect = anchor.getBoundingClientRect();
+          if (container !== document.body) {
+            const hostRect = container.getBoundingClientRect();
+            let left = rect.left - hostRect.left;
+            let top2 = rect.bottom - hostRect.top + gap;
+            picker.style.left = `${left}px`;
+            picker.style.top = `${top2}px`;
+          } else {
+            const scrollX = window.scrollX || 0;
+            const scrollY = window.scrollY || 0;
+            picker.style.left = `${rect.left + scrollX}px`;
+            picker.style.top = `${rect.bottom + scrollY + gap}px`;
+          }
+        } else {
+          picker.style.left = "50%";
+          picker.style.top = "50%";
+          picker.style.transform = "translate(-50%, -50%)";
+        }
+      };
+      place();
+      let current = sanitizeStatusColor(selected);
+      const finalize = (value) => {
+        if (picker && picker.parentElement) picker.parentElement.removeChild(picker);
+        if (state3.colorPickerEl === picker) state3.colorPickerEl = null;
+        resolve(value ?? null);
+      };
+      picker.querySelectorAll("button.writer-color-option").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          current = btn.dataset.color;
+          picker.querySelectorAll("button.writer-color-option").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          if (quickSelect) finalize(current);
+        });
+      });
+      if (!quickSelect) {
+        const confirmBtn = picker.querySelector(".writer-color-confirm");
+        const closeBtn = picker.querySelector(".writer-color-close");
+        if (confirmBtn) confirmBtn.addEventListener("click", () => finalize(current));
+        if (closeBtn) closeBtn.addEventListener("click", () => finalize(null));
+      }
+    });
+  }
+  async function updateStatusColor(statusId, color, docId) {
+    if (!statusesSupported || !writerAPI || typeof writerAPI.updateStatus !== "function") return;
+    try {
+      await writerAPI.updateStatus(Number(statusId), { color });
+      await loadStatuses();
+      if (Number.isFinite(Number(docId))) {
+        await applyDocStatus(docId, statusId, { closeMenu: false });
+      }
+      if (state3.statusMenuEl && state3.statusMenuEl.classList.contains("visible")) {
+        renderStatusMenu(state3.statusMenuDocId);
+      }
+      redrawFileList();
+    } catch (err) {
+      showToast(err?.message || "Failed to update color", "error", "writerToastError");
+    }
+  }
+  async function handleStatusRemove(id2, row) {
+    if (!statusesSupported || !writerAPI || typeof writerAPI.deleteStatus !== "function") return;
+    const status = getStatusById(id2);
+    if (!status || status.is_builtin) return;
+    if (row) {
+      row.style.transition = "transform 0.25s ease, opacity 0.25s ease";
+      row.style.transform = "translateX(-120%)";
+      row.style.opacity = "0";
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    try {
+      await writerAPI.deleteStatus(id2);
+      await loadStatuses();
+      await loadDocuments();
+      closeStatusMenu();
+    } catch (err) {
+      showToast(err?.message || "Failed to delete status", "error", "writerToastError");
     }
   }
   async function handleContextAction(action, id2) {
@@ -30231,28 +30929,29 @@ function startWriter(shell2, opts = {}) {
   }
   async function saveCurrentDocument(options2 = {}) {
     const { silent = false, refreshList = !silent } = options2;
-    if (!state2.current) {
+    if (!state3.current) {
       const doc2 = await createNewDocument();
       if (!doc2) return false;
     }
-    if (!state2.cmView || !state2.current) return false;
-    const title = state2.current.title || "Untitled Document";
-    const content2 = state2.cmView.state.doc.toString();
+    if (!state3.cmView || !state3.current) return false;
+    const title = state3.current.title || "Untitled Document";
+    const content2 = state3.cmView.state.doc.toString();
     try {
       const updated = normalizeDoc(await writerAPI.update({
-        id: state2.current.id,
+        id: state3.current.id,
         title,
         content: content2,
-        folderId: state2.current.folder_id ?? null
+        folderId: state3.current.folder_id ?? null,
+        statusId: state3.current.status_id ?? getDefaultStatusId()
       }));
-      state2.current = updated;
-      state2.savedSnapshot = content2;
+      state3.current = updated;
+      state3.savedSnapshot = content2;
       clearDirty(content2);
       if (refreshList) {
         await loadDocuments();
-        if (state2.current) setActiveListItem(state2.current.id);
-      } else if (state2.current) {
-        setActiveListItem(state2.current.id);
+        if (state3.current) setActiveListItem(state3.current.id);
+      } else if (state3.current) {
+        setActiveListItem(state3.current.id);
       }
       if (!silent) showToast("Document saved", "ok");
       return true;
@@ -30261,8 +30960,12 @@ function startWriter(shell2, opts = {}) {
       return false;
     }
   }
+  function activeFolderNormalized() {
+    const selected = state3.selectedFolderId === "all" ? state3.inboxFolderId : state3.selectedFolderId;
+    return normalizeFolderId(selected);
+  }
   async function createNewDocument() {
-    if (state2.dirty) {
+    if (state3.dirty) {
       const proceed = await confirmModal({
         title: "Unsaved changes",
         message: "Save current document before creating a new one?",
@@ -30286,19 +30989,36 @@ function startWriter(shell2, opts = {}) {
     const trimmed = String(requested ?? "").trim();
     if (!trimmed) return null;
     const desiredTitle = trimmed;
-    const existingTitles = new Set(state2.docs.map((doc2) => doc2.title));
+    const existingTitles = new Set(state3.docs.map((doc2) => doc2.title));
     let title = desiredTitle;
     let counter = 2;
     while (existingTitles.has(title)) {
       title = `${desiredTitle} ${counter++}`;
     }
     try {
-      const defaultFolder = state2.selectedFolderId === "all" ? state2.inboxFolderId : state2.selectedFolderId;
-      const folderId = defaultFolder ?? state2.inboxFolderId ?? null;
+      const defaultFolder = state3.selectedFolderId === "all" ? state3.inboxFolderId : state3.selectedFolderId;
+      const folderId = defaultFolder ?? state3.inboxFolderId ?? null;
       const doc2 = normalizeDoc(await writerAPI.create({ title, content: "", folderId }));
+      const createdFolder = normalizeFolderId(doc2.folder_id);
+      const viewingCreatedFolder = activeFolderNormalized() === createdFolder;
+      if (viewingCreatedFolder) {
+        const provisional = { ...doc2 };
+        if (typeof provisional.order_index !== "number") {
+          provisional.order_index = docsOrderedForFolder(folderId).length;
+        }
+        state3.docs.push(provisional);
+        redrawFileList();
+      }
       await loadDocuments();
-      await openDocument(doc2.id, { force: true });
-      setEmptyOverlayVisible(false);
+      if (viewingCreatedFolder) {
+        const docsInFolder = docsOrderedForFolder(folderId);
+        const onlyDoc = docsInFolder.length === 1 && docsInFolder[0].id === doc2.id;
+        if (onlyDoc) {
+          await openDocument(doc2.id, { force: true });
+        } else if (state3.current) {
+          setActiveListItem(state3.current.id);
+        }
+      }
       showToast("New document created", "ok");
       return doc2;
     } catch (err) {
@@ -30311,7 +31031,7 @@ function startWriter(shell2, opts = {}) {
       const source = await writerAPI.get(id2);
       if (!source) return;
       const base2 = `${source.title} Copy`;
-      const existingTitles = new Set(state2.docs.map((doc3) => doc3.title));
+      const existingTitles = new Set(state3.docs.map((doc3) => doc3.title));
       let title = base2;
       let counter = 1;
       while (existingTitles.has(title)) {
@@ -30327,7 +31047,7 @@ function startWriter(shell2, opts = {}) {
     }
   }
   async function renameDocument(id2) {
-    const target = state2.docs.find((doc2) => doc2.id === id2);
+    const target = state3.docs.find((doc2) => doc2.id === id2);
     if (!target) return;
     const result = await promptModal({
       title: "Rename document",
@@ -30339,9 +31059,9 @@ function startWriter(shell2, opts = {}) {
     try {
       const renamed = normalizeDoc(await writerAPI.rename(id2, title));
       await loadDocuments();
-      if (state2.current && state2.current.id === id2) {
-        state2.current = { ...state2.current, title: renamed.title };
-        if (!state2.dirty) setActiveListItem(id2);
+      if (state3.current && state3.current.id === id2) {
+        state3.current = { ...state3.current, title: renamed.title };
+        if (!state3.dirty) setActiveListItem(id2);
       }
       showToast("Document renamed", "ok");
     } catch (err) {
@@ -30349,7 +31069,7 @@ function startWriter(shell2, opts = {}) {
     }
   }
   async function deleteDocument(id2) {
-    const target = state2.docs.find((doc2) => doc2.id === id2);
+    const target = state3.docs.find((doc2) => doc2.id === id2);
     if (!target) return;
     const result = await confirmModal({
       title: "Delete document?",
@@ -30359,14 +31079,37 @@ function startWriter(shell2, opts = {}) {
       danger: true
     });
     if (result !== "confirm") return;
+    const deletingCurrent = state3.current && state3.current.id === id2;
+    let fallbackId = null;
+    if (deletingCurrent) {
+      const ordered = docsOrderedForFolder(target.folder_id);
+      const index = ordered.findIndex((doc2) => doc2.id === id2);
+      if (index !== -1) {
+        if (ordered[index + 1]) {
+          fallbackId = ordered[index + 1].id;
+        } else if (ordered[index - 1]) {
+          fallbackId = ordered[index - 1].id;
+        }
+      }
+    }
     try {
       await writerAPI.delete(id2);
+      state3.scrollPositions.delete(id2);
       showToast("Document deleted", "warn");
+      if (deletingCurrent) {
+        state3.current = null;
+      }
       await loadDocuments();
-      if (!state2.docs.length) {
+      if (!state3.docs.length) {
         showNoSelectionOverlay();
-      } else if (state2.current && state2.current.id === id2) {
-        showNoSelectionOverlay();
+        return;
+      }
+      if (deletingCurrent) {
+        if (fallbackId != null && state3.docs.some((doc2) => doc2.id === fallbackId)) {
+          await openDocument(fallbackId, { force: true });
+        } else {
+          showNoSelectionOverlay();
+        }
       }
     } catch (err) {
       shell2.print(`<div class="error">Delete failed: ${esc2(err?.message || err)}</div>`);
@@ -30431,11 +31174,11 @@ function startWriter(shell2, opts = {}) {
     return ".";
   }
   function requestExit() {
-    if (!state2.dirty) {
+    if (!state3.dirty) {
       performExit();
       return;
     }
-    if (state2.autosaveEnabled) {
+    if (state3.autosaveEnabled) {
       saveCurrentDocument({ silent: true }).then((saved) => {
         if (!saved) {
           showToast("Unable to save before exit", "error", "writerToastError");
@@ -30455,9 +31198,9 @@ function startWriter(shell2, opts = {}) {
   function performExit() {
     detachGlobalListeners();
     cancelAutosaveTimer();
-    if (state2.cmView) {
-      state2.cmView.destroy();
-      state2.cmView = null;
+    if (state3.cmView) {
+      state3.cmView.destroy();
+      state3.cmView = null;
     }
     restoreConsole();
     shell2.exit();
@@ -30634,19 +31377,113 @@ function startWriter(shell2, opts = {}) {
       }, 0);
     });
   }
+  function newStatusModal({ defaultName = "", defaultColor = STATUS_COLOR_OPTIONS[0] } = {}) {
+    return new Promise((resolve) => {
+      const wrap = document.createElement("div");
+      wrap.className = "cj-modal-backdrop";
+      wrap.innerHTML = `
+                <div class="cj-modal" role="dialog" aria-modal="true">
+                    <div class="cj-modal-title">New status</div>
+                    <div class="cj-modal-body">
+                        <label class="writer-status-name-field">
+                            <span>Name</span>
+                            <input type="text" class="cj-modal-input" value="${esc2(defaultName)}" spellcheck="false" />
+                        </label>
+                        <div class="writer-status-color-field">
+                            <div class="writer-status-color-label muted">Color</div>
+                            <div class="writer-color-grid">
+                                ${STATUS_COLOR_OPTIONS.map((color) => `
+                                    <button type="button" class="writer-color-option${sanitizeStatusColor(color) === sanitizeStatusColor(defaultColor) ? " active" : ""}"
+                                        data-color="${color}" style="--writer-color:${color};" aria-label="Select color ${color}"></button>
+                                `).join("")}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="cj-modal-actions">
+                        <button class="confirm">Create</button>
+                        <button class="cancel">Cancel</button>
+                    </div>
+                </div>
+            `;
+      document.body.appendChild(wrap);
+      const input2 = wrap.querySelector(".cj-modal-input");
+      const confirmBtn = wrap.querySelector("button.confirm");
+      const cancelBtn = wrap.querySelector("button.cancel");
+      let selectedColor = sanitizeStatusColor(defaultColor);
+      const buttons = wrap.querySelectorAll(".writer-color-option");
+      buttons.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          selectedColor = btn.dataset.color;
+          buttons.forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+        });
+      });
+      const cleanup = (value) => {
+        window.removeEventListener("keydown", onKey, true);
+        if (wrap && wrap.parentElement) wrap.parentElement.removeChild(wrap);
+        resolve(value);
+      };
+      const accept = () => {
+        const name2 = String(input2.value || "").trim();
+        if (!name2) return;
+        cleanup({ name: name2, color: selectedColor });
+      };
+      const reject = () => cleanup(null);
+      const onKey = (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          reject();
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          accept();
+        }
+      };
+      confirmBtn.addEventListener("click", accept);
+      cancelBtn.addEventListener("click", reject);
+      window.addEventListener("keydown", onKey, true);
+      setTimeout(() => {
+        try {
+          input2.focus({ preventScroll: true });
+        } catch {
+          input2.focus();
+        }
+        input2.select();
+      }, 0);
+    });
+  }
   mountUI();
   setEmptyOverlayVisible(true);
-  shell2.setPrompt(state2.prompt);
+  shell2.setPrompt(state3.prompt);
   (async () => {
     let docsPromise = null;
+    let statusesPromise = null;
     try {
       docsPromise = writerAPI.list();
     } catch (_) {
       docsPromise = null;
     }
+    if (statusesSupported) {
+      try {
+        statusesPromise = writerAPI.listStatuses();
+      } catch (_) {
+        statusesPromise = null;
+      }
+    }
     try {
       await loadFolders();
     } catch (_) {
+    }
+    if (!state3.statusesLoaded) {
+      if (statusesPromise) {
+        try {
+          const prefetchedStatuses = await statusesPromise;
+          await loadStatuses(prefetchedStatuses);
+        } catch (_) {
+          await loadStatuses();
+        }
+      } else {
+        await loadStatuses();
+      }
     }
     let prefetchedDocs = null;
     if (docsPromise) {
@@ -30661,6 +31498,13 @@ function startWriter(shell2, opts = {}) {
     } else {
       await loadDocuments();
     }
+    if (!state3.bootstrappedSelection) {
+      state3.bootstrappedSelection = true;
+      if (state3.docs.length) {
+        const initialFolder = state3.selectedFolderId ?? state3.inboxFolderId ?? "all";
+        setSelectedFolder(initialFolder);
+      }
+    }
   })();
   const program = {
     async consume() {
@@ -30669,6 +31513,12 @@ function startWriter(shell2, opts = {}) {
       detachGlobalListeners();
       closeContextMenu();
       cancelAutosaveTimer();
+      if (state3.editorFocusHandler && state3.cmView?.dom) {
+        try {
+          state3.cmView.dom.removeEventListener("focus", state3.editorFocusHandler, true);
+        } catch (_) {
+        }
+      }
     },
     setAutosave(enabled) {
       setAutosaveEnabled(enabled);
@@ -30676,6 +31526,27 @@ function startWriter(shell2, opts = {}) {
   };
   shell2.enter(program);
   return program;
+}
+function handleGlobalClick(e) {
+  handleStandardContextPointer(e);
+}
+function handleStandardContextPointer(e) {
+  const target = e.target;
+  if (target.closest(".cj-modal")) return;
+  if (state.statusMenuEl && state.statusMenuEl.classList.contains("visible")) {
+    if (state.statusMenuEl.contains(target)) return;
+    if (state.colorPickerEl && state.colorPickerEl.contains(target)) return;
+  }
+  if (isTargetInsideStandardContextMenu(target)) return;
+  if (anyStandardContextMenuVisible()) {
+    closeStandardContextMenus();
+  }
+}
+function isTargetInsideStandardContextMenu(target) {
+  return state.fileContextMenuEl?.contains(target) || state.folderContextMenuEl?.contains(target) || state.fileAreaContextMenuEl?.contains(target) || state.folderAreaContextMenuEl?.contains(target);
+}
+function anyStandardContextMenuVisible() {
+  return !!(state.fileContextMenuEl?.classList.contains("visible") || state.folderContextMenuEl?.classList.contains("visible") || state.fileAreaContextMenuEl?.classList.contains("visible") || state.folderAreaContextMenuEl?.classList.contains("visible"));
 }
 
 // packages/ui/js/theme.js
@@ -30704,6 +31575,7 @@ var THEME_VAR_WHITELIST = [
   "--font-ui",
   "--font-mono",
   "--font-editor",
+  "--font-writer",
   "--base-font-size",
   "--editor-font-size",
   "--editor-line-height",
@@ -31219,6 +32091,12 @@ function extractMaxWidth(value) {
   if (!Number.isFinite(num)) return 81;
   return Math.min(140, Math.max(40, Math.round(num)));
 }
+function extractLineHeight(value) {
+  const num = typeof value === "number" ? value : Number.parseFloat(String(value ?? "").replace(/em$/, ""));
+  if (!Number.isFinite(num)) return 1.5;
+  const clamped = Math.min(2.5, Math.max(1, num));
+  return Math.round(clamped * 100) / 100;
+}
 async function startThemeApp(shell2) {
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent || "");
   let activeTheme = await loadActiveTheme();
@@ -31287,7 +32165,7 @@ async function startThemeApp(shell2) {
   fontsPanel.appendChild(monoPreview);
   const editorLabel = document.createElement("label");
   editorLabel.className = "theme-font-label";
-  editorLabel.textContent = "Editor Font";
+  editorLabel.textContent = "Journal Font";
   const editorSelect = document.createElement("select");
   editorSelect.className = "theme-font-select";
   FONT_OPTIONS_EDITOR.forEach((opt) => {
@@ -31305,6 +32183,26 @@ async function startThemeApp(shell2) {
         <p>The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.</p>
     `;
   fontsPanel.appendChild(editorPreview);
+  const writerLabel = document.createElement("label");
+  writerLabel.className = "theme-font-label";
+  writerLabel.textContent = "Writer Font";
+  const writerSelect = document.createElement("select");
+  writerSelect.className = "theme-font-select";
+  FONT_OPTIONS_EDITOR.forEach((opt) => {
+    const option = document.createElement("option");
+    option.value = opt.id;
+    option.textContent = opt.label;
+    writerSelect.appendChild(option);
+  });
+  writerLabel.appendChild(writerSelect);
+  fontsPanel.appendChild(writerLabel);
+  const writerPreview = document.createElement("div");
+  writerPreview.className = "theme-font-preview writer";
+  writerPreview.innerHTML = `
+        <div class="preview-heading">Writer Preview</div>
+        <p>Scenes: The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.</p>
+    `;
+  fontsPanel.appendChild(writerPreview);
   const uiLabel = document.createElement("label");
   uiLabel.className = "theme-font-label";
   uiLabel.textContent = "UI Font";
@@ -31381,6 +32279,26 @@ async function startThemeApp(shell2) {
   });
   maxLabel.appendChild(maxWidthInput);
   layoutPanel.appendChild(maxLabel);
+  const lineLabel = document.createElement("label");
+  lineLabel.className = "theme-number-label";
+  lineLabel.textContent = "Line Height";
+  const lineHeightInput = document.createElement("input");
+  lineHeightInput.type = "number";
+  lineHeightInput.className = "theme-number-input";
+  lineHeightInput.min = "1";
+  lineHeightInput.max = "2.5";
+  lineHeightInput.step = "0.05";
+  lineHeightInput.value = extractLineHeight(draft.vars["--editor-line-height"] ?? "1.5").toFixed(2);
+  lineHeightInput.addEventListener("input", () => {
+    const height = extractLineHeight(lineHeightInput.value + "");
+    lineHeightInput.value = height.toFixed(2);
+    draft.vars["--editor-line-height"] = String(height);
+    dirty = true;
+    updateStatus();
+    updatePreview();
+  });
+  lineLabel.appendChild(lineHeightInput);
+  layoutPanel.appendChild(lineLabel);
   panels.appendChild(layoutPanel);
   const actions = document.createElement("div");
   actions.className = "theme-actions";
@@ -31422,16 +32340,19 @@ async function startThemeApp(shell2) {
   function currentFontOptions() {
     const uiOpt = detectFontOption(draft.vars["--font-ui"], FONT_OPTIONS_UI);
     const editorOpt = detectFontOption(draft.vars["--font-editor"], FONT_OPTIONS_EDITOR);
+    const writerOpt = detectFontOption(draft.vars["--font-writer"], FONT_OPTIONS_EDITOR);
     const monoOpt = detectFontOption(draft.vars["--font-mono"], FONT_OPTIONS_MONO);
-    return { uiOpt, editorOpt, monoOpt };
+    return { uiOpt, editorOpt, writerOpt, monoOpt };
   }
   function updateFontPreviews() {
-    const { uiOpt, editorOpt, monoOpt } = currentFontOptions();
+    const { uiOpt, editorOpt, writerOpt, monoOpt } = currentFontOptions();
     uiSelect.value = uiOpt.id;
     editorSelect.value = editorOpt.id;
+    writerSelect.value = writerOpt.id;
     monoSelect.value = monoOpt.id;
     uiPreview.style.fontFamily = uiOpt.css;
     editorPreview.style.fontFamily = editorOpt.css;
+    writerPreview.style.fontFamily = writerOpt.css;
     monoPreview.style.fontFamily = monoOpt.css;
   }
   function updateColorsUI() {
@@ -31443,11 +32364,13 @@ async function startThemeApp(shell2) {
   }
   function updateLayoutUI() {
     maxWidthInput.value = String(extractMaxWidth(draft.vars["--editor-max-width"] ?? "81"));
+    lineHeightInput.value = extractLineHeight(draft.vars["--editor-line-height"] ?? "1.5").toFixed(2);
   }
   function updatePreview() {
-    const { uiOpt, editorOpt, monoOpt } = currentFontOptions();
+    const { uiOpt, editorOpt, writerOpt, monoOpt } = currentFontOptions();
     draft.vars["--font-ui"] = uiOpt.css;
     draft.vars["--font-editor"] = editorOpt.css;
+    draft.vars["--font-writer"] = writerOpt.css;
     draft.vars["--font-mono"] = monoOpt.css;
     applyTheme(draft);
     updateFontPreviews();
@@ -31472,6 +32395,13 @@ async function startThemeApp(shell2) {
   editorSelect.addEventListener("change", () => {
     const opt = FONT_OPTIONS_EDITOR.find((o) => o.id === editorSelect.value) || FONT_OPTIONS_EDITOR[0];
     draft.vars["--font-editor"] = opt.css;
+    dirty = true;
+    updateStatus();
+    updatePreview();
+  });
+  writerSelect.addEventListener("change", () => {
+    const opt = FONT_OPTIONS_EDITOR.find((o) => o.id === writerSelect.value) || FONT_OPTIONS_EDITOR[0];
+    draft.vars["--font-writer"] = opt.css;
     dirty = true;
     updateStatus();
     updatePreview();
@@ -33616,6 +34546,13 @@ function shiftISO(days = 0, tz = Intl.DateTimeFormat().resolvedOptions().timeZon
 function isISODate2(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
+function shiftISOFrom(dateStr, days = 0) {
+  if (!isISODate2(dateStr)) return dateStr;
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const base2 = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  const shifted = new Date(base2.getTime() + days * 864e5);
+  return shifted.toISOString().slice(0, 10);
+}
 function isMonthDay(s) {
   return /^\d{2}-\d{2}$/.test(s);
 }
@@ -33719,14 +34656,56 @@ if (!db) {
         for (const child of children) stack.push(child.id);
       }
       return out;
+    }, normalizeStatusColorValue = function(color, { allowTransparent = false } = {}) {
+      if (typeof color !== "string") {
+        return allowTransparent ? DEFAULT_WRITER_STATUS_COLOR : DEFAULT_USER_STATUS_COLOR;
+      }
+      let value = color.trim();
+      if (/^transparent$/i.test(value)) {
+        return allowTransparent ? DEFAULT_WRITER_STATUS_COLOR : DEFAULT_USER_STATUS_COLOR;
+      }
+      if (/^#[0-9a-fA-F]{3}$/.test(value)) {
+        const r = value[1];
+        const g = value[2];
+        const b = value[3];
+        value = `#${r}${r}${g}${g}${b}${b}`;
+      }
+      if (/^#[0-9a-fA-F]{6}$/.test(value) || /^#[0-9a-fA-F]{8}$/.test(value)) {
+        return value.toLowerCase();
+      }
+      return allowTransparent ? DEFAULT_WRITER_STATUS_COLOR : DEFAULT_USER_STATUS_COLOR;
+    }, normalizeStatusRecord = function(row) {
+      if (!row) return null;
+      return {
+        id: row.id,
+        name: row.name || DEFAULT_WRITER_STATUS_NAME,
+        color: normalizeStatusColorValue(row.color, { allowTransparent: true }),
+        is_builtin: row.is_builtin === 1 || row.is_builtin === true,
+        order_index: row.order_index == null ? 0 : row.order_index
+      };
+    }, normalizeWriterDocRow = function(row, defaultStatusId) {
+      if (!row) return null;
+      const fallback = Number.isFinite(defaultStatusId) ? defaultStatusId : writerDefaultStatusId;
+      const statusId = row.status_id == null ? fallback : row.status_id;
+      return {
+        ...row,
+        folder_id: row.folder_id == null ? null : row.folder_id,
+        status_id: statusId == null ? fallback : statusId,
+        order_index: row.order_index == null ? 0 : row.order_index
+      };
     };
     const DB_NAME = "console-journal";
-    const DB_VERSION = 5;
+    const DB_VERSION = 6;
     const STORE = "entries";
     const TEMPLATE_STORE = "templates";
     const SETTINGS_STORE = "settings";
     const WRITER_STORE = "writer_docs";
     const WRITER_FOLDER_STORE = "writer_folders";
+    const WRITER_STATUS_STORE = "writer_statuses";
+    const DEFAULT_WRITER_STATUS_NAME = "None";
+    const DEFAULT_WRITER_STATUS_COLOR = "#00000000";
+    const DEFAULT_USER_STATUS_COLOR = "#37c978";
+    let writerDefaultStatusId = null;
     const openDB = () => new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
@@ -33755,6 +34734,64 @@ if (!db) {
           f.createIndex("parent_name", ["parent_id", "name_lower"], { unique: true });
           f.createIndex("name_lower", "name_lower", { unique: false });
         }
+        let statusStore;
+        if (!db2.objectStoreNames.contains(WRITER_STATUS_STORE)) {
+          statusStore = db2.createObjectStore(WRITER_STATUS_STORE, { keyPath: "id", autoIncrement: true });
+          statusStore.createIndex("name_lower", "name_lower", { unique: true });
+          statusStore.createIndex("order_index", "order_index", { unique: false });
+          statusStore.createIndex("is_builtin", "is_builtin", { unique: false });
+        } else {
+          statusStore = req.transaction.objectStore(WRITER_STATUS_STORE);
+          if (!statusStore.indexNames.contains("name_lower")) {
+            statusStore.createIndex("name_lower", "name_lower", { unique: true });
+          }
+          if (!statusStore.indexNames.contains("order_index")) {
+            statusStore.createIndex("order_index", "order_index", { unique: false });
+          }
+          if (!statusStore.indexNames.contains("is_builtin")) {
+            statusStore.createIndex("is_builtin", "is_builtin", { unique: false });
+          }
+        }
+        const writerStore = req.transaction.objectStore(WRITER_STORE);
+        const ensureDefaultStatus = (defaultId) => {
+          if (!writerStore) return;
+          const cursorReq = writerStore.openCursor();
+          cursorReq.onsuccess = () => {
+            const cursor = cursorReq.result;
+            if (!cursor) return;
+            const value = cursor.value || {};
+            if (value.status_id == null) {
+              value.status_id = defaultId;
+              cursor.update(value);
+            }
+            cursor.continue();
+          };
+        };
+        const now = (/* @__PURE__ */ new Date()).toISOString();
+        if (statusStore) {
+          const builtinReq = statusStore.index("is_builtin").get(1);
+          builtinReq.onsuccess = () => {
+            const row = builtinReq.result;
+            if (row && row.id != null) {
+              writerDefaultStatusId = row.id;
+              ensureDefaultStatus(row.id);
+            } else {
+              const addReq = statusStore.add({
+                name: DEFAULT_WRITER_STATUS_NAME,
+                name_lower: DEFAULT_WRITER_STATUS_NAME.toLowerCase(),
+                color: DEFAULT_WRITER_STATUS_COLOR,
+                is_builtin: 1,
+                order_index: 0,
+                created_at: now,
+                updated_at: now
+              });
+              addReq.onsuccess = () => {
+                writerDefaultStatusId = addReq.result;
+                ensureDefaultStatus(addReq.result);
+              };
+            }
+          };
+        }
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -33778,10 +34815,61 @@ if (!db) {
     const txRun = (mode, fn) => txRunStore(STORE, mode, fn);
     const txRunWriter = (mode, fn) => txRunStore(WRITER_STORE, mode, fn);
     const txRunFolders = (mode, fn) => txRunStore(WRITER_FOLDER_STORE, mode, fn);
+    const txRunStatuses = (mode, fn) => txRunStore(WRITER_STATUS_STORE, mode, fn);
+    async function ensureWriterDefaultStatusId() {
+      if (writerDefaultStatusId != null) return writerDefaultStatusId;
+      try {
+        const row = await txRunStatuses("readonly", (store) => new Promise((resolve, reject) => {
+          if (!store.indexNames.contains("is_builtin")) {
+            resolve(null);
+            return;
+          }
+          const req = store.index("is_builtin").get(1);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => reject(req.error);
+        }));
+        if (row && row.id != null) {
+          writerDefaultStatusId = row.id;
+          return row.id;
+        }
+      } catch (_) {
+      }
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const createdId = await txRunStatuses("readwrite", (store) => new Promise((resolve, reject) => {
+        const addReq = store.add({
+          name: DEFAULT_WRITER_STATUS_NAME,
+          name_lower: DEFAULT_WRITER_STATUS_NAME.toLowerCase(),
+          color: DEFAULT_WRITER_STATUS_COLOR,
+          is_builtin: 1,
+          order_index: 0,
+          created_at: now,
+          updated_at: now
+        });
+        addReq.onsuccess = () => resolve(addReq.result);
+        addReq.onerror = () => reject(addReq.error);
+      }));
+      writerDefaultStatusId = createdId;
+      return createdId;
+    }
+    async function resolveWriterStatusId(value) {
+      const fallback = await ensureWriterDefaultStatusId();
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
+      try {
+        const exists = await txRunStatuses("readonly", (store) => new Promise((resolve, reject) => {
+          const req = store.get(numeric);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => reject(req.error);
+        }));
+        return exists ? numeric : fallback;
+      } catch (_) {
+        return fallback;
+      }
+    }
     async function listDocsForFolder(folderId) {
       const key = folderId == null ? null : Number(folderId);
-      return txRunWriter("readonly", (store) => {
-        const docs = [];
+      const docs = await txRunWriter("readonly", (store) => {
+        const rows = [];
         return new Promise((resolve, reject) => {
           const index = store.index("folder_id");
           const range = IDBKeyRange.only(key);
@@ -33789,15 +34877,17 @@ if (!db) {
           cursor.onsuccess = () => {
             const cur = cursor.result;
             if (!cur) {
-              resolve(docs);
+              resolve(rows);
               return;
             }
-            docs.push(cur.value);
+            rows.push(cur.value);
             cur.continue();
           };
           cursor.onerror = () => reject(cursor.error);
         });
       });
+      const defaultStatusId = await ensureWriterDefaultStatusId();
+      return docs.map((doc2) => normalizeWriterDocRow(doc2, defaultStatusId));
     }
     async function clearDocsForFolder(folderId) {
       const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -33980,7 +35070,7 @@ if (!db) {
       },
       writer: {
         async list() {
-          return txRunWriter("readonly", (store) => {
+          const docs = await txRunWriter("readonly", (store) => {
             const idx = store.index("updated_at");
             const out = [];
             return new Promise((resolve, reject) => {
@@ -33994,43 +35084,61 @@ if (!db) {
               cursor.onerror = () => reject(cursor.error);
             });
           });
+          const defaultStatusId = await ensureWriterDefaultStatusId();
+          return docs.map((doc2) => normalizeWriterDocRow(doc2, defaultStatusId));
         },
         async get(id2) {
           const key = Number(id2);
           if (!Number.isFinite(key)) throw new Error("Writer document id required");
-          return txRunWriter("readonly", (store) => {
+          const row = await txRunWriter("readonly", (store) => {
             const req = store.get(key);
             return new Promise((resolve, reject) => {
               req.onsuccess = () => resolve(req.result || null);
               req.onerror = () => reject(req.error);
             });
           });
+          if (!row) return null;
+          const defaultStatusId = await ensureWriterDefaultStatusId();
+          return normalizeWriterDocRow(row, defaultStatusId);
         },
-        async create({ title, content: content2 = "", folderId = null } = {}) {
+        async create({ title, content: content2 = "", folderId = null, statusId = null } = {}) {
           const now = (/* @__PURE__ */ new Date()).toISOString();
           const titleNormalized = normalizeWriterTitle(title);
+          const resolvedStatusId = await resolveWriterStatusId(statusId);
+          const resolvedFolderId = folderId == null ? null : Number(folderId);
+          if (resolvedFolderId != null && !Number.isFinite(resolvedFolderId)) throw new Error("Folder id required");
+          const siblings = await listDocsForFolder(resolvedFolderId);
+          const maxOrder = siblings.reduce((max, doc3) => Math.max(max, Number(doc3.order_index) || 0), -1);
+          const nextOrder = maxOrder + 1;
           const doc2 = {
             title: titleNormalized,
             title_lower: titleNormalized.toLowerCase(),
             content: String(content2 ?? ""),
-            folder_id: folderId == null ? null : Number(folderId),
+            folder_id: resolvedFolderId,
+            order_index: nextOrder,
+            status_id: resolvedStatusId,
             created_at: now,
             updated_at: now
           };
-          return txRunWriter("readwrite", (store) => {
+          const created = await txRunWriter("readwrite", (store) => {
             const req = store.add(doc2);
             return new Promise((resolve, reject) => {
               req.onsuccess = () => resolve({ ...doc2, id: req.result });
               req.onerror = () => reject(req.error);
             });
           });
+          const defaultStatusId = await ensureWriterDefaultStatusId();
+          return normalizeWriterDocRow(created, defaultStatusId);
         },
-        async update({ id: id2, title, content: content2 = "", folderId = null } = {}) {
+        async update({ id: id2, title, content: content2 = "", folderId = null, statusId = null } = {}) {
           const key = Number(id2);
           if (!Number.isFinite(key)) throw new Error("Writer document id required");
           const now = (/* @__PURE__ */ new Date()).toISOString();
           const titleNormalized = normalizeWriterTitle(title);
-          return txRunWriter("readwrite", (store) => {
+          const resolvedStatus = statusId == null ? null : await resolveWriterStatusId(statusId);
+          const resolvedFolderId = folderId == null ? null : Number(folderId);
+          if (resolvedFolderId != null && !Number.isFinite(resolvedFolderId)) throw new Error("Folder id required");
+          const updated = await txRunWriter("readwrite", (store) => {
             const getReq = store.get(key);
             return new Promise((resolve, reject) => {
               getReq.onsuccess = () => {
@@ -34044,7 +35152,8 @@ if (!db) {
                   title: titleNormalized,
                   title_lower: titleNormalized.toLowerCase(),
                   content: String(content2 ?? ""),
-                  folder_id: folderId == null ? null : Number(folderId),
+                  folder_id: resolvedFolderId,
+                  status_id: resolvedStatus == null ? existing.status_id : resolvedStatus,
                   updated_at: now
                 };
                 const putReq = store.put(next);
@@ -34054,6 +35163,8 @@ if (!db) {
               getReq.onerror = () => reject(getReq.error);
             });
           });
+          const defaultStatusId = await ensureWriterDefaultStatusId();
+          return normalizeWriterDocRow(updated, defaultStatusId);
         },
         async delete(id2) {
           const key = Number(id2);
@@ -34073,14 +35184,54 @@ if (!db) {
           return this.create({
             title: nextTitle,
             content: source.content ?? "",
-            folderId: folderId ?? source.folder_id ?? null
+            folderId: folderId ?? source.folder_id ?? null,
+            statusId: source.status_id ?? null
           });
+        },
+        async reorderDocuments(moves = []) {
+          if (!Array.isArray(moves) || !moves.length) return;
+          const normalizedMoves = moves.map((move) => ({
+            id: Number(move?.id),
+            folderId: move?.folderId == null ? null : Number(move.folderId),
+            order: Number(move?.order)
+          })).filter((move) => Number.isFinite(move.id));
+          if (!normalizedMoves.length) return;
+          const now = (/* @__PURE__ */ new Date()).toISOString();
+          await txRunWriter("readwrite", (store) => new Promise((resolve, reject) => {
+            let index = 0;
+            const processNext = () => {
+              if (index >= normalizedMoves.length) {
+                resolve(true);
+                return;
+              }
+              const move = normalizedMoves[index++];
+              const getReq = store.get(move.id);
+              getReq.onsuccess = () => {
+                const row = getReq.result;
+                if (!row) {
+                  processNext();
+                  return;
+                }
+                const updated = {
+                  ...row,
+                  folder_id: move.folderId == null ? null : move.folderId,
+                  order_index: Number.isFinite(move.order) ? move.order : row.order_index ?? 0,
+                  updated_at: now
+                };
+                const putReq = store.put(updated);
+                putReq.onsuccess = () => processNext();
+                putReq.onerror = () => reject(putReq.error);
+              };
+              getReq.onerror = () => reject(getReq.error);
+            };
+            processNext();
+          }));
         },
         async rename(id2, title) {
           const key = Number(id2);
           if (!Number.isFinite(key)) throw new Error("Writer document id required");
           const normalized = normalizeWriterTitle(title);
-          return txRunWriter("readwrite", (store) => {
+          const renamed = await txRunWriter("readwrite", (store) => {
             const getReq = store.get(key);
             return new Promise((resolve, reject) => {
               getReq.onsuccess = () => {
@@ -34102,6 +35253,8 @@ if (!db) {
               getReq.onerror = () => reject(getReq.error);
             });
           });
+          const defaultStatusId = await ensureWriterDefaultStatusId();
+          return normalizeWriterDocRow(renamed, defaultStatusId);
         },
         async listFolders() {
           return txRunFolders("readonly", (store) => {
@@ -34110,9 +35263,14 @@ if (!db) {
               req.onsuccess = () => {
                 const rows = (req.result || []).map((row) => ({
                   ...row,
-                  parent_id: row.parent_id == null ? null : row.parent_id
+                  parent_id: row.parent_id == null ? null : row.parent_id,
+                  order_index: row.order_index == null ? 0 : row.order_index
                 }));
-                rows.sort((a, b) => a.name_lower.localeCompare(b.name_lower));
+                rows.sort((a, b) => {
+                  const diff = (a.order_index ?? 0) - (b.order_index ?? 0);
+                  if (diff !== 0) return diff;
+                  return (a.name_lower || "").localeCompare(b.name_lower || "");
+                });
                 resolve(rows);
               };
               req.onerror = () => reject(req.error);
@@ -34145,11 +35303,15 @@ if (!db) {
           const existingKeys = new Set(existing.map((f) => folderNameKey(f.parent_id, f.name)));
           const finalName = ensureUniqueFolderName(name2, parentKey, existingKeys);
           const now = (/* @__PURE__ */ new Date()).toISOString();
+          const siblings = existing.filter((f) => (f.parent_id == null ? null : f.parent_id) === (parentKey == null ? null : parentKey));
+          const maxOrder = siblings.reduce((max, folder) => Math.max(max, Number(folder.order_index) || 0), -1);
+          const nextOrder = maxOrder + 1;
           return txRunFolders("readwrite", (store) => {
             const doc2 = {
               name: finalName,
               name_lower: finalName.toLowerCase(),
               parent_id: parentKey == null ? null : parentKey,
+              order_index: nextOrder,
               created_at: now,
               updated_at: now
             };
@@ -34187,6 +35349,7 @@ if (!db) {
                   ...existingRow,
                   name: normalized,
                   name_lower: normalized.toLowerCase(),
+                  order_index: existingRow.order_index == null ? 0 : existingRow.order_index,
                   updated_at: now
                 };
                 const putReq = store.put(next);
@@ -34231,7 +35394,8 @@ if (!db) {
               await this.create({
                 title: doc2.title,
                 content: doc2.content ?? "",
-                folderId: destFolderId
+                folderId: destFolderId,
+                statusId: doc2.status_id ?? null
               });
             }
           };
@@ -34246,6 +35410,247 @@ if (!db) {
             }
           }
           return createdRoot;
+        },
+        async reorderFolders(moves = []) {
+          if (!Array.isArray(moves) || !moves.length) return;
+          const normalizedMoves = moves.map((move) => ({
+            id: Number(move?.id),
+            parentId: move?.parentId == null ? null : Number(move.parentId),
+            order: Number(move?.order)
+          })).filter((move) => Number.isFinite(move.id));
+          if (!normalizedMoves.length) return;
+          const now = (/* @__PURE__ */ new Date()).toISOString();
+          await txRunFolders("readwrite", (store) => new Promise((resolve, reject) => {
+            let index = 0;
+            const processNext = () => {
+              if (index >= normalizedMoves.length) {
+                resolve(true);
+                return;
+              }
+              const move = normalizedMoves[index++];
+              const getReq = store.get(move.id);
+              getReq.onsuccess = () => {
+                const row = getReq.result;
+                if (!row) {
+                  processNext();
+                  return;
+                }
+                const updated = {
+                  ...row,
+                  parent_id: move.parentId == null ? null : move.parentId,
+                  order_index: Number.isFinite(move.order) ? move.order : row.order_index ?? 0,
+                  updated_at: now
+                };
+                const putReq = store.put(updated);
+                putReq.onsuccess = () => processNext();
+                putReq.onerror = () => reject(putReq.error);
+              };
+              getReq.onerror = () => reject(getReq.error);
+            };
+            processNext();
+          }));
+        },
+        async listStatuses() {
+          const rows = await txRunStatuses("readonly", (store) => new Promise((resolve, reject) => {
+            const req = store.getAll();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => reject(req.error);
+          }));
+          rows.sort((a, b) => {
+            const orderDiff = (a.order_index ?? 0) - (b.order_index ?? 0);
+            if (orderDiff !== 0) return orderDiff;
+            return (a.id ?? 0) - (b.id ?? 0);
+          });
+          return rows.map(normalizeStatusRecord);
+        },
+        async createStatus({ name: name2, color } = {}) {
+          const trimmed = String(name2 ?? "").trim();
+          if (!trimmed) throw new Error("Status name required");
+          if (trimmed.toLowerCase() === DEFAULT_WRITER_STATUS_NAME.toLowerCase()) {
+            throw new Error("That status name is reserved");
+          }
+          const lower = trimmed.toLowerCase();
+          const colorValue = normalizeStatusColorValue(color);
+          const existing = await txRunStatuses("readonly", (store) => new Promise((resolve, reject) => {
+            if (!store.indexNames.contains("name_lower")) {
+              resolve(null);
+              return;
+            }
+            const req = store.index("name_lower").get(lower);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => reject(req.error);
+          }));
+          if (existing) throw new Error("A status with that name already exists");
+          const statuses = await this.listStatuses();
+          const maxOrder = statuses.reduce((max, status) => Math.max(max, status.order_index ?? 0), 0);
+          const nextOrder = maxOrder + 1;
+          const now = (/* @__PURE__ */ new Date()).toISOString();
+          const created = await txRunStatuses("readwrite", (store) => new Promise((resolve, reject) => {
+            const addReq = store.add({
+              name: trimmed,
+              name_lower: lower,
+              color: colorValue,
+              is_builtin: 0,
+              order_index: nextOrder,
+              created_at: now,
+              updated_at: now
+            });
+            addReq.onsuccess = () => resolve({ id: addReq.result, name: trimmed, color: colorValue, is_builtin: 0, order_index: nextOrder });
+            addReq.onerror = () => reject(addReq.error);
+          }));
+          return normalizeStatusRecord(created);
+        },
+        async updateStatus(id2, updates = {}) {
+          const key = Number(id2);
+          if (!Number.isFinite(key)) throw new Error("Status id required");
+          const target = await txRunStatuses("readonly", (store) => new Promise((resolve, reject) => {
+            const req = store.get(key);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => reject(req.error);
+          }));
+          if (!target) throw new Error("Status not found");
+          if (target.is_builtin) throw new Error("Cannot modify this status");
+          let newName = null;
+          if (typeof updates.name === "string") {
+            const trimmed = updates.name.trim();
+            if (trimmed) {
+              const lower = trimmed.toLowerCase();
+              const conflict = await txRunStatuses("readonly", (store) => new Promise((resolve, reject) => {
+                if (!store.indexNames.contains("name_lower")) {
+                  resolve(null);
+                  return;
+                }
+                const req = store.index("name_lower").get(lower);
+                req.onsuccess = () => resolve(req.result && req.result.id !== key ? req.result : null);
+                req.onerror = () => reject(req.error);
+              }));
+              if (conflict) throw new Error("A status with that name already exists");
+              newName = trimmed;
+            }
+          }
+          const newColor = updates.color == null ? null : normalizeStatusColorValue(updates.color, { allowTransparent: true });
+          const now = (/* @__PURE__ */ new Date()).toISOString();
+          const updated = await txRunStatuses("readwrite", (store) => new Promise((resolve, reject) => {
+            const getReq = store.get(key);
+            getReq.onsuccess = () => {
+              const existing = getReq.result;
+              if (!existing) {
+                reject(new Error("Status not found"));
+                return;
+              }
+              if (existing.is_builtin) {
+                reject(new Error("Cannot modify this status"));
+                return;
+              }
+              const next = {
+                ...existing,
+                name: newName || existing.name,
+                name_lower: (newName || existing.name).toLowerCase(),
+                color: newColor || existing.color,
+                updated_at: now
+              };
+              const putReq = store.put(next);
+              putReq.onsuccess = () => resolve(next);
+              putReq.onerror = () => reject(putReq.error);
+            };
+            getReq.onerror = () => reject(getReq.error);
+          }));
+          return normalizeStatusRecord(updated);
+        },
+        async deleteStatus(id2) {
+          const key = Number(id2);
+          if (!Number.isFinite(key)) throw new Error("Status id required");
+          const target = await txRunStatuses("readonly", (store) => new Promise((resolve, reject) => {
+            const req = store.get(key);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => reject(req.error);
+          }));
+          if (!target) return { deleted: 0 };
+          if (target.is_builtin) throw new Error("Cannot delete this status");
+          const defaultId = await ensureWriterDefaultStatusId();
+          const now = (/* @__PURE__ */ new Date()).toISOString();
+          await txRunWriter("readwrite", (store) => new Promise((resolve, reject) => {
+            const cursor = store.openCursor();
+            cursor.onsuccess = () => {
+              const cur = cursor.result;
+              if (!cur) {
+                resolve(true);
+                return;
+              }
+              const value = cur.value || {};
+              if (value.status_id === key) {
+                value.status_id = defaultId;
+                value.updated_at = now;
+                const updateReq = cur.update(value);
+                updateReq.onsuccess = () => cur.continue();
+                updateReq.onerror = () => reject(updateReq.error);
+              } else {
+                cur.continue();
+              }
+            };
+            cursor.onerror = () => reject(cursor.error);
+          }));
+          await txRunStatuses("readwrite", (store) => new Promise((resolve, reject) => {
+            const delReq = store.delete(key);
+            delReq.onsuccess = () => resolve(true);
+            delReq.onerror = () => reject(delReq.error);
+          }));
+          return { deleted: 1 };
+        },
+        async setStatus(id2, statusId) {
+          const key = Number(id2);
+          if (!Number.isFinite(key)) throw new Error("Writer document id required");
+          const resolved = await resolveWriterStatusId(statusId);
+          const now = (/* @__PURE__ */ new Date()).toISOString();
+          const updated = await txRunWriter("readwrite", (store) => new Promise((resolve, reject) => {
+            const req = store.get(key);
+            req.onsuccess = () => {
+              const existing = req.result;
+              if (!existing) {
+                reject(new Error("Document not found"));
+                return;
+              }
+              const next = {
+                ...existing,
+                status_id: resolved,
+                updated_at: now
+              };
+              const putReq = store.put(next);
+              putReq.onsuccess = () => resolve(next);
+              putReq.onerror = () => reject(putReq.error);
+            };
+            req.onerror = () => reject(req.error);
+          }));
+          const defaultStatusId = await ensureWriterDefaultStatusId();
+          return normalizeWriterDocRow(updated, defaultStatusId);
+        },
+        async reorderStatuses(order = []) {
+          const ids = Array.isArray(order) ? order.map(Number).filter((id2) => Number.isFinite(id2) && id2 > 0) : [];
+          if (!ids.length) return { updated: 0 };
+          return txRunStatuses("readwrite", (store) => new Promise((resolve, reject) => {
+            let index = 0;
+            const step = () => {
+              if (index >= ids.length) {
+                resolve({ updated: ids.length });
+                return;
+              }
+              const id2 = ids[index++];
+              const getReq = store.get(id2);
+              getReq.onsuccess = () => {
+                const row = getReq.result;
+                if (!row || row.is_builtin) {
+                  step();
+                  return;
+                }
+                row.order_index = index - 1;
+                const putReq = store.put(row);
+                putReq.onsuccess = () => step();
+                putReq.onerror = () => reject(putReq.error);
+              };
+              getReq.onerror = () => reject(getReq.error);
+            };
+            step();
+          }));
         }
       }
     };
@@ -34321,7 +35726,13 @@ if (!db) {
         createFolder: (payload = {}) => invoke("writer:create-folder", payload),
         renameFolder: (id2, name2) => invoke("writer:rename-folder", { id: id2, name: name2 }),
         deleteFolder: (id2) => invoke("writer:delete-folder", id2),
-        duplicateFolder: (id2, overrides2 = {}) => invoke("writer:duplicate-folder", { id: id2, ...overrides2 })
+        duplicateFolder: (id2, overrides2 = {}) => invoke("writer:duplicate-folder", { id: id2, ...overrides2 }),
+        listStatuses: () => invoke("writer:list-statuses"),
+        createStatus: (payload = {}) => invoke("writer:create-status", payload),
+        updateStatus: (id2, updates = {}) => invoke("writer:update-status", { id: id2, ...updates }),
+        deleteStatus: (id2) => invoke("writer:delete-status", id2),
+        setStatus: (id2, statusId) => invoke("writer:set-status", { id: id2, statusId }),
+        reorderStatuses: (order = []) => invoke("writer:reorder-statuses", { order })
       }
     };
   }
@@ -34353,7 +35764,7 @@ async function loadAutosavePreference() {
 }
 await loadAutosavePreference();
 var activeProgram = null;
-var state = {
+var state2 = {
   prompt: "user:~$",
   commands: {}
 };
@@ -34391,10 +35802,10 @@ var shell = {
   print,
   esc,
   setPrompt(p) {
-    state.prompt = p;
+    state2.prompt = p;
   },
   resetPrompt() {
-    state.prompt = "user:~$";
+    state2.prompt = "user:~$";
   },
   enter(program) {
     activeProgram = program;
@@ -34456,7 +35867,7 @@ function scrollToBottom() {
 function newline4() {
   print(
     `<div class="line">
-       <span class="prompt">${esc(state.prompt)}</span>
+       <span class="prompt">${esc(state2.prompt)}</span>
        <span class="muted">${esc(input.value)}</span>
      </div>`
   );
@@ -34489,7 +35900,7 @@ console.error = (...args) => {
   print(`<span class="error">${esc(args.join(" "))}</span>`);
 };
 function register(name2, handler, desc) {
-  state.commands[name2] = { handler, desc };
+  state2.commands[name2] = { handler, desc };
 }
 function parseArgs(str) {
   const out = [];
@@ -34506,7 +35917,7 @@ var exec = async (line) => {
     history2.push(line.trim());
     historyIndex = history2.length;
   }
-  const item = state.commands[cmd2];
+  const item = state2.commands[cmd2];
   if (!item) {
     console.error(`command not found: ${cmd2}`);
     return;
@@ -34842,8 +36253,8 @@ async function loadTextAsset(name2) {
   return await resp.text();
 }
 register("help", () => {
-  const rowsHtml = Object.keys(state.commands).sort().map((k) => {
-    const desc = state.commands[k].desc || "";
+  const rowsHtml = Object.keys(state2.commands).sort().map((k) => {
+    const desc = state2.commands[k].desc || "";
     return `<div><span class="kbd">${esc(k)}</span> \u2014 ${esc(desc)}</div>`;
   }).join("");
   print(`
@@ -35300,6 +36711,7 @@ function printExportHelp() {
         <div><span class="kbd">export YYYY</span> \u2014 export that year</div>
         <div><span class="kbd">export YYYY-MM</span> \u2014 export that month</div>
         <div><span class="kbd">export YYYY-MM-DD</span> \u2014 export that day</div>
+        <div><span class="kbd">export YYYY-MM-DD-YYYY-MM-DD</span> \u2014 export that date range</div>
         <div><span class="kbd">export ... -pdf</span> \u2014 export as <em>.pdf</em> instead of .txt</div>
         <div><span class="kbd">export -help</span> \u2014 show this help</div>
     </div>`);
@@ -35310,6 +36722,24 @@ async function gatherEntriesForExport(selector) {
     const key = `${selector.y}-${String(selector.m).padStart(2, "0")}-${String(selector.d).padStart(2, "0")}`;
     const row = await db.get(key);
     return row ? [row] : [];
+  }
+  if (selector.type === "range") {
+    const startISO = selector.startISO || `${selector.start.y}-${String(selector.start.m).padStart(2, "0")}-${String(selector.start.d).padStart(2, "0")}`;
+    const endISO = selector.endISO || `${selector.end.y}-${String(selector.end.m).padStart(2, "0")}-${String(selector.end.d).padStart(2, "0")}`;
+    if (!startISO || !endISO) return [];
+    const rows2 = [];
+    let cursor = startISO;
+    let safety = 0;
+    const maxSpan = 365 * 200;
+    while (cursor && cursor <= endISO && safety < maxSpan) {
+      const row = await db.get(cursor);
+      if (row) rows2.push(row);
+      const next = shiftISOFrom(cursor, 1);
+      if (!next || next === cursor) break;
+      cursor = next;
+      safety += 1;
+    }
+    return rows2;
   }
   if (selector.type === "month") {
     const ym = `${selector.y}-${String(selector.m).padStart(2, "0")}`;
@@ -35408,6 +36838,22 @@ function parseExportArgs(argv) {
     } else if (/^\d{4}-\d{2}-\d{2}$/.test(a0)) {
       const [y, m, d] = a0.split("-").map((n) => Number(n));
       opts.target = { type: "day", y, m, d };
+    } else if (/^\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}$/.test(a0)) {
+      const parts = a0.split("-").map((n) => Number(n));
+      if (parts.length === 6) {
+        const start = { y: parts[0], m: parts[1], d: parts[2] };
+        const end = { y: parts[3], m: parts[4], d: parts[5] };
+        const startISO = `${String(start.y).padStart(4, "0")}-${String(start.m).padStart(2, "0")}-${String(start.d).padStart(2, "0")}`;
+        const endISO = `${String(end.y).padStart(4, "0")}-${String(end.m).padStart(2, "0")}-${String(end.d).padStart(2, "0")}`;
+        const valid = isValidISO(start.y, start.m, start.d) && isValidISO(end.y, end.m, end.d);
+        if (!valid || startISO > endISO) {
+          opts.invalid = a0;
+        } else {
+          opts.target = { type: "range", start, end, startISO, endISO };
+        }
+      } else {
+        opts.invalid = a0;
+      }
     } else if (a0.length) {
       opts.invalid = a0;
     }
@@ -35421,7 +36867,7 @@ register("export", async (argv = []) => {
     return;
   }
   if (parsed.invalid) {
-    print(`<div class="error">Invalid argument for export: ${esc(parsed.invalid)}<br>Use none, -a, YYYY, YYYY-MM, YYYY-MM-DD, optional -pdf, or -help.</div>`);
+    print(`<div class="error">Invalid argument for export: ${esc(parsed.invalid)}<br>Use none, -a, YYYY, YYYY-MM, YYYY-MM-DD, YYYY-MM-DD-YYYY-MM-DD, optional -pdf, or -help.</div>`);
     return;
   }
   const rows = await gatherEntriesForExport(parsed.target);
@@ -35440,6 +36886,10 @@ register("export", async (argv = []) => {
     base2 = `console-journal-${String(parsed.target.y)}-${String(parsed.target.m).padStart(2, "0")}`;
   } else if (parsed.target.type === "year") {
     base2 = `console-journal-${String(parsed.target.y)}`;
+  } else if (parsed.target.type === "range") {
+    const startISO = parsed.target.startISO || `${String(parsed.target.start?.y ?? "").padStart(4, "0")}-${String(parsed.target.start?.m ?? "").padStart(2, "0")}-${String(parsed.target.start?.d ?? "").padStart(2, "0")}`;
+    const endISO = parsed.target.endISO || `${String(parsed.target.end?.y ?? "").padStart(4, "0")}-${String(parsed.target.end?.m ?? "").padStart(2, "0")}-${String(parsed.target.end?.d ?? "").padStart(2, "0")}`;
+    base2 = `console-journal-${startISO}_to_${endISO}`;
   } else if (parsed.target.type === "all") {
     base2 = "console-journal-ALL";
   } else {

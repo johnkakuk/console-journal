@@ -653,7 +653,8 @@ export function startEditor(shell, opts = {}) {
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            minWidth: '2ch',
+            minWidth: 'calc(var(--editor-line-height, 1.5) * 0.9em)',
+            minHeight: 'calc(var(--editor-line-height, 1.5) * 0.9em)',
             cursor: 'pointer',
             background: 'transparent',
             zIndex: 2,
@@ -673,7 +674,7 @@ export function startEditor(shell, opts = {}) {
             display: 'grid',
             gridTemplateColumns: 'calc(var(--list-indent-ch, 0) * 1ch) calc(var(--list-marker-ch, 2) * 1ch) minmax(0, 1fr)',
             columnGap: 'calc(var(--list-gap-ch, 0.5) * 1ch)',
-            alignItems: 'start'
+            alignItems: 'center'
         },
         '.cm-line.cm-list-line .cm-list-indent': {
             gridColumn: '1',
@@ -682,8 +683,9 @@ export function startEditor(shell, opts = {}) {
         },
         '.cm-line.cm-list-line .cm-list-marker': {
             gridColumn: '2',
-            display: 'block',
-            justifySelf: 'end',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
             whiteSpace: 'pre',
             textAlign: 'right',
             fontVariantNumeric: 'tabular-nums lining-nums',

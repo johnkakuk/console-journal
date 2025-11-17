@@ -24,6 +24,7 @@ export const THEME_VAR_WHITELIST = [
     '--font-ui',
     '--font-mono',
     '--font-editor',
+    '--font-writer',
     '--base-font-size',
     '--editor-font-size',
     '--editor-line-height',
