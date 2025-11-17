@@ -28313,10 +28313,12 @@ function getScrollContainer(view) {
   }
   return view.scrollDOM;
 }
+var INIT_SCROLL_SUPPRESS = /* @__PURE__ */ new WeakSet();
 var snapOutOfView = EditorView.updateListener.of((update) => {
   if (!(update.docChanged || update.selectionSet)) return;
   if (hasPointerUserEvent2(update)) return;
   const view = update.view;
+  if (INIT_SCROLL_SUPPRESS.has(view)) return;
   const scroller = getScrollContainer(view);
   if (!scroller) return;
   requestAnimationFrame(() => {
@@ -28512,7 +28514,19 @@ function dynamicScrollerPadding() {
     }
   });
 }
-var INIT_SCROLL_SUPPRESS = /* @__PURE__ */ new WeakSet();
+function getTypewriterTopOffset(scroller) {
+  if (!scroller) return 0;
+  try {
+    const styles = getComputedStyle(scroller);
+    const toNumber = (value) => {
+      const parsed = parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    return Math.max(0, toNumber(styles.paddingTop) + toNumber(styles.marginTop));
+  } catch (_) {
+    return 0;
+  }
+}
 function showToast(message, variant = "info", id2 = "writerToast") {
   try {
     const prev = id2 ? document.getElementById(id2) : null;
@@ -30417,21 +30431,55 @@ function startWriter(shell2, opts = {}) {
   function setEditorContent(content2, title, snapshotOverride, options2 = {}) {
     if (!state3.cmView) return;
     const doc2 = typeof content2 === "string" ? content2 : "";
-    const desiredScrollTopRaw = typeof options2.scrollTop === "number" ? options2.scrollTop : 0;
-    const desiredScrollTop = Number.isFinite(desiredScrollTopRaw) ? Math.max(0, desiredScrollTopRaw) : 0;
+    const explicitScrollTop = typeof options2.scrollTop === "number" && Number.isFinite(options2.scrollTop) ? Math.max(0, options2.scrollTop) : null;
     state3.cmView.dispatch({
       changes: { from: 0, to: state3.cmView.state.doc.length, insert: doc2 }
     });
     const docLen = state3.cmView.state.doc.length;
     state3.cmView.dispatch({ selection: { anchor: docLen }, scrollIntoView: true });
-    requestAnimationFrame(() => {
-      const scroller = getScrollContainer(state3.cmView);
-      if (!scroller) return;
-      scroller.scrollTop = desiredScrollTop;
+    const finalizeInitialScroll = () => {
       requestAnimationFrame(() => {
         INIT_SCROLL_SUPPRESS.delete(state3.cmView);
       });
-    });
+    };
+    const MAX_SCROLL_ATTEMPTS = 8;
+    const scheduleInitialScroll = (attempt = 0) => {
+      const delay = attempt ? 50 : 0;
+      setTimeout(() => {
+        const scroller = getScrollContainer(state3.cmView);
+        if (!scroller) {
+          finalizeInitialScroll();
+          return;
+        }
+        if (explicitScrollTop != null) {
+          scroller.scrollTop = explicitScrollTop;
+          finalizeInitialScroll();
+          return;
+        }
+        const line = scroller.querySelector(".cm-line");
+        if (line instanceof HTMLElement) {
+          try {
+            line.scrollIntoView({ behavior: "instant", block: "start", inline: "nearest" });
+            finalizeInitialScroll();
+            return;
+          } catch (_) {
+          }
+        }
+        const fallback = getTypewriterTopOffset(scroller);
+        if (fallback > 1) {
+          scroller.scrollTop = fallback;
+          finalizeInitialScroll();
+          return;
+        }
+        if (attempt < MAX_SCROLL_ATTEMPTS) {
+          scheduleInitialScroll(attempt + 1);
+          return;
+        }
+        scroller.scrollTop = Math.max(0, fallback);
+        finalizeInitialScroll();
+      }, delay);
+    };
+    scheduleInitialScroll();
     state3.cmView.focus();
     state3.cmView.dispatch({ selection: { anchor: 0 } });
     state3.savedSnapshot = typeof snapshotOverride === "string" ? snapshotOverride : doc2;
@@ -30457,6 +30505,13 @@ function startWriter(shell2, opts = {}) {
       setEditorContent(doc2.content || "", doc2.title || "Untitled Document", doc2.content || "", { scrollTop: savedScroll });
       updateWordCountFromText(doc2.content || "");
       setEmptyOverlayVisible(false);
+      if (!savedScroll) {
+        setTimeout(() => {
+          const content2 = document.querySelector(".cm-content");
+          content2.style.scrollMarginTop = "5ch";
+          content2.scrollIntoView({ behavior: "instant", block: "start" });
+        }, 1);
+      }
     } catch (err) {
       shell2.print(`<div class="error">Unable to open document: ${esc2(err?.message || err)}</div>`);
     }

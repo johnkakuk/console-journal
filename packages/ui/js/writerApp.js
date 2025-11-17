@@ -349,10 +349,13 @@ function getScrollContainer(view) {
     }
     return view.scrollDOM;
 }
+const INIT_SCROLL_SUPPRESS = new WeakSet();
+
 const snapOutOfView = EditorView.updateListener.of((update) => {
     if (!(update.docChanged || update.selectionSet)) return;
     if (hasPointerUserEvent(update)) return;
     const view = update.view;
+    if (INIT_SCROLL_SUPPRESS.has(view)) return;
     const scroller = getScrollContainer(view);
     if (!scroller) return;
     requestAnimationFrame(() => {
@@ -554,7 +557,20 @@ function dynamicScrollerPadding() {
     });
 }
 
-const INIT_SCROLL_SUPPRESS = new WeakSet();
+function getTypewriterTopOffset(scroller) {
+    if (!scroller) return 0;
+    try {
+        const styles = getComputedStyle(scroller);
+        const toNumber = (value) => {
+            const parsed = parseFloat(value);
+            return Number.isFinite(parsed) ? parsed : 0;
+        };
+        // Include margin to cover custom themes that expand the buffer area.
+        return Math.max(0, toNumber(styles.paddingTop) + toNumber(styles.marginTop));
+    } catch (_) {
+        return 0;
+    }
+}
 
 function showToast(message, variant = 'info', id = 'writerToast') {
     try {
@@ -2602,21 +2618,56 @@ function ensureFileAreaContextMenu() {
     function setEditorContent(content, title, snapshotOverride, options = {}) {
         if (!state.cmView) return;
         const doc = typeof content === 'string' ? content : '';
-        const desiredScrollTopRaw = typeof options.scrollTop === 'number' ? options.scrollTop : 0;
-        const desiredScrollTop = Number.isFinite(desiredScrollTopRaw) ? Math.max(0, desiredScrollTopRaw) : 0;
+        const explicitScrollTop = typeof options.scrollTop === 'number' && Number.isFinite(options.scrollTop)
+            ? Math.max(0, options.scrollTop)
+            : null;
         state.cmView.dispatch({
             changes: { from: 0, to: state.cmView.state.doc.length, insert: doc }
         });
         const docLen = state.cmView.state.doc.length;
         state.cmView.dispatch({ selection: { anchor: docLen }, scrollIntoView: true });
-        requestAnimationFrame(() => {
-            const scroller = getScrollContainer(state.cmView);
-            if (!scroller) return;
-            scroller.scrollTop = desiredScrollTop;
+        const finalizeInitialScroll = () => {
             requestAnimationFrame(() => {
                 INIT_SCROLL_SUPPRESS.delete(state.cmView);
             });
-        });
+        };
+        const MAX_SCROLL_ATTEMPTS = 8;
+        const scheduleInitialScroll = (attempt = 0) => {
+            const delay = attempt ? 50 : 0;
+            setTimeout(() => {
+                const scroller = getScrollContainer(state.cmView);
+                if (!scroller) {
+                    finalizeInitialScroll();
+                    return;
+                }
+                if (explicitScrollTop != null) {
+                    scroller.scrollTop = explicitScrollTop;
+                    finalizeInitialScroll();
+                    return;
+                }
+                const line = scroller.querySelector('.cm-line');
+                if (line instanceof HTMLElement) {
+                    try {
+                        line.scrollIntoView({ behavior: 'instant', block: 'start', inline: 'nearest' });
+                        finalizeInitialScroll();
+                        return;
+                    } catch (_) {}
+                }
+                const fallback = getTypewriterTopOffset(scroller);
+                if (fallback > 1) {
+                    scroller.scrollTop = fallback;
+                    finalizeInitialScroll();
+                    return;
+                }
+                if (attempt < MAX_SCROLL_ATTEMPTS) {
+                    scheduleInitialScroll(attempt + 1);
+                    return;
+                }
+                scroller.scrollTop = Math.max(0, fallback);
+                finalizeInitialScroll();
+            }, delay);
+        };
+        scheduleInitialScroll();
         state.cmView.focus();
         state.cmView.dispatch({ selection: { anchor: 0 } });
         state.savedSnapshot = typeof snapshotOverride === 'string' ? snapshotOverride : doc;
@@ -2643,6 +2694,13 @@ function ensureFileAreaContextMenu() {
             setEditorContent(doc.content || '', doc.title || 'Untitled Document', doc.content || '', { scrollTop: savedScroll });
             updateWordCountFromText(doc.content || '');
             setEmptyOverlayVisible(false);
+            if(!savedScroll) {
+                setTimeout(() => {
+                    const content = document.querySelector('.cm-content');
+                    content.style.scrollMarginTop = '5ch';
+                    content.scrollIntoView({ behavior: 'instant', block: 'start' }); 
+                }, 1)
+            }
         } catch (err) {
             shell.print(`<div class="error">Unable to open document: ${esc(err?.message || err)}</div>`);
         }
