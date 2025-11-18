@@ -1,13 +1,12 @@
 /* ==== editor.js — Minimal inline writer (subprogram) ======================= */
-import { EditorState, RangeSetBuilder, Transaction, EditorSelection } from '@codemirror/state';
-import { EditorView, keymap, drawSelection, highlightActiveLine, Decoration, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { markdown } from '@codemirror/lang-markdown';
+import { EditorState, RangeSetBuilder, Transaction, EditorSelection, Prec } from '@codemirror/state';
+import { EditorView, keymap, drawSelection, highlightActiveLine, Decoration, ViewPlugin, ViewUpdate } from '@codemirror/view';
+import { defaultKeymap, history, historyKeymap, indentLess, indentMore } from '@codemirror/commands';
+import { markdown, markdownKeymap } from '@codemirror/lang-markdown';
 import { indentOnInput, indentUnit, syntaxHighlighting, HighlightStyle } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import { search, searchKeymap, openSearchPanel, findNext, findPrevious } from '@codemirror/search';
 import { normalizeTemplateSchedule, cloneTemplateSchedule, isISODate } from './schedule.js';
-import { listLayoutPlugin, createListKeymap, listRenumberListener, listTodoAutoComplete } from './listLayout.js';
 
 const SELECTION_BG = 'var(--editor-selection-bg, color-mix(in srgb, var(--editor-fg, #000) 25%, var(--editor-bg, #fff)))';
 const SELECTION_FG = 'var(--editor-selection-fg, var(--editor-fg, #000))';
@@ -21,25 +20,6 @@ function hasPointerUserEvent(update) {
         const lowered = userEvent.toLowerCase();
         return lowered.includes('pointer') || lowered.includes('mouse');
     });
-}
-
-// Widget for clickable overlay on the [ ] or [x] in todo list
-class TodoClickTargetWidget extends WidgetType {
-    constructor() { super(); }
-    toDOM() {
-        const span = document.createElement('span');
-        span.className = 'todo-click-target';
-        // The span overlays the bracket area, but doesn't alter text
-        span.style.position = 'absolute';
-        span.style.top = '0';
-        span.style.left = '0';
-        span.style.width = '100%';
-        span.style.height = '100%';
-        span.style.pointerEvents = 'auto';
-        // No content; pseudo-element or background can be styled
-        return span;
-    }
-    ignoreEvent() { return false; }
 }
 
 const todoDecorationPlugin = ViewPlugin.fromClass(class {
@@ -57,21 +37,18 @@ const todoDecorationPlugin = ViewPlugin.fromClass(class {
             let endLine = view.state.doc.lineAt(to).number;
             for (let i = startLine; i <= endLine; ++i) {
                 const line = view.state.doc.line(i);
-                const todoPrefixMatch = line.text.match(/^(\s*[-*]\s+\[( |x)\]\s*)/);
-                if (todoPrefixMatch) {
-                    const isChecked = todoPrefixMatch[2] === 'x';
-                    const lineClasses = ['todo-line'];
-                    if (isChecked) lineClasses.push('completed');
-                    const lineSpec = { class: lineClasses.join(' ') };
-                    builder.add(
-                        line.from,
-                        line.from,
-                        Decoration.line(lineSpec)
-                    );
-
+                const match = line.text.match(/^\s*[-*]\s+\[( |x)\]/);
+                if (match) {
                     const bracketStart = line.text.indexOf('[');
                     const bracketEnd = line.text.indexOf(']', bracketStart);
                     if (bracketStart !== -1 && bracketEnd !== -1) {
+                        if (match[1] === 'x') {
+                            builder.add(
+                                line.from,
+                                line.from,
+                                Decoration.line({ class: 'completed' })
+                            );
+                        }
                         // 1) Bracket click-target span
                         const decoFrom = line.from + bracketStart;
                         const decoTo = line.from + bracketEnd + 1;
@@ -81,8 +58,6 @@ const todoDecorationPlugin = ViewPlugin.fromClass(class {
                             Decoration.mark({ class: 'todo-click-target' })
                         );
 
-                        // 2) Trailing text span after "]"
-                        // Skip spaces after closing bracket so they belong to the left segment (the brackets)
                         const spaceAfter = line.text.slice(bracketEnd + 1).match(/^\s*/)[0].length;
                         const contentStart = line.from + bracketEnd + 1 + spaceAfter;
                         if (contentStart < line.to) {
@@ -650,11 +625,6 @@ export function startEditor(shell, opts = {}) {
         // --- To-do clickable overlay style ---
         '.todo-click-target': {
             position: 'relative',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            minWidth: 'calc(var(--editor-line-height, 1.5) * 0.9em)',
-            minHeight: 'calc(var(--editor-line-height, 1.5) * 0.9em)',
             cursor: 'pointer',
             background: 'transparent',
             zIndex: 2,
@@ -669,41 +639,7 @@ export function startEditor(shell, opts = {}) {
             transition: 'opacity 0.1s',
             pointerEvents: 'none'
         },
-        '.todo-click-target:hover::after': { opacity: 1 },
-        '.cm-line.cm-list-line': {
-            display: 'grid',
-            gridTemplateColumns: 'calc(var(--list-indent-ch, 0) * 1ch) calc(var(--list-marker-ch, 2) * 1ch) minmax(0, 1fr)',
-            columnGap: 'calc(var(--list-gap-ch, 0.5) * 1ch)',
-            alignItems: 'center'
-        },
-        '.cm-line.cm-list-line .cm-list-indent': {
-            gridColumn: '1',
-            display: 'block',
-            whiteSpace: 'pre'
-        },
-        '.cm-line.cm-list-line .cm-list-marker': {
-            gridColumn: '2',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'flex-end',
-            whiteSpace: 'pre',
-            textAlign: 'right',
-            fontVariantNumeric: 'tabular-nums lining-nums',
-            fontFeatureSettings: '"tnum" 1, "lnum" 1',
-            opacity: 0.85,
-            userSelect: 'none'
-        },
-        '.cm-line.cm-list-line .cm-list-content': {
-            gridColumn: '3',
-            minWidth: 0,
-            whiteSpace: 'pre-wrap',
-            lineHeight: '1.5',
-            wordBreak: 'break-word'
-        },
-        '.cm-line.cm-list-line .cm-list-content[data-list-empty="true"]': {
-            minHeight: '1.2em',
-            display: 'block'
-        }
+        '.todo-click-target:hover::after': { opacity: 1 }
     }, { dark: true });
 
     // Syntax highlight accents for Markdown (conservative)
@@ -914,6 +850,72 @@ export function startEditor(shell, opts = {}) {
     // --- Indentation config & smart Tab for Markdown lists/quotes -------------
     const INDENT = '  '; // two spaces per nesting level
     const indentConfig = indentUnit.of(INDENT);
+    const LIST_START_RE = /^\s*(?:[-+*]\s|\d+\.\s|>\s)/;
+
+    function linesInSelection(state) {
+        const seen = new Set();
+        const out = [];
+        for (const range of state.selection.ranges) {
+            let line = state.doc.lineAt(range.from).number;
+            const endLine = state.doc.lineAt(range.to).number;
+            for (; line <= endLine; line++) {
+                if (!seen.has(line)) {
+                    seen.add(line);
+                    out.push(line);
+                }
+            }
+        }
+        return out;
+    }
+
+    const smartListTabKeymap = keymap.of([
+        {
+            key: 'Tab',
+            preventDefault: true,
+            run: (view) => {
+                const { state } = view;
+                const lines = linesInSelection(state);
+                if (lines.length && lines.every(n => LIST_START_RE.test(state.doc.line(n).text))) {
+                    const changes = lines.map(n => {
+                        const ln = state.doc.line(n);
+                        return { from: ln.from, to: ln.from, insert: INDENT };
+                    });
+                    view.dispatch({ changes, scrollIntoView: true });
+                    return true;
+                }
+                return indentMore(view);
+            }
+        },
+        {
+            key: 'Shift-Tab',
+            preventDefault: true,
+            run: (view) => {
+                const { state } = view;
+                const lines = linesInSelection(state);
+                if (!lines.length) return indentLess(view);
+                if (lines.every(n => /^\s+/.test(state.doc.line(n).text))) {
+                    const changes = [];
+                    for (const n of lines) {
+                        const ln = state.doc.line(n);
+                        const text = ln.text;
+                        if (!LIST_START_RE.test(text)) return indentLess(view);
+                        let remove = 0;
+                        while (remove < INDENT.length && remove < text.length && text[remove] === ' ') {
+                            remove++;
+                        }
+                        if (remove > 0) {
+                            changes.push({ from: ln.from, to: ln.from + remove, insert: '' });
+                        }
+                    }
+                    if (changes.length) {
+                        view.dispatch({ changes, scrollIntoView: true });
+                        return true;
+                    }
+                }
+                return indentLess(view);
+            }
+        }
+    ]);
 
     // Dynamically maintain top/bottom padding in the CodeMirror scroller based on its height.
     function dynamicScrollerPadding() {
@@ -1001,11 +1003,9 @@ export function startEditor(shell, opts = {}) {
             history(),
             todoPlugin,
             markdownIndicatorPlugin,
-            listLayoutPlugin,
-            listRenumberListener,
-            listTodoAutoComplete,
             indentConfig,
-            createListKeymap(INDENT),
+            smartListTabKeymap,
+            Prec.high(keymap.of(markdownKeymap)),
             keymap.of([
                 ...CUSTOM_DEFAULT_KEYMAP,
                 ...historyKeymap,

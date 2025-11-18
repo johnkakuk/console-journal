@@ -25951,448 +25951,6 @@ function matchTemplateSchedule(schedule, dateStr) {
   return null;
 }
 
-// packages/ui/js/listLayout.js
-var ORDERED_LIST_RE = /^(\s*)(\d+)([.)])(\s+)(.*)$/;
-var TODO_LIST_RE = /^(\s*)([-*])(\s+)\[( |x|X)\](\s*)(.*)$/;
-var UNORDERED_LIST_RE = /^(\s*)([-+*])(\s+)(.*)$/;
-var LIST_GAP_CH = 0.5;
-var TODO_AUTOCOMPLETE_PREFIX_RE = /^\s*[-*]\s+$/;
-var TODO_AUTOCOMPLETE_SUFFIX_RE = /^\s*\]/;
-var todoAutoCompleteAnnotation = Annotation.define();
-function countLeadingSpaces(text) {
-  const match = text.match(/^\s*/);
-  return match ? match[0].length : 0;
-}
-function linesInSelection(state3) {
-  const seen = /* @__PURE__ */ new Set();
-  const out = [];
-  for (const r of state3.selection.ranges) {
-    let line = state3.doc.lineAt(r.from).number;
-    const endLine = state3.doc.lineAt(r.to).number;
-    for (; line <= endLine; line++) {
-      if (!seen.has(line)) {
-        seen.add(line);
-        out.push(line);
-      }
-    }
-  }
-  return out;
-}
-function parseListLine(text) {
-  if (!text) return null;
-  const todo = text.match(TODO_LIST_RE);
-  if (todo) {
-    const indent = todo[1] || "";
-    const bullet2 = todo[2];
-    const gap = todo[3] || " ";
-    const mark = todo[4] || " ";
-    const after = todo[5] ?? "";
-    const rest = todo[6] ?? "";
-    const markerCore = `${bullet2}${gap}[${mark}]`;
-    const markerLength = markerCore.length;
-    const markerEnd = indent.length + markerLength;
-    return {
-      type: "todo",
-      indent,
-      indentLength: indent.length,
-      bullet: bullet2,
-      spacing: gap,
-      checked: mark.toLowerCase() === "x",
-      afterBracket: after,
-      content: rest,
-      contentStart: markerEnd + after.length,
-      markerLength,
-      markerEnd
-    };
-  }
-  const ordered = text.match(ORDERED_LIST_RE);
-  if (ordered) {
-    const indent = ordered[1] || "";
-    const numberText = ordered[2];
-    const markerChar = ordered[3];
-    const gap = ordered[4] || " ";
-    const rest = ordered[5] ?? "";
-    const prefix = indent + numberText + markerChar + gap;
-    const markerLength = prefix.length - indent.length;
-    const markerEnd = indent.length + markerLength;
-    return {
-      type: "ordered",
-      indent,
-      indentLength: indent.length,
-      number: Number(numberText),
-      numberText,
-      markerChar,
-      spacing: gap,
-      content: rest,
-      contentStart: prefix.length,
-      markerLength,
-      markerEnd
-    };
-  }
-  const unordered = text.match(UNORDERED_LIST_RE);
-  if (unordered) {
-    const indent = unordered[1] || "";
-    const bullet2 = unordered[2];
-    const gap = unordered[3] || " ";
-    const rest = unordered[4] ?? "";
-    const prefix = indent + bullet2 + gap;
-    const markerLength = prefix.length - indent.length;
-    const markerEnd = indent.length + markerLength;
-    return {
-      type: "unordered",
-      indent,
-      indentLength: indent.length,
-      bullet: bullet2,
-      spacing: gap,
-      content: rest,
-      contentStart: prefix.length,
-      markerLength,
-      markerEnd
-    };
-  }
-  return null;
-}
-function makeListPrefix(parsed, overrides2 = {}) {
-  const indent = overrides2.indent ?? parsed.indent;
-  switch (parsed.type) {
-    case "ordered": {
-      const number2 = overrides2.number ?? 1;
-      const spacing = parsed.spacing && parsed.spacing.length ? parsed.spacing : " ";
-      return `${indent}${number2}${parsed.markerChar}${spacing}`;
-    }
-    case "unordered": {
-      const spacing = parsed.spacing && parsed.spacing.length ? parsed.spacing : " ";
-      const bullet2 = overrides2.bullet ?? parsed.bullet;
-      return `${indent}${bullet2}${spacing}`;
-    }
-    case "todo": {
-      const spacing = parsed.spacing && parsed.spacing.length ? parsed.spacing : " ";
-      const afterBracket = overrides2.afterBracket ?? (parsed.afterBracket && parsed.afterBracket.length ? parsed.afterBracket : " ");
-      const bullet2 = overrides2.bullet ?? parsed.bullet;
-      const checked = overrides2.checked === true ? "x" : " ";
-      return `${indent}${bullet2}${spacing}[${checked}]${afterBracket}`;
-    }
-    default:
-      return indent;
-  }
-}
-function listEnterCommandFactory(indentString2) {
-  return function listEnterCommand(view) {
-    const { state: state3 } = view;
-    if (state3.selection.ranges.length !== 1) return false;
-    const range = state3.selection.main;
-    if (!range.empty) return false;
-    const line = state3.doc.lineAt(range.head);
-    const parsed = parseListLine(line.text);
-    if (!parsed) return false;
-    const cursorOffset = range.head - line.from;
-    if (cursorOffset < parsed.contentStart) {
-      const target = line.from + parsed.contentStart;
-      if (range.head !== target) {
-        view.dispatch({
-          selection: EditorSelection.cursor(target),
-          scrollIntoView: true
-        });
-      }
-      return true;
-    }
-    const content2 = line.text.slice(parsed.contentStart).trim();
-    if (!content2) {
-      const parentIndentLength = Math.max(0, parsed.indentLength - indentString2.length);
-      const parentIndent = parsed.indent.slice(0, parentIndentLength);
-      const removeTo = line.from + parsed.contentStart;
-      view.dispatch({
-        changes: { from: line.from, to: removeTo, insert: parentIndent },
-        selection: EditorSelection.cursor(line.from + parentIndentLength),
-        scrollIntoView: true,
-        annotations: Transaction.userEvent.of("input")
-      });
-      insertNewlineAndIndent(view);
-      return true;
-    }
-    const nextNumber = parsed.type === "ordered" ? parsed.number + 1 : void 0;
-    const prefix = makeListPrefix(parsed, {
-      number: nextNumber,
-      checked: false
-    });
-    const insertText = `
-${prefix}`;
-    view.dispatch({
-      changes: { from: range.from, to: range.to, insert: insertText },
-      selection: EditorSelection.cursor(range.from + insertText.length),
-      scrollIntoView: true,
-      annotations: Transaction.userEvent.of("input")
-    });
-    return true;
-  };
-}
-function listIndentCommandFactory(indentString2) {
-  return function listIndentCommand(view) {
-    const { state: state3 } = view;
-    const selectedLines = linesInSelection(state3);
-    if (!selectedLines.length) return indentMore(view);
-    const targets = [];
-    for (const lineNumber of selectedLines) {
-      const ln = state3.doc.line(lineNumber);
-      const parsed = parseListLine(ln.text);
-      if (!parsed) return indentMore(view);
-      targets.push(ln);
-    }
-    if (!targets.length) return true;
-    const changes = targets.map((ln) => ({ from: ln.from, to: ln.from, insert: indentString2 }));
-    view.dispatch({
-      changes,
-      scrollIntoView: true,
-      annotations: Transaction.userEvent.of("input")
-    });
-    return true;
-  };
-}
-function listOutdentCommandFactory(indentString2) {
-  return function listOutdentCommand(view) {
-    const { state: state3 } = view;
-    const selectedLines = linesInSelection(state3);
-    if (!selectedLines.length) return indentLess(view);
-    const changes = [];
-    for (const lineNumber of selectedLines) {
-      const ln = state3.doc.line(lineNumber);
-      const parsed = parseListLine(ln.text);
-      if (!parsed) return indentLess(view);
-      if (!parsed.indentLength) return indentLess(view);
-      const remove2 = Math.min(indentString2.length, parsed.indentLength);
-      changes.push({ from: ln.from, to: ln.from + remove2, insert: "" });
-    }
-    if (!changes.length) return true;
-    view.dispatch({
-      changes,
-      scrollIntoView: true,
-      annotations: Transaction.userEvent.of("input")
-    });
-    return true;
-  };
-}
-function createListKeymap(indentString2 = "  ") {
-  const enterCommand = listEnterCommandFactory(indentString2);
-  const indentCommand = listIndentCommandFactory(indentString2);
-  const outdentCommand = listOutdentCommandFactory(indentString2);
-  return Prec.highest(keymap.of([
-    { key: "Enter", run: enterCommand },
-    { key: "Shift-Enter", run: enterCommand },
-    {
-      key: "Tab",
-      preventDefault: true,
-      run: indentCommand
-    },
-    {
-      key: "Shift-Tab",
-      preventDefault: true,
-      run: outdentCommand
-    }
-  ]));
-}
-function analyzeListStructure(state3) {
-  const builder = new RangeSetBuilder();
-  const numberingChanges = [];
-  const doc2 = state3.doc;
-  const levels = [];
-  const allLevels = [];
-  const lineInfos = [];
-  const ensureLevel = (parsed) => {
-    const indent = parsed.indentLength;
-    const markerWidthCh = Math.max(parsed.contentStart - parsed.indentLength, parsed.markerLength);
-    while (levels.length && indent < levels[levels.length - 1].indent) {
-      levels.pop();
-    }
-    let level = levels.length ? levels[levels.length - 1] : null;
-    if (!level || indent > level.indent) {
-      level = {
-        indent,
-        type: parsed.type,
-        counter: 0,
-        maxDigits: 0,
-        markerWidth: markerWidthCh,
-        spacingWidth: parsed.spacing ? parsed.spacing.length : 1
-      };
-      levels.push(level);
-      allLevels.push(level);
-      return level;
-    }
-    if (indent === level.indent && level.type !== parsed.type) {
-      level = {
-        indent,
-        type: parsed.type,
-        counter: 0,
-        maxDigits: 0,
-        markerWidth: markerWidthCh,
-        spacingWidth: parsed.spacing ? parsed.spacing.length : 1
-      };
-      levels[levels.length - 1] = level;
-      allLevels.push(level);
-      return level;
-    }
-    if (indent === level.indent) {
-      level.markerWidth = Math.max(level.markerWidth, markerWidthCh);
-      level.spacingWidth = Math.max(level.spacingWidth, parsed.spacing ? parsed.spacing.length : 1);
-      return level;
-    }
-    return level;
-  };
-  for (let lineNo = 1; lineNo <= doc2.lines; lineNo++) {
-    const line = doc2.line(lineNo);
-    const parsed = parseListLine(line.text);
-    if (parsed) {
-      const level = ensureLevel(parsed);
-      if (parsed.type === "ordered") {
-        level.counter += 1;
-        const expected = level.counter;
-        const expectedText = String(expected);
-        level.maxDigits = Math.max(level.maxDigits, expectedText.length);
-        const markerWidthCh = Math.max(parsed.contentStart - parsed.indentLength, parsed.markerLength);
-        level.markerWidth = Math.max(level.markerWidth, markerWidthCh);
-        if (parsed.number !== expected) {
-          const numberFrom = line.from + parsed.indentLength;
-          const numberTo = numberFrom + parsed.numberText.length;
-          numberingChanges.push({ from: numberFrom, to: numberTo, insert: expectedText });
-        }
-        lineInfos.push({ line, parsed, level });
-      } else {
-        const markerWidthCh = Math.max(parsed.contentStart - parsed.indentLength, parsed.markerLength);
-        level.markerWidth = Math.max(level.markerWidth, markerWidthCh);
-        lineInfos.push({ line, parsed, level });
-      }
-    } else {
-      if (!line.text.trim().length) {
-        levels.length = 0;
-        continue;
-      }
-      const indentLen = countLeadingSpaces(line.text);
-      while (levels.length && indentLen <= levels[levels.length - 1].indent) {
-        levels.pop();
-      }
-    }
-  }
-  for (const level of allLevels) {
-    if (level.type === "ordered") {
-      const digits = Math.max(level.maxDigits, 1);
-      const spacing = Math.max(level.spacingWidth || 1, 1);
-      level.markerWidth = Math.max(level.markerWidth, digits + 1 + spacing);
-    } else if (level.type === "todo") {
-      level.markerWidth = Math.max(level.markerWidth, 5);
-    } else if (level.type === "unordered") {
-      level.markerWidth = Math.max(level.markerWidth, 2);
-    }
-  }
-  for (const info of lineInfos) {
-    const { line, parsed, level } = info;
-    const styleParts = [
-      `--list-indent-ch:${parsed.indentLength}`,
-      `--list-marker-ch:${level.markerWidth}`,
-      `--list-gap-ch:${LIST_GAP_CH}`
-    ];
-    const markerFrom = line.from + parsed.indentLength;
-    const markerTo = line.from + parsed.contentStart;
-    const hasContent = markerTo < line.to;
-    const attributes = {
-      style: styleParts.join(";"),
-      "data-list-type": parsed.type,
-      "data-list-empty": hasContent ? "false" : "true"
-    };
-    builder.add(
-      line.from,
-      line.from,
-      Decoration.line({ class: `cm-list-line cm-list-type-${parsed.type}`, attributes })
-    );
-    if (parsed.indentLength > 0) {
-      builder.add(
-        line.from,
-        line.from + parsed.indentLength,
-        Decoration.mark({
-          class: "cm-list-indent",
-          inclusiveStart: true,
-          inclusiveEnd: false
-        })
-      );
-    }
-    builder.add(
-      markerFrom,
-      markerTo,
-      Decoration.mark({
-        class: "cm-list-marker",
-        inclusiveStart: false,
-        inclusiveEnd: false
-      })
-    );
-    const contentAttributes2 = {
-      "data-list-type": parsed.type,
-      "data-list-empty": hasContent ? "false" : "true"
-    };
-    const contentDeco = Decoration.mark({
-      class: "cm-list-content",
-      inclusiveStart: true,
-      inclusiveEnd: true,
-      attributes: contentAttributes2
-    });
-    if (hasContent) {
-      builder.add(markerTo, line.to, contentDeco);
-    } else {
-      builder.add(markerTo, markerTo, contentDeco);
-    }
-  }
-  return {
-    decorations: builder.finish(),
-    numberingChanges
-  };
-}
-var autoNumberAnnotation = Annotation.define();
-var todoAutoCompleteHandler = EditorView.inputHandler.of((view, from, to, text) => {
-  if (text !== "[") return false;
-  if (from !== to) return false;
-  const { state: state3 } = view;
-  if (state3.selection.ranges.length !== 1 || !state3.selection.main.empty) return false;
-  const line = state3.doc.lineAt(from);
-  const prefix = state3.doc.sliceString(line.from, from);
-  if (TODO_AUTOCOMPLETE_PREFIX_RE.test(prefix)) {
-    const suffix = state3.doc.sliceString(from, line.to);
-    if (TODO_AUTOCOMPLETE_SUFFIX_RE.test(suffix)) return false;
-    const hasContentSuffix = /\S/.test(suffix);
-    const replaceTo = hasContentSuffix ? line.to : to;
-    const insertText = hasContentSuffix ? `[ ] 
-${suffix}` : "[ ] ";
-    view.dispatch({
-      changes: { from, to: replaceTo, insert: insertText },
-      selection: EditorSelection.cursor(from + 4),
-      annotations: todoAutoCompleteAnnotation.of(true),
-      scrollIntoView: false
-    });
-    return true;
-  }
-  return false;
-});
-var listLayoutPlugin = ViewPlugin.fromClass(class {
-  constructor(view) {
-    const result = analyzeListStructure(view.state);
-    this.decorations = result.decorations;
-  }
-  update(update) {
-    if (!(update.docChanged || update.viewportChanged)) return;
-    const result = analyzeListStructure(update.state);
-    this.decorations = result.decorations;
-  }
-}, {
-  decorations: (v) => v.decorations
-});
-var listRenumberListener = EditorView.updateListener.of((update) => {
-  if (!update.docChanged) return;
-  if (update.transactions.some((tr) => tr.annotation(autoNumberAnnotation))) return;
-  const result = analyzeListStructure(update.state);
-  if (!result.numberingChanges.length) return;
-  update.view.dispatch({
-    changes: result.numberingChanges,
-    annotations: [autoNumberAnnotation.of(true), Transaction.addToHistory.of(false)]
-  });
-});
-var listTodoAutoComplete = Prec.highest(todoAutoCompleteHandler);
-
 // packages/ui/js/editor.js
 var SELECTION_BG = "var(--editor-selection-bg, color-mix(in srgb, var(--editor-fg, #000) 25%, var(--editor-bg, #fff)))";
 var SELECTION_FG = "var(--editor-selection-fg, var(--editor-fg, #000))";
@@ -26421,20 +25979,18 @@ var todoDecorationPlugin = ViewPlugin.fromClass(class {
       let endLine = view.state.doc.lineAt(to).number;
       for (let i = startLine; i <= endLine; ++i) {
         const line = view.state.doc.line(i);
-        const todoPrefixMatch = line.text.match(/^(\s*[-*]\s+\[( |x)\]\s*)/);
-        if (todoPrefixMatch) {
-          const isChecked = todoPrefixMatch[2] === "x";
-          const lineClasses = ["todo-line"];
-          if (isChecked) lineClasses.push("completed");
-          const lineSpec = { class: lineClasses.join(" ") };
-          builder.add(
-            line.from,
-            line.from,
-            Decoration.line(lineSpec)
-          );
+        const match = line.text.match(/^\s*[-*]\s+\[( |x)\]/);
+        if (match) {
           const bracketStart = line.text.indexOf("[");
           const bracketEnd = line.text.indexOf("]", bracketStart);
           if (bracketStart !== -1 && bracketEnd !== -1) {
+            if (match[1] === "x") {
+              builder.add(
+                line.from,
+                line.from,
+                Decoration.line({ class: "completed" })
+              );
+            }
             const decoFrom = line.from + bracketStart;
             const decoTo = line.from + bracketEnd + 1;
             builder.add(
@@ -26935,11 +26491,6 @@ function startEditor(shell2, opts = {}) {
     // --- To-do clickable overlay style ---
     ".todo-click-target": {
       position: "relative",
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      minWidth: "calc(var(--editor-line-height, 1.5) * 0.9em)",
-      minHeight: "calc(var(--editor-line-height, 1.5) * 0.9em)",
       cursor: "pointer",
       background: "transparent",
       zIndex: 2,
@@ -26957,41 +26508,7 @@ function startEditor(shell2, opts = {}) {
       transition: "opacity 0.1s",
       pointerEvents: "none"
     },
-    ".todo-click-target:hover::after": { opacity: 1 },
-    ".cm-line.cm-list-line": {
-      display: "grid",
-      gridTemplateColumns: "calc(var(--list-indent-ch, 0) * 1ch) calc(var(--list-marker-ch, 2) * 1ch) minmax(0, 1fr)",
-      columnGap: "calc(var(--list-gap-ch, 0.5) * 1ch)",
-      alignItems: "center"
-    },
-    ".cm-line.cm-list-line .cm-list-indent": {
-      gridColumn: "1",
-      display: "block",
-      whiteSpace: "pre"
-    },
-    ".cm-line.cm-list-line .cm-list-marker": {
-      gridColumn: "2",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "flex-end",
-      whiteSpace: "pre",
-      textAlign: "right",
-      fontVariantNumeric: "tabular-nums lining-nums",
-      fontFeatureSettings: '"tnum" 1, "lnum" 1',
-      opacity: 0.85,
-      userSelect: "none"
-    },
-    ".cm-line.cm-list-line .cm-list-content": {
-      gridColumn: "3",
-      minWidth: 0,
-      whiteSpace: "pre-wrap",
-      lineHeight: "1.5",
-      wordBreak: "break-word"
-    },
-    '.cm-line.cm-list-line .cm-list-content[data-list-empty="true"]': {
-      minHeight: "1.2em",
-      display: "block"
-    }
+    ".todo-click-target:hover::after": { opacity: 1 }
   }, { dark: true });
   const retroHighlight2 = HighlightStyle.define([
     { tag: tags.strong, fontWeight: "700" },
@@ -27178,7 +26695,71 @@ function startEditor(shell2, opts = {}) {
     }
   });
   const INDENT2 = "  ";
-  const indentConfig = indentUnit.of(INDENT2);
+  const indentConfig2 = indentUnit.of(INDENT2);
+  const LIST_START_RE2 = /^\s*(?:[-+*]\s|\d+\.\s|>\s)/;
+  function linesInSelection2(state4) {
+    const seen = /* @__PURE__ */ new Set();
+    const out = [];
+    for (const range of state4.selection.ranges) {
+      let line = state4.doc.lineAt(range.from).number;
+      const endLine = state4.doc.lineAt(range.to).number;
+      for (; line <= endLine; line++) {
+        if (!seen.has(line)) {
+          seen.add(line);
+          out.push(line);
+        }
+      }
+    }
+    return out;
+  }
+  const smartListTabKeymap2 = keymap.of([
+    {
+      key: "Tab",
+      preventDefault: true,
+      run: (view) => {
+        const { state: state4 } = view;
+        const lines = linesInSelection2(state4);
+        if (lines.length && lines.every((n) => LIST_START_RE2.test(state4.doc.line(n).text))) {
+          const changes = lines.map((n) => {
+            const ln = state4.doc.line(n);
+            return { from: ln.from, to: ln.from, insert: INDENT2 };
+          });
+          view.dispatch({ changes, scrollIntoView: true });
+          return true;
+        }
+        return indentMore(view);
+      }
+    },
+    {
+      key: "Shift-Tab",
+      preventDefault: true,
+      run: (view) => {
+        const { state: state4 } = view;
+        const lines = linesInSelection2(state4);
+        if (!lines.length) return indentLess(view);
+        if (lines.every((n) => /^\s+/.test(state4.doc.line(n).text))) {
+          const changes = [];
+          for (const n of lines) {
+            const ln = state4.doc.line(n);
+            const text = ln.text;
+            if (!LIST_START_RE2.test(text)) return indentLess(view);
+            let remove2 = 0;
+            while (remove2 < INDENT2.length && remove2 < text.length && text[remove2] === " ") {
+              remove2++;
+            }
+            if (remove2 > 0) {
+              changes.push({ from: ln.from, to: ln.from + remove2, insert: "" });
+            }
+          }
+          if (changes.length) {
+            view.dispatch({ changes, scrollIntoView: true });
+            return true;
+          }
+        }
+        return indentLess(view);
+      }
+    }
+  ]);
   function dynamicScrollerPadding2() {
     return ViewPlugin.fromClass(class {
       constructor(view) {
@@ -27265,11 +26846,9 @@ function startEditor(shell2, opts = {}) {
       history(),
       todoPlugin,
       markdownIndicatorPlugin,
-      listLayoutPlugin,
-      listRenumberListener,
-      listTodoAutoComplete,
-      indentConfig,
-      createListKeymap(INDENT2),
+      indentConfig2,
+      smartListTabKeymap2,
+      Prec.high(keymap.of(markdownKeymap)),
       keymap.of([
         ...CUSTOM_DEFAULT_KEYMAP,
         ...historyKeymap,
@@ -28018,7 +27597,72 @@ var FOLDER_ACTIONS = {
   NEW_CHILD: "new-child"
 };
 var INDENT = "  ";
+var indentConfig = indentUnit.of(INDENT);
+var LIST_START_RE = /^\s*(?:[-+*]\s|\d+\.\s|>\s)/;
 var CUSTOM_DEFAULT_KEYMAP2 = defaultKeymap.filter((binding) => binding.key !== "Mod-b" && binding.key !== "Mod-i");
+function linesInSelection(state3) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const range of state3.selection.ranges) {
+    let line = state3.doc.lineAt(range.from).number;
+    const endLine = state3.doc.lineAt(range.to).number;
+    for (; line <= endLine; line++) {
+      if (!seen.has(line)) {
+        seen.add(line);
+        out.push(line);
+      }
+    }
+  }
+  return out;
+}
+var smartListTabKeymap = keymap.of([
+  {
+    key: "Tab",
+    preventDefault: true,
+    run: (view) => {
+      const { state: state3 } = view;
+      const lines = linesInSelection(state3);
+      if (lines.length && lines.every((n) => LIST_START_RE.test(state3.doc.line(n).text))) {
+        const changes = lines.map((n) => {
+          const ln = state3.doc.line(n);
+          return { from: ln.from, to: ln.from, insert: INDENT };
+        });
+        view.dispatch({ changes, scrollIntoView: true });
+        return true;
+      }
+      return indentMore(view);
+    }
+  },
+  {
+    key: "Shift-Tab",
+    preventDefault: true,
+    run: (view) => {
+      const { state: state3 } = view;
+      const lines = linesInSelection(state3);
+      if (!lines.length) return indentLess(view);
+      if (lines.every((n) => /^\s+/.test(state3.doc.line(n).text))) {
+        const changes = [];
+        for (const n of lines) {
+          const ln = state3.doc.line(n);
+          const text = ln.text;
+          if (!LIST_START_RE.test(text)) return indentLess(view);
+          let remove2 = 0;
+          while (remove2 < INDENT.length && remove2 < text.length && text[remove2] === " ") {
+            remove2++;
+          }
+          if (remove2 > 0) {
+            changes.push({ from: ln.from, to: ln.from + remove2, insert: "" });
+          }
+        }
+        if (changes.length) {
+          view.dispatch({ changes, scrollIntoView: true });
+          return true;
+        }
+      }
+      return indentLess(view);
+    }
+  }
+]);
 function hasPointerUserEvent2(update) {
   if (!update || !Array.isArray(update.transactions)) return false;
   return update.transactions.some((tr) => {
@@ -28043,16 +27687,14 @@ var todoDecorationPlugin2 = ViewPlugin.fromClass(class {
       let endLine = view.state.doc.lineAt(to).number;
       for (let i = startLine; i <= endLine; ++i) {
         const line = view.state.doc.line(i);
-        const match = line.text.match(/^(\s*[-*]\s+\[( |x)\]\s*)/);
+        const match = line.text.match(/^\s*[-*]\s+\[( |x)\]/);
         if (!match) continue;
-        const isChecked = match[2] === "x";
-        const lineClasses = ["todo-line"];
-        if (isChecked) lineClasses.push("completed");
-        const lineSpec = { class: lineClasses.join(" ") };
-        builder.add(line.from, line.from, Decoration.line(lineSpec));
         const bracketStart = line.text.indexOf("[");
         const bracketEnd = line.text.indexOf("]", bracketStart);
         if (bracketStart === -1 || bracketEnd === -1) continue;
+        if (match[1] === "x") {
+          builder.add(line.from, line.from, Decoration.line({ class: "completed" }));
+        }
         const decoFrom = line.from + bracketStart;
         const decoTo = line.from + bracketEnd + 1;
         builder.add(decoFrom, decoTo, Decoration.mark({ class: "todo-click-target" }));
@@ -28237,11 +27879,6 @@ var retroTheme = EditorView.theme({
   ".cm-panels": { background: "var(--editor-panel-bg)" },
   ".todo-click-target": {
     position: "relative",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: "calc(var(--editor-line-height, 1.5) * 0.9em)",
-    minHeight: "calc(var(--editor-line-height, 1.5) * 0.9em)",
     cursor: "pointer",
     background: "transparent",
     zIndex: 2,
@@ -28259,41 +27896,7 @@ var retroTheme = EditorView.theme({
     transition: "opacity 0.1s",
     pointerEvents: "none"
   },
-  ".todo-click-target:hover::after": { opacity: 1 },
-  ".cm-line.cm-list-line": {
-    display: "grid",
-    gridTemplateColumns: "calc(var(--list-indent-ch, 0) * 1ch) calc(var(--list-marker-ch, 2) * 1ch) minmax(0, 1fr)",
-    columnGap: "calc(var(--list-gap-ch, 0.5) * 1ch)",
-    alignItems: "center"
-  },
-  ".cm-line.cm-list-line .cm-list-indent": {
-    gridColumn: "1",
-    display: "block",
-    whiteSpace: "pre"
-  },
-  ".cm-line.cm-list-line .cm-list-marker": {
-    gridColumn: "2",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    whiteSpace: "pre",
-    textAlign: "right",
-    fontVariantNumeric: "tabular-nums lining-nums",
-    fontFeatureSettings: '"tnum" 1, "lnum" 1',
-    opacity: 0.85,
-    userSelect: "none"
-  },
-  ".cm-line.cm-list-line .cm-list-content": {
-    gridColumn: "3",
-    minWidth: 0,
-    whiteSpace: "pre-wrap",
-    lineHeight: "var(--editor-line-height, 1.5)",
-    wordBreak: "break-word"
-  },
-  '.cm-line.cm-list-line .cm-list-content[data-list-empty="true"]': {
-    minHeight: "1.2em",
-    display: "block"
-  }
+  ".todo-click-target:hover::after": { opacity: 1 }
 }, { dark: true });
 var retroHighlight = HighlightStyle.define([
   { tag: tags.strong, fontWeight: "700" },
@@ -28313,10 +27916,12 @@ function getScrollContainer(view) {
   }
   return view.scrollDOM;
 }
+var INIT_SCROLL_SUPPRESS = /* @__PURE__ */ new WeakSet();
 var snapOutOfView = EditorView.updateListener.of((update) => {
   if (!(update.docChanged || update.selectionSet)) return;
   if (hasPointerUserEvent2(update)) return;
   const view = update.view;
+  if (INIT_SCROLL_SUPPRESS.has(view)) return;
   const scroller = getScrollContainer(view);
   if (!scroller) return;
   requestAnimationFrame(() => {
@@ -28512,7 +28117,19 @@ function dynamicScrollerPadding() {
     }
   });
 }
-var INIT_SCROLL_SUPPRESS = /* @__PURE__ */ new WeakSet();
+function getTypewriterTopOffset(scroller) {
+  if (!scroller) return 0;
+  try {
+    const styles = getComputedStyle(scroller);
+    const toNumber = (value) => {
+      const parsed = parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    return Math.max(0, toNumber(styles.paddingTop) + toNumber(styles.marginTop));
+  } catch (_) {
+    return 0;
+  }
+}
 function showToast(message, variant = "info", id2 = "writerToast") {
   try {
     const prev = id2 ? document.getElementById(id2) : null;
@@ -28612,6 +28229,7 @@ function startWriter(shell2, opts = {}) {
     scrollPositions: /* @__PURE__ */ new Map(),
     editorFocusHandler: null
   };
+  let scrollSaveRaf = null;
   function rememberCurrentScrollPosition(docId = state3.current?.id) {
     if (!state3.cmView) return;
     const targetId = docId != null ? docId : null;
@@ -28622,11 +28240,19 @@ function startWriter(shell2, opts = {}) {
     if (!Number.isFinite(top2)) return;
     state3.scrollPositions.set(targetId, top2);
   }
+  function scheduleScrollPositionSave() {
+    if (scrollSaveRaf) cancelAnimationFrame(scrollSaveRaf);
+    scrollSaveRaf = requestAnimationFrame(() => {
+      scrollSaveRaf = null;
+      rememberCurrentScrollPosition();
+    });
+  }
   function getSavedScrollPosition(docId) {
-    if (docId == null) return 0;
-    if (!state3.scrollPositions.has(docId)) return 0;
+    if (docId == null) return null;
+    if (!state3.scrollPositions.has(docId)) return null;
     const value = state3.scrollPositions.get(docId);
-    return Number.isFinite(value) ? Math.max(0, value) : 0;
+    if (!Number.isFinite(value)) return null;
+    return Math.max(0, value);
   }
   function pruneScrollPositions() {
     if (!(state3.scrollPositions instanceof Map)) return;
@@ -29294,11 +28920,9 @@ function startWriter(shell2, opts = {}) {
       history(),
       todoPlugin2,
       markdownIndicatorPlugin2,
-      listLayoutPlugin,
-      listRenumberListener,
-      listTodoAutoComplete,
-      indentUnit.of(INDENT),
-      createListKeymap(INDENT),
+      indentConfig,
+      smartListTabKeymap,
+      Prec.high(keymap.of(markdownKeymap)),
       keymap.of([
         ...CUSTOM_DEFAULT_KEYMAP2,
         ...historyKeymap,
@@ -29493,6 +29117,10 @@ function startWriter(shell2, opts = {}) {
       });
     };
     state3.cmView.dom.addEventListener("focus", state3.editorFocusHandler, true);
+    const editorScroller = getScrollContainer(state3.cmView);
+    if (editorScroller) {
+      editorScroller.addEventListener("scroll", scheduleScrollPositionSave, { passive: true });
+    }
     updateWordCountFromText("");
     INIT_SCROLL_SUPPRESS.add(state3.cmView);
     state3.savedSnapshot = "";
@@ -30417,21 +30045,77 @@ function startWriter(shell2, opts = {}) {
   function setEditorContent(content2, title, snapshotOverride, options2 = {}) {
     if (!state3.cmView) return;
     const doc2 = typeof content2 === "string" ? content2 : "";
-    const desiredScrollTopRaw = typeof options2.scrollTop === "number" ? options2.scrollTop : 0;
-    const desiredScrollTop = Number.isFinite(desiredScrollTopRaw) ? Math.max(0, desiredScrollTopRaw) : 0;
+<<<<<<< Updated upstream
+    const explicitScrollTop = typeof options2.scrollTop === "number" && Number.isFinite(options2.scrollTop) ? Math.max(0, options2.scrollTop) : null;
+=======
+    const rawScrollTop = typeof options2.scrollTop === "number" ? options2.scrollTop : null;
+    const desiredScrollTop = Number.isFinite(rawScrollTop) ? Math.max(0, rawScrollTop) : null;
+>>>>>>> Stashed changes
     state3.cmView.dispatch({
       changes: { from: 0, to: state3.cmView.state.doc.length, insert: doc2 }
     });
     const docLen = state3.cmView.state.doc.length;
     state3.cmView.dispatch({ selection: { anchor: docLen }, scrollIntoView: true });
+<<<<<<< Updated upstream
+    const finalizeInitialScroll = () => {
+=======
     requestAnimationFrame(() => {
       const scroller = getScrollContainer(state3.cmView);
       if (!scroller) return;
-      scroller.scrollTop = desiredScrollTop;
+      if (desiredScrollTop != null) {
+        scroller.scrollTop = desiredScrollTop;
+      } else {
+        const firstLine = state3.cmView.dom?.querySelector(".cm-line");
+        firstLine.style.scrollMarginTop = "5rem";
+        if (firstLine instanceof HTMLElement) {
+          firstLine.scrollIntoView({ block: "start", inline: "nearest" });
+        } else {
+          scroller.scrollTop = 0;
+        }
+      }
+>>>>>>> Stashed changes
       requestAnimationFrame(() => {
         INIT_SCROLL_SUPPRESS.delete(state3.cmView);
       });
-    });
+    };
+    const MAX_SCROLL_ATTEMPTS = 8;
+    const scheduleInitialScroll = (attempt = 0) => {
+      const delay = attempt ? 50 : 0;
+      setTimeout(() => {
+        const scroller = getScrollContainer(state3.cmView);
+        if (!scroller) {
+          finalizeInitialScroll();
+          return;
+        }
+        if (explicitScrollTop != null) {
+          scroller.scrollTop = explicitScrollTop;
+          finalizeInitialScroll();
+          return;
+        }
+        const line = scroller.querySelector(".cm-line");
+        if (line instanceof HTMLElement) {
+          try {
+            line.scrollIntoView({ behavior: "instant", block: "start", inline: "nearest" });
+            finalizeInitialScroll();
+            return;
+          } catch (_) {
+          }
+        }
+        const fallback = getTypewriterTopOffset(scroller);
+        if (fallback > 1) {
+          scroller.scrollTop = fallback;
+          finalizeInitialScroll();
+          return;
+        }
+        if (attempt < MAX_SCROLL_ATTEMPTS) {
+          scheduleInitialScroll(attempt + 1);
+          return;
+        }
+        scroller.scrollTop = Math.max(0, fallback);
+        finalizeInitialScroll();
+      }, delay);
+    };
+    scheduleInitialScroll();
     state3.cmView.focus();
     state3.cmView.dispatch({ selection: { anchor: 0 } });
     state3.savedSnapshot = typeof snapshotOverride === "string" ? snapshotOverride : doc2;
@@ -30457,6 +30141,13 @@ function startWriter(shell2, opts = {}) {
       setEditorContent(doc2.content || "", doc2.title || "Untitled Document", doc2.content || "", { scrollTop: savedScroll });
       updateWordCountFromText(doc2.content || "");
       setEmptyOverlayVisible(false);
+      if (!savedScroll) {
+        setTimeout(() => {
+          const content2 = document.querySelector(".cm-content");
+          content2.style.scrollMarginTop = "5ch";
+          content2.scrollIntoView({ behavior: "instant", block: "start" });
+        }, 1);
+      }
     } catch (err) {
       shell2.print(`<div class="error">Unable to open document: ${esc2(err?.message || err)}</div>`);
     }
