@@ -503,6 +503,10 @@ function typewriterAdvanceScroll() {
                     const scroller = getScrollContainer(this.view);
                     const cur = this._curBottom;
                     if (!scroller || cur == null) return;
+                    if (INIT_SCROLL_SUPPRESS.has(this.view)) {
+                        this._lastBottom = cur;
+                        return;
+                    }
                     if (this._lastBottom == null) {
                         this._lastBottom = cur;
                         return;
@@ -675,9 +679,15 @@ export function startWriter(shell, opts = {}) {
     };
     let scrollSaveRaf = null;
 
+    function scrollKey(docId) {
+        if (docId == null) return null;
+        const key = String(docId);
+        return key.length ? key : null;
+    }
+
     function rememberCurrentScrollPosition(docId = state.current?.id) {
         if (!state.cmView) return;
-        const targetId = docId != null ? docId : null;
+        const targetId = scrollKey(docId);
         if (targetId == null) return;
         const scroller = getScrollContainer(state.cmView);
         if (!scroller) return;
@@ -695,16 +705,17 @@ export function startWriter(shell, opts = {}) {
     }
 
     function getSavedScrollPosition(docId) {
-        if (docId == null) return null;
-        if (!state.scrollPositions.has(docId)) return null;
-        const value = state.scrollPositions.get(docId);
+        const key = scrollKey(docId);
+        if (key == null) return null;
+        if (!state.scrollPositions.has(key)) return null;
+        const value = state.scrollPositions.get(key);
         if (!Number.isFinite(value)) return null;
         return Math.max(0, value);
     }
 
     function pruneScrollPositions() {
         if (!(state.scrollPositions instanceof Map)) return;
-        const validIds = new Set(state.docs.map(doc => doc.id));
+        const validIds = new Set(state.docs.map(doc => scrollKey(doc.id)).filter(Boolean));
         for (const key of state.scrollPositions.keys()) {
             if (!validIds.has(key)) state.scrollPositions.delete(key);
         }
@@ -2639,80 +2650,36 @@ function ensureFileAreaContextMenu() {
     function setEditorContent(content, title, snapshotOverride, options = {}) {
         if (!state.cmView) return;
         const doc = typeof content === 'string' ? content : '';
-<<<<<<< Updated upstream
-        const explicitScrollTop = typeof options.scrollTop === 'number' && Number.isFinite(options.scrollTop)
-            ? Math.max(0, options.scrollTop)
-            : null;
-=======
         const rawScrollTop = typeof options.scrollTop === 'number' ? options.scrollTop : null;
         const desiredScrollTop = Number.isFinite(rawScrollTop) ? Math.max(0, rawScrollTop) : null;
->>>>>>> Stashed changes
         state.cmView.dispatch({
             changes: { from: 0, to: state.cmView.state.doc.length, insert: doc }
         });
         const docLen = state.cmView.state.doc.length;
-        state.cmView.dispatch({ selection: { anchor: docLen }, scrollIntoView: true });
-<<<<<<< Updated upstream
-        const finalizeInitialScroll = () => {
-=======
+        state.cmView.dispatch({ selection: { anchor: docLen, head: docLen }, scrollIntoView: false });
+        INIT_SCROLL_SUPPRESS.add(state.cmView);
         requestAnimationFrame(() => {
             const scroller = getScrollContainer(state.cmView);
             if (!scroller) return;
             if (desiredScrollTop != null) {
                 scroller.scrollTop = desiredScrollTop;
+                requestAnimationFrame(() => {
+                    INIT_SCROLL_SUPPRESS.delete(state.cmView);
+                });
             } else {
-                const firstLine = state.cmView.dom?.querySelector('.cm-line');
-                firstLine.style.scrollMarginTop = '5rem';
-                if (firstLine instanceof HTMLElement) {
-                    firstLine.scrollIntoView({ block: 'start', inline: 'nearest' });
-                } else {
-                    scroller.scrollTop = 0;
-                }
+                setTimeout(() => {
+                    const firstLine = state.cmView.dom?.querySelector('.cm-line');
+                    if (firstLine instanceof HTMLElement) {
+                        firstLine.style.scrollMarginTop = '5em';
+                        firstLine.scrollIntoView({ block: 'start', inline: 'nearest' });
+                    } else {
+                        scroller.scrollTop = 0;
+                    }
+                    INIT_SCROLL_SUPPRESS.delete(state.cmView);
+                }, 1);
             }
->>>>>>> Stashed changes
-            requestAnimationFrame(() => {
-                INIT_SCROLL_SUPPRESS.delete(state.cmView);
-            });
-        };
-        const MAX_SCROLL_ATTEMPTS = 8;
-        const scheduleInitialScroll = (attempt = 0) => {
-            const delay = attempt ? 50 : 0;
-            setTimeout(() => {
-                const scroller = getScrollContainer(state.cmView);
-                if (!scroller) {
-                    finalizeInitialScroll();
-                    return;
-                }
-                if (explicitScrollTop != null) {
-                    scroller.scrollTop = explicitScrollTop;
-                    finalizeInitialScroll();
-                    return;
-                }
-                const line = scroller.querySelector('.cm-line');
-                if (line instanceof HTMLElement) {
-                    try {
-                        line.scrollIntoView({ behavior: 'instant', block: 'start', inline: 'nearest' });
-                        finalizeInitialScroll();
-                        return;
-                    } catch (_) {}
-                }
-                const fallback = getTypewriterTopOffset(scroller);
-                if (fallback > 1) {
-                    scroller.scrollTop = fallback;
-                    finalizeInitialScroll();
-                    return;
-                }
-                if (attempt < MAX_SCROLL_ATTEMPTS) {
-                    scheduleInitialScroll(attempt + 1);
-                    return;
-                }
-                scroller.scrollTop = Math.max(0, fallback);
-                finalizeInitialScroll();
-            }, delay);
-        };
-        scheduleInitialScroll();
+        });
         state.cmView.focus();
-        state.cmView.dispatch({ selection: { anchor: 0 } });
         state.savedSnapshot = typeof snapshotOverride === 'string' ? snapshotOverride : doc;
         clearDirty(state.savedSnapshot);
         updateWordCountFromText(doc);
@@ -2737,13 +2704,6 @@ function ensureFileAreaContextMenu() {
             setEditorContent(doc.content || '', doc.title || 'Untitled Document', doc.content || '', { scrollTop: savedScroll });
             updateWordCountFromText(doc.content || '');
             setEmptyOverlayVisible(false);
-            if(!savedScroll) {
-                setTimeout(() => {
-                    const content = document.querySelector('.cm-content');
-                    content.style.scrollMarginTop = '5ch';
-                    content.scrollIntoView({ behavior: 'instant', block: 'start' }); 
-                }, 1)
-            }
         } catch (err) {
             shell.print(`<div class="error">Unable to open document: ${esc(err?.message || err)}</div>`);
         }
@@ -3414,7 +3374,8 @@ function ensureFileAreaContextMenu() {
         }
         try {
             await writerAPI.delete(id);
-            state.scrollPositions.delete(id);
+            const key = scrollKey(id);
+            if (key) state.scrollPositions.delete(key);
             showToast('Document deleted', 'warn');
             if (deletingCurrent) {
                 state.current = null;
